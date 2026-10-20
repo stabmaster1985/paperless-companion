@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% from "macros.html" import doclink %}
+{% block content %}
+<h1>Inbox</h1>
+<p class="muted">Diese Dokumente wurden analysiert, aber nicht alle Angaben waren sicher genug. Bitte prüfen und bestätigen.</p>
+{% if docs %}
+<div class="table-wrap"><table class="list">
+  <thead><tr><th>Dokument</th><th>Art</th><th class="hide-sm">Korrespondent</th><th class="hide-sm">Datum</th><th></th></tr></thead>
+  <tbody>
+  {% for doc in docs %}
+    <tr>
+      <td><a href="/documents/{{ doc.id }}">{{ doc.title or ('#' ~ doc.id) }}</a> {{ doclink(doc.id) }}</td>
+      <td><span class="tag">{{ KINDS[doc.kind] }}</span></td>
+      <td class="hide-sm">{{ doc.correspondent or '–' }}</td>
+      <td class="hide-sm">{{ doc.created|d }}</td>
+      <td><a class="button small" href="/documents/{{ doc.id }}">Prüfen</a></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% else %}
+<p class="empty">Alles erledigt – nichts zu prüfen.</p>
+{% endif %}
+{% endblock %}

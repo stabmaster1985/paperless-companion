@@ -1,0 +1,30 @@
+{% macro badge(name, sugg, from_record) -%}
+  {%- if not from_record and name in sugg -%}
+    {%- set s = sugg[name] -%}
+    {%- set src = {'rule': 'Regel', 'llm': 'AI', 'paperless': 'Paperless', 'default': 'Standard'}.get(s.source, s.source) -%}
+    <span class="badge {{ 'low' if s.confidence < 0.8 }} src-{{ s.source }}" title="Quelle: {{ src }}">{{ src }}{% if s.source in ('rule', 'llm') %} {{ (s.confidence * 100)|round|int }} %{% endif %}</span>
+  {%- endif -%}
+{%- endmacro %}
+
+{% macro input(name, label, values, sugg, from_record, type='text', step=None, hint=None) -%}
+  {%- set v = values.get(name) -%}
+  <label class="field">
+    <span>{{ label }} {{ badge(name, sugg, from_record) }}</span>
+    <input type="{{ type }}" name="{{ name }}" value="{{ v.isoformat() if v is not none and v.isoformat is defined else (v if v is not none else '') }}"{% if step %} step="{{ step }}"{% endif %}>
+    {% if hint %}<small>{{ hint }}</small>{% endif %}
+  </label>
+{%- endmacro %}
+
+{% macro select(name, label, values, sugg, from_record, options) -%}
+  {%- set v = values.get(name) -%}
+  <label class="field">
+    <span>{{ label }} {{ badge(name, sugg, from_record) }}</span>
+    <select name="{{ name }}">
+      {% for key, text in options %}<option value="{{ key }}" {{ 'selected' if v == key }}>{{ text }}</option>{% endfor %}
+    </select>
+  </label>
+{%- endmacro %}
+
+{% macro doclink(doc_id) -%}
+  {%- if link_base -%}<a href="{{ link_base }}/documents/{{ doc_id }}/details" target="_blank" rel="noopener" class="ext" title="In Paperless öffnen">↗</a>{%- endif -%}
+{%- endmacro %}

@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% from "macros.html" import doclink %}
+{% block content %}
+<h1>Rechnungen</h1>
+<nav class="tabs">
+  <a href="/invoices?status=open" class="{{ 'active' if status == 'open' }}">Offen</a>
+  <a href="/invoices?status=paid" class="{{ 'active' if status == 'paid' }}">Bezahlt</a>
+  <a href="/invoices?status=all" class="{{ 'active' if status not in ('open', 'paid') }}">Alle</a>
+</nav>
+{% if invoices %}
+<div class="table-wrap"><table class="list">
+  <thead><tr><th>Aussteller</th><th>Betrag</th><th>Fällig</th><th class="hide-sm">Nr.</th><th></th></tr></thead>
+  <tbody>
+  {% for i in invoices %}
+    {% set overdue = i.status == 'open' and i.payment_method != 'debit' and i.due_date and i.due_date < today %}
+    <tr class="{{ 'overdue' if overdue }}">
+      <td><a href="/documents/{{ i.document_id }}">{{ i.issuer or i.document.title }}</a> {{ doclink(i.document_id) }}</td>
+      <td class="nowrap">{{ i.amount|eur }}</td>
+      <td class="nowrap">
+        {% if i.payment_method == 'debit' %}<span class="tag">Lastschrift</span>
+        {% else %}{{ i.due_date|d }}{% if overdue %} <span class="tag tag-overdue">überfällig</span>{% endif %}{% endif %}
+        {% if i.status == 'paid' %}<br><small>bezahlt {{ i.paid_on|d }}</small>{% endif %}
+      </td>
+      <td class="hide-sm">{{ i.invoice_number or '–' }}</td>
+      <td>
+        {% if i.status == 'open' %}
+        <form method="post" action="/invoices/{{ i.id }}/paid" class="inline"><button class="small">Bezahlt</button></form>
+        {% else %}
+        <form method="post" action="/invoices/{{ i.id }}/open" class="inline"><button class="small link">wieder offen</button></form>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% else %}
+<p class="empty">Keine Rechnungen in dieser Ansicht.</p>
+{% endif %}
+{% endblock %}

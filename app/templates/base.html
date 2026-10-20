@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Paperless Companion{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/">Paperless Companion</a>
+  <nav>
+    {% set path = request.url.path %}
+    <a href="/" class="{{ 'active' if path == '/' }}">Übersicht</a>
+    <a href="/inbox" class="{{ 'active' if path.startswith('/inbox') }}">Inbox{% if inbox_count %} <span class="pill">{{ inbox_count }}</span>{% endif %}</a>
+    <a href="/contracts" class="{{ 'active' if path.startswith('/contracts') }}">Verträge</a>
+    <a href="/invoices" class="{{ 'active' if path.startswith('/invoices') }}">Rechnungen</a>
+    <a href="/warranties" class="{{ 'active' if path.startswith('/warranties') }}">Garantien</a>
+    <a href="/documents" class="{{ 'active' if path.startswith('/documents') }}">Dokumente</a>
+    <a href="/system" class="{{ 'active' if path.startswith('/system') }}">System</a>
+    {% if auth %}<form method="post" action="/logout" class="inline"><button class="link">Abmelden</button></form>{% endif %}
+  </nav>
+</header>
+<main>
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>

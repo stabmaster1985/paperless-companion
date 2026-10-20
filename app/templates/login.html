@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Anmelden – Paperless Companion</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="login">
+<form method="post" action="/login" class="card login-card">
+  <h1>Paperless Companion</h1>
+  {% if error %}<p class="bad">{{ error }}</p>{% endif %}
+  <label class="field"><span>Passwort</span><input type="password" name="password" autofocus required></label>
+  <button class="primary">Anmelden</button>
+</form>
+</body>
+</html>

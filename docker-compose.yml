@@ -1,0 +1,26 @@
+services:
+  companion:
+    build: .
+    image: paperless-companion:latest
+    container_name: paperless-companion
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8010:8000"
+    volumes:
+      - ./data:/data
+    mem_limit: 512m
+
+  # Optional: Ollama auf demselben Host (Start mit `docker compose --profile ollama up -d`).
+  # Empfohlen ist stattdessen ein eigener LXC auf dem i5-Host, siehe docs/ollama-lxc.md.
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ollama"]
+    restart: unless-stopped
+    environment:
+      OLLAMA_KEEP_ALIVE: 2m
+      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_MAX_LOADED_MODELS: "1"
+    volumes:
+      - ./ollama:/root/.ollama
+    mem_limit: 6g

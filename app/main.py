@@ -1,0 +1,368 @@
+import hmac
+import logging
+import re
+from contextlib import asynccontextmanager
+from datetime import date, datetime
+from pathlib import Path
+from urllib.parse import quote
+from zoneinfo import ZoneInfo
+
+from fastapi import Depends, FastAPI, Form, HTTPException, Request
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+from starlette.middleware.sessions import SessionMiddleware
+
+from app import deadlines, events, ics, notify, pipeline, reminders
+from app.config import Settings, get_settings
+from app.db import get_session, init_db, session_scope
+from app.models import Contract, Document, Invoice, Warranty
+from app.paperless import PaperlessError
+from app.worker import Worker, make_ollama, make_paperless
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+log = logging.getLogger(__name__)
+BASE = Path(__file__).parent
+PUBLIC_PATHS = ("/login", "/static", "/api/webhook", "/calendar.ics", "/health")
+
+
+def create_app(settings: Settings | None = None, start_worker: bool = True) -> FastAPI:
+    settings = settings or get_settings()
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        settings.data_dir.mkdir(parents=True, exist_ok=True)
+        init_db(settings.database_url)
+        worker = Worker(settings)
+        app.state.worker = worker
+        if start_worker:
+            worker.start()
+        yield
+        if start_worker:
+            worker.stop()
+
+    app = FastAPI(title="Paperless Companion", lifespan=lifespan)
+    app.state.settings = settings
+    templates = Jinja2Templates(directory=BASE / "templates")
+    templates.env.filters["d"] = events.fmt_date
+    templates.env.filters["eur"] = events.fmt_money
+    templates.env.globals.update(KINDS=pipeline.KINDS, link_base=settings.paperless_link_base, auth=bool(settings.app_password))
+
+    @app.middleware("http")
+    async def require_login(request: Request, call_next):
+        path = request.url.path
+        if settings.app_password and not path.startswith(PUBLIC_PATHS) and not request.session.get("auth"):
+            return RedirectResponse("/login", status_code=303)
+        return await call_next(request)
+
+    # Muss nach require_login registriert werden, damit request.session dort verfügbar ist
+    app.add_middleware(SessionMiddleware, secret_key=settings.secret_key, max_age=60 * 60 * 24 * 30, same_site="lax")
+    app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
+
+    def today() -> date:
+        return datetime.now(ZoneInfo(settings.timezone)).date()
+
+    def render(request: Request, name: str, **ctx) -> HTMLResponse:
+        with session_scope() as s:
+            inbox_count = s.scalar(select(func.count()).select_from(Document).where(Document.review_state == "pending"))
+        return templates.TemplateResponse(request, name, {"inbox_count": inbox_count, "today": today(), **ctx})
+
+    def check_token(expected: str, given: str | None) -> None:
+        if not expected or not given or not hmac.compare_digest(expected, given):
+            raise HTTPException(status_code=403, detail="Ungültiges Token")
+
+    # ------------------------------------------------------------------ Login
+
+    @app.get("/login", response_class=HTMLResponse)
+    def login_form(request: Request):
+        return templates.TemplateResponse(request, "login.html", {"error": None})
+
+    @app.post("/login")
+    def login(request: Request, password: str = Form(...)):
+        if settings.app_password and hmac.compare_digest(password, settings.app_password):
+            request.session["auth"] = True
+            return RedirectResponse("/", status_code=303)
+        return templates.TemplateResponse(request, "login.html", {"error": "Falsches Passwort"}, status_code=401)
+
+    @app.post("/logout")
+    def logout(request: Request):
+        request.session.clear()
+        return RedirectResponse("/login", status_code=303)
+
+    # ------------------------------------------------------------------ Seiten
+
+    @app.get("/", response_class=HTMLResponse)
+    def dashboard(request: Request, session: Session = Depends(get_session)):
+        t = today()
+        all_events = events.collect(session, t)
+        upcoming = [e for e in all_events if (e.date - t).days <= 60]
+        open_invoices = session.scalars(select(Invoice).where(Invoice.status == "open")).all()
+        stats = {
+            "open_sum": round(sum(i.amount or 0 for i in open_invoices if i.payment_method != "debit"), 2),
+            "open_count": len([i for i in open_invoices if i.payment_method != "debit"]),
+            "overdue": len([e for e in all_events if e.type == "overdue"]),
+            "fixed_costs": events.monthly_fixed_costs(session),
+            "contracts": session.scalar(select(func.count()).select_from(Contract).where(Contract.status == "active")),
+            "queued": session.scalar(
+                select(func.count()).select_from(Document).where(Document.extraction_state.in_(("queued", "running")))
+            ),
+        }
+        return render(request, "dashboard.html", events=upcoming, stats=stats)
+
+    @app.get("/inbox", response_class=HTMLResponse)
+    def inbox(request: Request, session: Session = Depends(get_session)):
+        docs = session.scalars(
+            select(Document).where(Document.review_state == "pending").order_by(Document.created.desc())
+        ).all()
+        return render(request, "inbox.html", docs=docs)
+
+    @app.get("/documents", response_class=HTMLResponse)
+    def documents(request: Request, kind: str = "", state: str = "", session: Session = Depends(get_session)):
+        query = select(Document).order_by(Document.created.desc().nulls_last(), Document.id.desc()).limit(500)
+        if kind:
+            query = query.where(Document.kind == kind)
+        if state:
+            query = query.where(Document.extraction_state == state)
+        return render(request, "documents.html", docs=session.scalars(query).all(), kind=kind, state=state)
+
+    @app.get("/documents/{doc_id}", response_class=HTMLResponse)
+    def document_detail(request: Request, doc_id: int, session: Session = Depends(get_session)):
+        doc = session.get(Document, doc_id)
+        if doc is None:
+            raise HTTPException(404, "Dokument nicht gefunden")
+        values, from_record = form_values(doc)
+        deadline = None
+        if doc.contract:
+            deadline = deadlines.compute(deadlines.terms_from_contract(doc.contract), today())
+        return render(
+            request, "document.html", doc=doc, values=values, from_record=from_record,
+            sugg=doc.suggestions or {}, deadline=deadline,
+        )
+
+    @app.post("/documents/{doc_id}/confirm")
+    async def document_confirm(request: Request, doc_id: int, session: Session = Depends(get_session)):
+        doc = session.get(Document, doc_id)
+        if doc is None or doc.kind not in pipeline.FIELD_TYPES:
+            raise HTTPException(404)
+        form = dict(await request.form())
+        pipeline.apply_values(session, doc, doc.kind, pipeline.parse_values(doc.kind, form))
+        doc.review_state = "confirmed"
+        doc.auto_confirmed = False
+        if settings.writeback_enabled:
+            paperless = make_paperless(settings)
+            try:
+                pipeline.writeback(paperless, doc, settings, today())
+            finally:
+                paperless.close()
+        target = form.get("next") or "/inbox"
+        return RedirectResponse(target if target.startswith("/") else "/inbox", status_code=303)
+
+    @app.post("/documents/{doc_id}/kind")
+    def document_kind(doc_id: int, kind: str = Form(...), session: Session = Depends(get_session)):
+        doc = session.get(Document, doc_id)
+        if doc is None or kind not in pipeline.KINDS:
+            raise HTTPException(404)
+        doc.kind, doc.kind_source = kind, "manual"
+        doc.extraction_state = "queued"
+        doc.review_state = "none"
+        request_worker(app)
+        return RedirectResponse(f"/documents/{doc_id}", status_code=303)
+
+    @app.post("/documents/{doc_id}/reanalyze")
+    def document_reanalyze(doc_id: int, session: Session = Depends(get_session)):
+        doc = session.get(Document, doc_id)
+        if doc is None:
+            raise HTTPException(404)
+        doc.extraction_state = "queued"
+        request_worker(app)
+        return RedirectResponse(f"/documents/{doc_id}", status_code=303)
+
+    @app.post("/documents/{doc_id}/ignore")
+    def document_ignore(doc_id: int, session: Session = Depends(get_session)):
+        doc = session.get(Document, doc_id)
+        if doc is None:
+            raise HTTPException(404)
+        doc.kind, doc.kind_source, doc.review_state = "other", "manual", "none"
+        doc.contract = doc.invoice = doc.warranty = None
+        return RedirectResponse("/inbox", status_code=303)
+
+    @app.get("/contracts", response_class=HTMLResponse)
+    def contracts(request: Request, session: Session = Depends(get_session)):
+        t = today()
+        rows = []
+        for c in session.scalars(select(Contract)):
+            rows.append((c, deadlines.compute(deadlines.terms_from_contract(c), t)))
+        rows.sort(key=lambda r: (r[0].status != "active", r[1].cancel_by or date.max))
+        return render(request, "contracts.html", rows=rows, fixed_costs=events.monthly_fixed_costs(session))
+
+    @app.post("/contracts/{contract_id}/cancelled")
+    def contract_cancelled(contract_id: int, cancelled_on: str = Form(""), session: Session = Depends(get_session)):
+        c = session.get(Contract, contract_id)
+        if c is None:
+            raise HTTPException(404)
+        c.status = "cancelled"
+        c.cancelled_on = pipeline.coerce("date", cancelled_on) or today()
+        return RedirectResponse("/contracts", status_code=303)
+
+    @app.get("/invoices", response_class=HTMLResponse)
+    def invoices(request: Request, status: str = "open", session: Session = Depends(get_session)):
+        query = select(Invoice).order_by(Invoice.due_date.asc().nulls_last())
+        if status in ("open", "paid"):
+            query = query.where(Invoice.status == status)
+        return render(request, "invoices.html", invoices=session.scalars(query).all(), status=status)
+
+    @app.post("/invoices/{invoice_id}/paid")
+    def invoice_paid(invoice_id: int, session: Session = Depends(get_session)):
+        inv = session.get(Invoice, invoice_id)
+        if inv is None:
+            raise HTTPException(404)
+        inv.status, inv.paid_on = "paid", today()
+        return RedirectResponse("/invoices", status_code=303)
+
+    @app.post("/invoices/{invoice_id}/open")
+    def invoice_open(invoice_id: int, session: Session = Depends(get_session)):
+        inv = session.get(Invoice, invoice_id)
+        if inv is None:
+            raise HTTPException(404)
+        inv.status, inv.paid_on = "open", None
+        return RedirectResponse("/invoices?status=paid", status_code=303)
+
+    @app.get("/warranties", response_class=HTMLResponse)
+    def warranties(request: Request, session: Session = Depends(get_session)):
+        rows = sorted(session.scalars(select(Warranty)).all(), key=lambda w: w.expires_on or date.max)
+        return render(request, "warranties.html", rows=rows)
+
+    @app.get("/system", response_class=HTMLResponse)
+    def system(request: Request, msg: str = "", session: Session = Depends(get_session)):
+        paperless = make_paperless(settings, timeout=5)
+        try:
+            paperless.ping()
+            paperless_status = {"ok": True, "error": None}
+        except PaperlessError as exc:
+            paperless_status = {"ok": False, "error": str(exc)}
+        finally:
+            paperless.close()
+        ollama_status = None
+        if (ollama := make_ollama(settings)) is not None:
+            ollama_status = ollama.status()
+            ollama.close()
+        worker: Worker = app.state.worker
+        counts = dict(session.execute(
+            select(Document.extraction_state, func.count()).group_by(Document.extraction_state)
+        ).all())
+        return render(
+            request, "system.html", settings=settings, paperless_status=paperless_status,
+            ollama_status=ollama_status, worker=worker, counts=counts, msg=msg,
+            last_sync=pipeline.kv_get(session, "last_sync"), channels=notify.channels(settings),
+        )
+
+    @app.post("/system/sync")
+    def system_sync():
+        app.state.worker.request_sync()
+        return RedirectResponse("/system?msg=Synchronisation+gestartet", status_code=303)
+
+    @app.post("/system/import")
+    def system_import(doc_id: int = Form(...), session: Session = Depends(get_session)):
+        paperless = make_paperless(settings)
+        try:
+            pipeline.import_single(session, paperless, doc_id)
+        except PaperlessError as exc:
+            return RedirectResponse(f"/system?msg={quote(f'Import fehlgeschlagen: {exc}')}", status_code=303)
+        finally:
+            paperless.close()
+        request_worker(app)
+        return RedirectResponse(f"/documents/{doc_id}", status_code=303)
+
+    @app.post("/system/test-notification")
+    def system_test_notification():
+        try:
+            used = notify.send(settings, "Paperless Companion: Test", "Testnachricht – Benachrichtigungen funktionieren.")
+            msg = "Test gesendet über " + ", ".join(used)
+        except notify.NotifyError as exc:
+            msg = f"Fehler: {exc}"
+        return RedirectResponse(f"/system?msg={quote(msg)}", status_code=303)
+
+    @app.post("/system/reminders")
+    def system_reminders(session: Session = Depends(get_session)):
+        try:
+            count = reminders.run(session, settings, today())
+            msg = f"{count} Erinnerungen gesendet" if count else "Keine fälligen Erinnerungen"
+        except notify.NotifyError as exc:
+            msg = f"Fehler: {exc}"
+        return RedirectResponse(f"/system?msg={quote(msg)}", status_code=303)
+
+    # ------------------------------------------------------------------ API
+
+    @app.get("/health")
+    def health():
+        return {"status": "ok"}
+
+    @app.post("/api/webhook/paperless")
+    async def webhook(request: Request, token: str | None = None, session: Session = Depends(get_session)):
+        check_token(settings.webhook_token, token or request.headers.get("X-Companion-Token"))
+        payload: dict = {}
+        if "json" in request.headers.get("content-type", ""):
+            payload = await request.json()
+        else:
+            payload = dict(await request.form()) or dict(request.query_params)
+        doc_id = extract_doc_id(payload)
+        if doc_id is None:
+            # Ohne ID: einfach eine Synchronisation anstoßen
+            app.state.worker.request_sync()
+            return {"status": "sync_requested"}
+        paperless = make_paperless(settings)
+        try:
+            pipeline.import_single(session, paperless, doc_id)
+        except PaperlessError as exc:
+            raise HTTPException(502, str(exc)) from exc
+        finally:
+            paperless.close()
+        request_worker(app)
+        return {"status": "queued", "document": doc_id}
+
+    @app.get("/calendar.ics")
+    def calendar(token: str | None = None, session: Session = Depends(get_session)):
+        check_token(settings.ics_token, token)
+        body = ics.render(events.collect(session, today()), settings.paperless_link_base)
+        return Response(body, media_type="text/calendar; charset=utf-8")
+
+    @app.exception_handler(HTTPException)
+    async def http_error(request: Request, exc: HTTPException):
+        return PlainTextResponse(str(exc.detail), status_code=exc.status_code)
+
+    return app
+
+
+def request_worker(app: FastAPI) -> None:
+    worker = getattr(app.state, "worker", None)
+    if worker is not None:
+        worker.wake.set()
+
+
+def extract_doc_id(payload: dict) -> int | None:
+    for key in ("doc_id", "document_id", "id"):
+        value = payload.get(key)
+        if value is not None and str(value).isdigit():
+            return int(value)
+    for key in ("doc_url", "url", "document_url"):
+        if value := payload.get(key):
+            if m := re.search(r"/documents/(\d+)", str(value)):
+                return int(m.group(1))
+    return None
+
+
+def form_values(doc: Document) -> tuple[dict, bool]:
+    """Formularwerte: gespeicherter Datensatz, sonst Vorschläge."""
+    record = {"invoice": doc.invoice, "contract": doc.contract, "warranty": doc.warranty}.get(doc.kind)
+    if record is None:
+        return pipeline.suggestion_values(doc), False
+    values = {name: getattr(record, name, None) for name in pipeline.FIELD_TYPES[doc.kind]}
+    if doc.kind == "invoice":
+        values["warranty_enabled"] = doc.warranty is not None
+        values["warranty_months"] = doc.warranty.months if doc.warranty else None
+    return values, True
+
+
+app = create_app()

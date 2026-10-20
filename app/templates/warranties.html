@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% from "macros.html" import doclink %}
+{% block content %}
+<h1>Garantien &amp; Gewährleistung</h1>
+{% if rows %}
+<div class="table-wrap"><table class="list">
+  <thead><tr><th>Produkt</th><th>Gekauft</th><th>Läuft bis</th><th class="hide-sm">Art</th></tr></thead>
+  <tbody>
+  {% for w in rows %}
+    {% set exp = w.expires_on %}
+    <tr class="{{ 'inactive' if exp and exp < today }}">
+      <td><a href="/documents/{{ w.document_id }}">{{ w.product }}</a> {{ doclink(w.document_id) }}</td>
+      <td class="nowrap">{{ w.purchase_date|d }}</td>
+      <td class="nowrap">{{ exp|d }}{% if exp and exp >= today and (exp - today).days <= 60 %} <span class="tag tag-warn">bald</span>{% elif exp and exp < today %} <small>abgelaufen</small>{% endif %}</td>
+      <td class="hide-sm">{{ 'Garantie' if w.warranty_type == 'garantie' else 'Gewährleistung' }} ({{ w.months }} Mon.)</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% else %}
+<p class="empty">Noch keine Garantien erfasst.</p>
+{% endif %}
+{% endblock %}

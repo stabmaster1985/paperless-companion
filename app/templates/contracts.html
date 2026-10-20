@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% from "macros.html" import doclink %}
+{% block content %}
+<h1>Verträge</h1>
+<p class="muted">Fixkosten aktiver Verträge: <strong>{{ fixed_costs|eur }}</strong> pro Monat</p>
+{% if rows %}
+<div class="table-wrap"><table class="list">
+  <thead><tr><th>Vertrag</th><th>Kündigen bis</th><th class="hide-sm">Laufzeitende</th><th class="hide-sm">Frist</th><th>€/Monat</th><th></th></tr></thead>
+  <tbody>
+  {% for c, d in rows %}
+    {% set days = (d.cancel_by - today).days if d.cancel_by else none %}
+    <tr class="{{ 'inactive' if c.status != 'active' }}">
+      <td><a href="/documents/{{ c.document_id }}">{{ c.name }}</a> {{ doclink(c.document_id) }}<br><small>{{ c.provider or '' }}</small></td>
+      <td class="nowrap">
+        {% if c.status == 'cancelled' %}<span class="tag">gekündigt {{ c.cancelled_on|d }}</span>
+        {% elif c.status == 'ended' %}<span class="tag">beendet</span>
+        {% elif d.missing_info %}<span class="tag tag-warn">Angaben fehlen</span>
+        {% elif d.anytime %}jederzeit
+        {% elif d.cancel_by %}<span class="{{ 'soon' if days is not none and days <= 30 }}">{{ d.cancel_by|d }}</span><br><small>in {{ days }} T.</small>
+        {% else %}–{% endif %}
+      </td>
+      <td class="hide-sm">{{ d.term_end|d }}</td>
+      <td class="hide-sm">{% if c.notice_value %}{{ c.notice_value }} {{ {'months': 'Mon.', 'weeks': 'Wo.', 'days': 'Tage'}[c.notice_unit] }}{% else %}–{% endif %}</td>
+      <td class="nowrap">{{ c.monthly_cost|eur }}</td>
+      <td>
+        {% if c.status == 'active' %}
+        <form method="post" action="/contracts/{{ c.id }}/cancelled" class="inline"><button class="small" title="Als gekündigt markieren">Gekündigt</button></form>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% else %}
+<p class="empty">Noch keine Verträge erfasst.</p>
+{% endif %}
+{% endblock %}

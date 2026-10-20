@@ -1,0 +1,9 @@
+[project]
+name = "paperless-companion"
+version = "0.1.0"
+description = "Fristen-, Rechnungs- und Vertragscockpit für Paperless NGX"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning:fastapi.testclient", "ignore:Using `httpx` with `starlette.testclient`"]

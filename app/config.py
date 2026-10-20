@@ -1,0 +1,94 @@
+from functools import lru_cache
+from pathlib import Path
+from typing import Literal
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _split(value: str) -> list[str]:
+    return [part.strip() for part in value.split(",") if part.strip()]
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    # Paperless
+    paperless_url: str = "http://paperless:8000"
+    paperless_public_url: str = ""  # URL für Links im Browser, falls abweichend
+    paperless_token: str = ""
+
+    # App
+    data_dir: Path = Path("/data")
+    app_password: str = ""
+    secret_key: str = "bitte-aendern"
+    webhook_token: str = ""
+    ics_token: str = ""
+    timezone: str = "Europe/Berlin"
+
+    # Synchronisation
+    sync_interval_minutes: int = 15
+    initial_sync_days: int = 90
+
+    # Zuordnung Paperless-Dokumenttyp -> Art (kommagetrennt, Groß/Klein egal)
+    doctypes_invoice: str = "Rechnung,Quittung"
+    doctypes_contract: str = "Vertrag,Versicherung,Police"
+    doctypes_warranty: str = "Kaufbeleg,Kassenbon,Garantie"
+    keyword_classification: bool = True
+
+    # LLM
+    llm_provider: Literal["none", "ollama"] = "ollama"
+    ollama_url: str = "http://ollama:11434"
+    ollama_model: str = "qwen2.5:3b"
+    ollama_keep_alive: str = "2m"
+    ollama_num_ctx: int = 4096
+    ollama_timeout_seconds: int = 900
+    llm_max_chars: int = 6000
+    llm_auto_accept: bool = False
+
+    # Rückschreiben in Paperless-Custom-Fields
+    writeback_enabled: bool = False
+
+    # Erinnerungen
+    reminder_days: str = "30,7,1"
+    reminder_hour: int = 8
+    ntfy_url: str = ""
+    ntfy_token: str = ""
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_to: str = ""
+    smtp_starttls: bool = True
+
+    @property
+    def database_url(self) -> str:
+        return f"sqlite:///{self.data_dir / 'companion.db'}"
+
+    @property
+    def paperless_link_base(self) -> str:
+        return (self.paperless_public_url or self.paperless_url).rstrip("/")
+
+    @property
+    def reminder_day_list(self) -> list[int]:
+        return sorted({int(d) for d in _split(self.reminder_days)}, reverse=True)
+
+    def doctype_map(self) -> dict[str, str]:
+        mapping: dict[str, str] = {}
+        for kind, raw in (
+            ("invoice", self.doctypes_invoice),
+            ("contract", self.doctypes_contract),
+            ("warranty", self.doctypes_warranty),
+        ):
+            for name in _split(raw):
+                mapping[name.lower()] = kind
+        return mapping
+
+    @property
+    def llm_enabled(self) -> bool:
+        return self.llm_provider == "ollama" and bool(self.ollama_url)
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()

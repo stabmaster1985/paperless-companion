@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% from "macros.html" import doclink %}
+{% block content %}
+<h1>Dokumente</h1>
+<form method="get" class="filters">
+  <select name="kind" onchange="this.form.submit()">
+    <option value="">Alle Arten</option>
+    {% for key, text in KINDS.items() %}<option value="{{ key }}" {{ 'selected' if kind == key }}>{{ text }}</option>{% endfor %}
+  </select>
+  <select name="state" onchange="this.form.submit()">
+    <option value="">Alle Zustände</option>
+    {% for key, text in [('queued', 'in Warteschlange'), ('running', 'läuft'), ('done', 'analysiert'), ('error', 'Fehler')] %}
+    <option value="{{ key }}" {{ 'selected' if state == key }}>{{ text }}</option>
+    {% endfor %}
+  </select>
+  <noscript><button class="small">Filtern</button></noscript>
+</form>
+{% if docs %}
+<div class="table-wrap"><table class="list">
+  <thead><tr><th>Dokument</th><th>Art</th><th class="hide-sm">Typ in Paperless</th><th>Status</th></tr></thead>
+  <tbody>
+  {% for doc in docs %}
+    <tr>
+      <td><a href="/documents/{{ doc.id }}">{{ doc.title or ('#' ~ doc.id) }}</a> {{ doclink(doc.id) }}<br><small>{{ doc.correspondent or '' }} {{ doc.created|d }}</small></td>
+      <td>{{ KINDS[doc.kind] }}</td>
+      <td class="hide-sm">{{ doc.document_type or '–' }}</td>
+      <td>
+        {% if doc.extraction_state in ('queued', 'running') %}<span class="tag">{{ 'läuft' if doc.extraction_state == 'running' else 'wartet' }}</span>
+        {% elif doc.extraction_state == 'error' %}<span class="tag tag-overdue">Fehler</span>
+        {% elif doc.review_state == 'pending' %}<span class="tag tag-warn">prüfen</span>
+        {% elif doc.review_state == 'confirmed' %}<span class="tag tag-ok">erfasst</span>
+        {% else %}–{% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% else %}
+<p class="empty">Noch keine Dokumente synchronisiert. Unter „System“ kannst du die Verbindung prüfen.</p>
+{% endif %}
+{% endblock %}

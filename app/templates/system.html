@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>System</h1>
+{% if msg %}<div class="notice">{{ msg }}</div>{% endif %}
+
+<section class="cards">
+  <div class="card">
+    <h2>Paperless</h2>
+    <p>{{ settings.paperless_url }}</p>
+    {% if paperless_status.ok %}<p class="ok">✔ verbunden</p>{% else %}<p class="bad">✘ {{ paperless_status.error }}</p>{% endif %}
+    <p class="muted">Letzte Synchronisation: {{ last_sync[:19].replace('T', ' ') if last_sync else 'noch nie' }} (UTC)</p>
+    <form method="post" action="/system/sync" class="inline"><button class="small">Jetzt synchronisieren</button></form>
+  </div>
+
+  <div class="card">
+    <h2>AI (Ollama)</h2>
+    {% if ollama_status is none %}
+      <p class="muted">Deaktiviert – es werden nur Regeln verwendet.</p>
+    {% else %}
+      <p>{{ settings.ollama_url }} · Modell <code>{{ settings.ollama_model }}</code></p>
+      {% if not ollama_status.reachable %}<p class="bad">✘ nicht erreichbar: {{ ollama_status.error }}</p>
+      {% elif not ollama_status.model_present %}<p class="bad">✘ Modell fehlt – auf dem Ollama-Server <code>ollama pull {{ settings.ollama_model }}</code> ausführen</p>
+      {% else %}<p class="ok">✔ bereit</p>{% endif %}
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>Warteschlange</h2>
+    <p>Wartend: {{ counts.get('queued', 0) }} · läuft: {{ counts.get('running', 0) }} · fertig: {{ counts.get('done', 0) }} · Fehler: {{ counts.get('error', 0) }}</p>
+    {% if worker.current_document %}<p>Analysiert gerade Dokument <a href="/documents/{{ worker.current_document }}">#{{ worker.current_document }}</a></p>{% endif %}
+    {% if worker.last_error %}<p class="bad">Letzter Fehler: {{ worker.last_error }}</p>{% endif %}
+    <form method="post" action="/system/import" class="inline-form">
+      <input type="number" name="doc_id" placeholder="Paperless-ID" required>
+      <button class="small">Dokument einlesen</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Erinnerungen</h2>
+    <p>Kanäle: {{ channels|join(', ') if channels else 'keine konfiguriert' }}</p>
+    <p class="muted">Täglich ab {{ settings.reminder_hour }}:00 Uhr, Vorlauf {{ settings.reminder_days }} Tage</p>
+    <form method="post" action="/system/test-notification" class="inline"><button class="small">Test senden</button></form>
+    <form method="post" action="/system/reminders" class="inline"><button class="small">Jetzt prüfen</button></form>
+  </div>
+
+  <div class="card">
+    <h2>Kalender-Feed</h2>
+    {% if settings.ics_token %}
+      <p>In Kalender-App abonnieren:</p>
+      <code class="block">{{ request.base_url }}calendar.ics?token={{ settings.ics_token }}</code>
+    {% else %}
+      <p class="muted"><code>ICS_TOKEN</code> setzen, um den Feed zu aktivieren.</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h2>Webhook für Paperless-Workflow</h2>
+    {% if settings.webhook_token %}
+      <code class="block">{{ request.base_url }}api/webhook/paperless?token={{ settings.webhook_token }}</code>
+      <p class="muted">Body: <code>{"doc_url": "{doc_url}"}</code></p>
+    {% else %}
+      <p class="muted"><code>WEBHOOK_TOKEN</code> setzen, um den Webhook zu aktivieren. Ohne Webhook wird alle {{ settings.sync_interval_minutes }} Minuten synchronisiert.</p>
+    {% endif %}
+  </div>
+</section>
+<p class="muted">Rückschreiben in Paperless-Custom-Fields: {{ 'aktiv' if settings.writeback_enabled else 'aus' }} · Automatische Übernahme von AI-Werten: {{ 'aktiv' if settings.llm_auto_accept else 'aus' }}</p>
+{% endblock %}

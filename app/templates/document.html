@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% from "macros.html" import input, select, doclink %}
+{% block title %}{{ doc.title }} – Paperless Companion{% endblock %}
+{% block content %}
+<div class="head">
+  <div>
+    <h1>{{ doc.title or ('Dokument #' ~ doc.id) }} {{ doclink(doc.id) }}</h1>
+    <p class="muted">{{ doc.correspondent or 'ohne Korrespondent' }} · {{ doc.document_type or 'ohne Dokumenttyp' }} · {{ doc.created|d }}</p>
+  </div>
+  <form method="post" action="/documents/{{ doc.id }}/kind" class="kind-switch">
+    <label>Art
+      <select name="kind" onchange="this.form.submit()">
+        {% for key, text in KINDS.items() %}<option value="{{ key }}" {{ 'selected' if doc.kind == key }}>{{ text }}</option>{% endfor %}
+      </select>
+    </label>
+    <noscript><button class="small">Ändern</button></noscript>
+  </form>
+</div>
+
+{% if doc.extraction_state in ('queued', 'running') %}
+  <div class="notice">Dokument wird gerade analysiert{% if doc.extraction_state == 'queued' %} (in der Warteschlange){% endif %}. Seite später neu laden.</div>
+{% elif doc.extraction_state == 'error' %}
+  <div class="notice error">Analyse fehlgeschlagen: {{ doc.extraction_error }}</div>
+{% endif %}
+{% if sugg.get('_llm_error') %}
+  <div class="notice warn">AI-Analyse nicht verfügbar: {{ sugg['_llm_error'].value }}. Es wurden nur Regeln verwendet.</div>
+{% endif %}
+{% if doc.review_state == 'confirmed' %}
+  <div class="notice ok">{{ 'Automatisch übernommen' if doc.auto_confirmed else 'Bestätigt' }}. Änderungen unten speichern.</div>
+{% endif %}
+
+{% if doc.kind == 'other' %}
+  <p class="empty">Dieses Dokument wird nicht ausgewertet. Wähle oben eine Art, um es als Rechnung, Vertrag oder Garantie zu erfassen.</p>
+{% else %}
+<form method="post" action="/documents/{{ doc.id }}/confirm" class="card">
+  <input type="hidden" name="next" value="{{ '/inbox' if doc.review_state == 'pending' else '/documents/' ~ doc.id }}">
+
+  {% if doc.kind == 'invoice' %}
+  <div class="grid">
+    {{ input('issuer', 'Aussteller', values, sugg, from_record) }}
+    {{ input('invoice_number', 'Rechnungsnummer', values, sugg, from_record) }}
+    {{ input('amount', 'Betrag (€)', values, sugg, from_record, type='number', step='0.01') }}
+    {{ input('invoice_date', 'Rechnungsdatum', values, sugg, from_record, type='date') }}
+    {{ input('due_date', 'Fällig am', values, sugg, from_record, type='date') }}
+    {{ input('iban', 'IBAN', values, sugg, from_record) }}
+    {{ select('payment_method', 'Zahlungsart', values, sugg, from_record, [('transfer', 'Überweisung'), ('debit', 'Lastschrift (wird abgebucht)'), ('other', 'Sonstiges')]) }}
+    {{ select('status', 'Status', values, sugg, from_record, [('open', 'offen'), ('paid', 'bezahlt')]) }}
+    {{ input('paid_on', 'Bezahlt am', values, sugg, from_record, type='date') }}
+  </div>
+  <fieldset>
+    <legend>Garantie / Gewährleistung</legend>
+    <label class="check"><input type="checkbox" name="warranty_enabled" value="1" {{ 'checked' if values.get('warranty_enabled') }}> Für diesen Kauf eine Garantie überwachen</label>
+    {{ input('warranty_months', 'Dauer in Monaten', values, sugg, from_record, type='number', hint='Leer = 24 Monate gesetzliche Gewährleistung') }}
+  </fieldset>
+
+  {% elif doc.kind == 'contract' %}
+  <div class="grid">
+    {{ input('name', 'Bezeichnung', values, sugg, from_record) }}
+    {{ input('provider', 'Anbieter', values, sugg, from_record) }}
+    {{ input('contract_number', 'Vertragsnummer', values, sugg, from_record) }}
+    {{ input('monthly_cost', 'Kosten pro Monat (€)', values, sugg, from_record, type='number', step='0.01') }}
+    {{ input('start_date', 'Vertragsbeginn', values, sugg, from_record, type='date') }}
+    {{ input('initial_term_months', 'Mindestlaufzeit (Monate)', values, sugg, from_record, type='number') }}
+    {{ input('end_date', 'Festes Laufzeitende', values, sugg, from_record, type='date', hint='Nur ausfüllen, wenn kein Beginn/Mindestlaufzeit bekannt ist') }}
+    {{ select('renewal_mode', 'Danach', values, sugg, from_record, [('renews', 'verlängert sich automatisch'), ('indefinite', 'läuft unbefristet weiter'), ('none', 'endet automatisch')]) }}
+    {{ input('renewal_months', 'Verlängerung um (Monate)', values, sugg, from_record, type='number') }}
+    {{ input('notice_value', 'Kündigungsfrist', values, sugg, from_record, type='number') }}
+    {{ select('notice_unit', 'Einheit', values, sugg, from_record, [('months', 'Monate'), ('weeks', 'Wochen'), ('days', 'Tage')]) }}
+    {{ select('notice_to', 'Kündigung zum', values, sugg, from_record, [('term_end', 'Laufzeitende'), ('month_end', 'Monatsende'), ('quarter_end', 'Quartalsende'), ('any', 'beliebigen Tag')]) }}
+    {{ select('status', 'Status', values, sugg, from_record, [('active', 'aktiv'), ('cancelled', 'gekündigt'), ('ended', 'beendet')]) }}
+    {{ input('cancelled_on', 'Gekündigt am', values, sugg, from_record, type='date') }}
+  </div>
+  <label class="field wide"><span>Notizen</span><textarea name="notes" rows="2">{{ values.get('notes') or '' }}</textarea></label>
+  <p class="hint">Hinweis: Für Verbraucherverträge, die seit dem 01.03.2022 geschlossen wurden, gilt nach der Mindestlaufzeit meist „unbefristet, Kündigung mit 1 Monat Frist“ (§ 309 Nr. 9 BGB).</p>
+  {% if deadline %}
+  <div class="deadline">
+    {% if deadline.missing_info %}Für eine Fristberechnung fehlen Angaben (Beginn + Mindestlaufzeit oder Laufzeitende, Verlängerung).
+    {% elif deadline.anytime %}Jederzeit kündbar – frühestes Vertragsende bei Kündigung heute: <strong>{{ deadline.term_end|d }}</strong>.
+    {% elif deadline.cancel_by %}Kündigung muss eingehen bis <strong>{{ deadline.cancel_by|d }}</strong> (Vertragsende {{ deadline.term_end|d }}).
+    {% else %}Vertrag {{ 'endete' if deadline.ended else 'endet automatisch' }} am <strong>{{ deadline.term_end|d }}</strong>.{% endif %}
+  </div>
+  {% endif %}
+
+  {% elif doc.kind == 'warranty' %}
+  <div class="grid">
+    {{ input('product', 'Produkt', values, sugg, from_record) }}
+    {{ input('purchase_date', 'Kaufdatum', values, sugg, from_record, type='date') }}
+    {{ input('months', 'Dauer (Monate)', values, sugg, from_record, type='number') }}
+    {{ select('warranty_type', 'Art', values, sugg, from_record, [('gewaehrleistung', 'Gewährleistung'), ('garantie', 'Herstellergarantie')]) }}
+  </div>
+  {% endif %}
+
+  <div class="actions">
+    <button type="submit" class="primary">{{ 'Bestätigen' if doc.review_state == 'pending' else 'Speichern' }}</button>
+  </div>
+</form>
+{% endif %}
+
+<div class="actions secondary">
+  <form method="post" action="/documents/{{ doc.id }}/reanalyze" class="inline"><button class="small">Neu analysieren</button></form>
+  {% if doc.kind != 'other' %}
+  <form method="post" action="/documents/{{ doc.id }}/ignore" class="inline"><button class="small">Ignorieren</button></form>
+  {% endif %}
+</div>
+{% endblock %}
