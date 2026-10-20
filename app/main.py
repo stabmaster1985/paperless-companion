@@ -229,6 +229,12 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                 cases.add_document(session, case, session.get(Document, other_id))
         return RedirectResponse(f"/cases/{case.id}", status_code=303)
 
+    @app.post("/system/retry-llm")
+    def system_retry_llm(session: Session = Depends(get_session)):
+        count = pipeline.requeue_llm_errors(session, include_exhausted=True)
+        request_worker(app)
+        return RedirectResponse(f"/system?msg={quote(f'{count} Dokumente werden mit AI neu analysiert')}", status_code=303)
+
     @app.post("/system/summaries")
     def system_summaries(session: Session = Depends(get_session)):
         count = 0
@@ -364,7 +370,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             request, "system.html", settings=settings, paperless_status=paperless_status,
             ollama_status=ollama_status, firefly_status=firefly_status, worker=worker, counts=counts, msg=msg,
             last_sync=pipeline.kv_get(session, "last_sync"), channels=notify.channels(settings),
-            version=app.state.version.get(),
+            version=app.state.version.get(), llm_error_count=len(pipeline.documents_with_llm_error(session, True)),
         )
 
     @app.post("/system/version-check")

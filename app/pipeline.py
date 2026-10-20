@@ -331,7 +331,12 @@ def process_document(
                 found = llm.extract(ollama, kind, text, wanted, settings.llm_max_chars)
             except OllamaError as exc:
                 log.warning("LLM-Analyse für Dokument %s fehlgeschlagen: %s", doc.id, exc)
-                sugg["_llm_error"] = {"value": str(exc), "confidence": 0, "source": "llm"}
+                previous = (doc.suggestions or {}).get("_llm_error") or {}
+                sugg["_llm_error"] = {
+                    "value": str(exc), "confidence": 0, "source": "llm",
+                    "at": datetime.now(timezone.utc).isoformat(timespec="minutes"),
+                    "attempts": int(previous.get("attempts", 0)) + 1,
+                }
             else:
                 for name, value in found.items():
                     if _conf(sugg, name) < value["confidence"]:
@@ -579,6 +584,28 @@ def process_summary(
     doc.summary = text
     propose(doc, "summary", text)  # erst nach Zustimmung in Paperless
     doc.summary_state = "done"
+
+
+LLM_RETRY_LIMIT = 3
+
+
+def documents_with_llm_error(session: Session, include_exhausted: bool = False) -> list[Document]:
+    """Zu prüfende Dokumente, deren Analyse ohne AI lief, weil Ollama nicht erreichbar war."""
+    result = []
+    for doc in session.scalars(select(Document).where(Document.review_state == "pending")):
+        error = (doc.suggestions or {}).get("_llm_error")
+        if error and doc.extraction_state == "done" and (
+            include_exhausted or int(error.get("attempts", 1)) < LLM_RETRY_LIMIT
+        ):
+            result.append(doc)
+    return result
+
+
+def requeue_llm_errors(session: Session, include_exhausted: bool = False) -> int:
+    docs = documents_with_llm_error(session, include_exhausted)
+    for doc in docs:
+        doc.extraction_state = "queued"
+    return len(docs)
 
 
 def next_queued(session: Session) -> Document | None:

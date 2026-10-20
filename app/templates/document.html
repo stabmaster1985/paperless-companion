@@ -27,8 +27,10 @@
 {% elif doc.extraction_state == 'error' %}
   <div class="notice error">Analyse fehlgeschlagen: {{ doc.extraction_error }}</div>
 {% endif %}
-{% if sugg.get('_llm_error') %}
-  <div class="notice warn">AI-Analyse nicht verfügbar: {{ sugg['_llm_error'].value }}. Es wurden nur Regeln verwendet.</div>
+{% if sugg.get('_llm_error') and doc.extraction_state == 'done' %}
+  {% set err = sugg['_llm_error'] %}
+  <div class="notice warn">Bei der Analyse{% if err.at %} am {{ err.at[8:10] }}.{{ err.at[5:7] }}.{{ err.at[:4] }} um {{ err.at[11:16] }} (UTC){% endif %} war die AI nicht erreichbar ({{ err.value }}). Es wurden nur Regeln verwendet.
+    <form method="post" action="/documents/{{ doc.id }}/reanalyze" class="inline"><button class="small">Jetzt mit AI neu analysieren</button></form></div>
 {% endif %}
 {% if doc.review_state == 'confirmed' %}
   <div class="notice ok">{{ 'Automatisch übernommen' if doc.auto_confirmed else 'Bestätigt' }}. Änderungen unten speichern.</div>

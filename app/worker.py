@@ -52,6 +52,7 @@ class Worker:
         self._last_sync = 0.0
         self._last_payments = -3600.0
         self._last_tidy = 0.0
+        self._last_llm_retry = 0.0
         self.sync_requested = True
         self.current_document: int | None = None
         self.last_error: str | None = None
@@ -84,6 +85,7 @@ class Worker:
                 self._index_sync(paperless)
                 self._payments()
                 self._tidy_changes()
+                self._retry_llm_errors(ollama)
                 if self.version is not None:
                     self.version.refresh()  # höchstens stündlich bei GitHub
                 self._reminders()
@@ -128,6 +130,22 @@ class Worker:
                 # Nicht in jeder Schleife erneut versuchen – in einer Stunde wieder
                 retry = datetime.now(timezone.utc) - timedelta(hours=23)
                 pipeline.kv_set(session, "last_index_sync", retry.isoformat())
+
+    def _retry_llm_errors(self, ollama: OllamaClient | None) -> None:
+        """Ist Ollama (wieder) erreichbar, Dokumente erneut analysieren, bei denen die AI fehlte."""
+        if ollama is None or time.monotonic() - self._last_llm_retry < 600:
+            return
+        self._last_llm_retry = time.monotonic()
+        with session_scope() as session:
+            if not pipeline.documents_with_llm_error(session):
+                return
+        status = ollama.status()
+        if not (status["reachable"] and status["model_present"]):
+            return
+        with session_scope() as session:
+            count = pipeline.requeue_llm_errors(session)
+        if count:
+            log.info("AI wieder erreichbar: %s Dokumente werden erneut analysiert", count)
 
     def _tidy_changes(self) -> None:
         """Markierungen ohne tatsächliche Unterschiede entfernen (für die Zahl im Menü). Schreibt nichts nach Paperless."""

@@ -152,3 +152,34 @@ def test_paperless_client_sends_no_fixed_api_version():
         assert client.ping() == {"version": "2.20.1", "api_version": "10"}
         # Eine fest angefragte alte Version beantwortet neueres Paperless mit 406
         assert route.calls.last.request.headers["accept"] == "application/json"
+
+
+def test_llm_errors_are_retried_when_ai_is_back(db, settings, mock_api):
+    mock_api.post(f"{OLLAMA}/api/chat").respond(500)
+    ollama = OllamaClient(OLLAMA, "qwen2.5:3b")
+    run_all(db, settings, ollama)
+    with db() as s:
+        err = s.get(Document, 2).suggestions["_llm_error"]
+        assert err["attempts"] == 1 and err["at"]
+        assert [d.id for d in pipeline.documents_with_llm_error(s)] == [2, 3]
+        assert pipeline.requeue_llm_errors(s) == 2
+        assert s.get(Document, 2).extraction_state == "queued"
+
+    # Erneut fehlgeschlagen -> Zähler steigt; nach 3 Versuchen kein automatischer Neuversuch mehr
+    for _ in range(2):
+        run_all(db, settings, ollama)
+        with db() as s:
+            pipeline.requeue_llm_errors(s)
+    run_all(db, settings, ollama)
+    with db() as s:
+        assert s.get(Document, 2).suggestions["_llm_error"]["attempts"] == 3
+        assert pipeline.documents_with_llm_error(s) == []
+        assert len(pipeline.documents_with_llm_error(s, include_exhausted=True)) == 2
+
+    # AI wieder da -> Hinweis verschwindet nach erneuter Analyse
+    mock_api.post(f"{OLLAMA}/api/chat").respond(json={"message": {"content": "{}"}})
+    with db() as s:
+        pipeline.requeue_llm_errors(s, include_exhausted=True)
+    run_all(db, settings, ollama)
+    with db() as s:
+        assert "_llm_error" not in s.get(Document, 2).suggestions

@@ -88,3 +88,16 @@ def test_unwritable_data_dir_gives_clear_error(tmp_path):
     with pytest.raises(RuntimeError, match="chown -R 1000:1000"):
         ensure_writable(blocker)
     ensure_writable(tmp_path / "ok")
+
+
+def test_retry_llm_button(client):
+    from app.db import session_scope as scope
+
+    with scope() as s:
+        doc = s.get(Document, 2)
+        doc.suggestions = {**doc.suggestions, "_llm_error": {"value": "No route to host", "attempts": 5}}
+    assert "Jetzt mit AI neu analysieren" in client.get("/system").text
+    assert "war die AI nicht erreichbar" in client.get("/documents/2").text
+    client.post("/system/retry-llm")
+    with scope() as s:
+        assert s.get(Document, 2).extraction_state == "queued"
