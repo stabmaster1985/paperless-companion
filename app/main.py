@@ -15,10 +15,10 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import deadlines, events, ics, notify, pipeline, reminders
+from app import deadlines, events, ics, notify, pipeline, reminders, retention
 from app.config import Settings, get_settings
 from app.db import get_session, init_db, session_scope
-from app.models import Contract, Document, Invoice, Warranty
+from app.models import Contract, Document, Invoice, RetentionLog, RetentionRule, Warranty
 from app.paperless import PaperlessError
 from app.worker import Worker, make_ollama, make_paperless
 
@@ -35,6 +35,8 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     async def lifespan(app: FastAPI):
         settings.data_dir.mkdir(parents=True, exist_ok=True)
         init_db(settings.database_url)
+        with session_scope() as s:
+            retention.seed_defaults(s)
         worker = Worker(settings)
         app.state.worker = worker
         if start_worker:
@@ -292,6 +294,111 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         except notify.NotifyError as exc:
             msg = f"Fehler: {exc}"
         return RedirectResponse(f"/system?msg={quote(msg)}", status_code=303)
+
+    # ------------------------------------------------------------------ Aufbewahrung
+
+    @app.get("/retention", response_class=HTMLResponse)
+    def retention_page(request: Request, msg: str = "", session: Session = Depends(get_session)):
+        rules = session.scalars(select(RetentionRule).order_by(RetentionRule.name)).all()
+        log_entries = session.scalars(select(RetentionLog).order_by(RetentionLog.at.desc()).limit(50)).all()
+        indexed = session.scalar(select(func.count()).select_from(Document))
+        return render(
+            request, "retention.html", rules=rules, overview=retention.overview(session, today()),
+            log_entries=log_entries, msg=msg, indexed=indexed, settings=settings,
+            last_index=pipeline.kv_get(session, "last_index_sync"),
+            BASIS=retention.BASIS_LABELS, MATCH=retention.MATCH_LABELS,
+        )
+
+    @app.post("/retention/rules")
+    def retention_rule_save(
+        rule_id: int | None = Form(None), name: str = Form(...), match_type: str = Form(...),
+        match_value: str = Form(...), years: int = Form(...), basis: str = Form("year_end"),
+        session: Session = Depends(get_session),
+    ):
+        if match_type not in retention.MATCH_LABELS or basis not in retention.BASIS_LABELS or years < 0:
+            raise HTTPException(400, "Ungültige Regel")
+        rule = session.get(RetentionRule, rule_id) if rule_id else RetentionRule()
+        if rule is None:
+            raise HTTPException(404)
+        rule.name, rule.match_type, rule.match_value = name.strip(), match_type, match_value.strip()
+        rule.years, rule.basis = years, basis
+        session.add(rule)
+        return RedirectResponse("/retention", status_code=303)
+
+    @app.post("/retention/rules/{rule_id}/delete")
+    def retention_rule_delete(rule_id: int, session: Session = Depends(get_session)):
+        if rule := session.get(RetentionRule, rule_id):
+            session.delete(rule)
+        return RedirectResponse("/retention", status_code=303)
+
+    @app.post("/retention/index")
+    def retention_index(session: Session = Depends(get_session)):
+        paperless = make_paperless(settings, timeout=60)
+        try:
+            total, removed = pipeline.index_sync(session, paperless)
+            msg = f"Archiv-Index aktualisiert: {total} Dokumente, {removed} entfernt"
+        except PaperlessError as exc:
+            msg = f"Fehler: {exc}"
+        finally:
+            paperless.close()
+        return RedirectResponse(f"/retention?msg={quote(msg)}", status_code=303)
+
+    @app.post("/retention/apply")
+    async def retention_apply(request: Request, session: Session = Depends(get_session)):
+        form = await request.form()
+        action = form.get("action")
+        ids = [int(i) for i in form.getlist("doc") if str(i).isdigit()]
+        if not ids or action not in ("tag", "delete", "hold"):
+            return RedirectResponse(f"/retention?msg={quote('Keine Dokumente ausgewählt')}", status_code=303)
+        if action == "delete" and (not settings.retention_delete_enabled or form.get("confirm") != "LÖSCHEN"):
+            return RedirectResponse(
+                f"/retention?msg={quote('Löschen nicht bestätigt (LÖSCHEN eintippen) oder deaktiviert')}", status_code=303
+            )
+        # Nur Dokumente verarbeiten, die laut aktueller Bewertung wirklich fällig sind (außer „behalten“)
+        statuses = {s.doc.id: s for s in retention.overview(session, today())["due"]}
+        if action != "hold":
+            ids = [i for i in ids if i in statuses]
+        paperless = make_paperless(settings, timeout=60)
+        done, errors = 0, []
+        try:
+            if action == "tag" and ids:
+                paperless.add_tag(ids, settings.retention_tag)
+            for doc_id in ids:
+                doc = session.get(Document, doc_id)
+                if doc is None:
+                    continue
+                if action == "delete":
+                    try:
+                        paperless.delete_document(doc_id)
+                    except PaperlessError as exc:
+                        errors.append(str(exc))
+                        continue
+                status = statuses.get(doc_id)
+                session.add(RetentionLog(
+                    document_id=doc.id, title=doc.title, correspondent=doc.correspondent, created=doc.created,
+                    action={"tag": "tagged", "delete": "deleted", "hold": "hold"}[action],
+                    rule=status.rule.name if status and status.rule else None,
+                ))
+                if action == "hold":
+                    doc.retention_hold = True
+                elif action == "delete":
+                    session.delete(doc)
+                done += 1
+        except PaperlessError as exc:
+            errors.append(str(exc))
+        finally:
+            paperless.close()
+        verb = {"tag": f"mit Tag „{settings.retention_tag}“ markiert", "delete": "gelöscht", "hold": "dauerhaft behalten"}[action]
+        msg = f"{done} Dokumente {verb}" + (f". Fehler: {'; '.join(errors)}" if errors else "")
+        return RedirectResponse(f"/retention?msg={quote(msg)}", status_code=303)
+
+    @app.post("/documents/{doc_id}/hold")
+    def document_hold(doc_id: int, hold: str = Form("1"), session: Session = Depends(get_session)):
+        doc = session.get(Document, doc_id)
+        if doc is None:
+            raise HTTPException(404)
+        doc.retention_hold = hold == "1"
+        return RedirectResponse(f"/documents/{doc_id}", status_code=303)
 
     # ------------------------------------------------------------------ API
 

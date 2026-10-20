@@ -16,6 +16,7 @@
     <a href="/contracts" class="{{ 'active' if path.startswith('/contracts') }}">Verträge</a>
     <a href="/invoices" class="{{ 'active' if path.startswith('/invoices') }}">Rechnungen</a>
     <a href="/warranties" class="{{ 'active' if path.startswith('/warranties') }}">Garantien</a>
+    <a href="/retention" class="{{ 'active' if path.startswith('/retention') }}">Aufbewahrung</a>
     <a href="/documents" class="{{ 'active' if path.startswith('/documents') }}">Dokumente</a>
     <a href="/system" class="{{ 'active' if path.startswith('/system') }}">System</a>
     {% if auth %}<form method="post" action="/logout" class="inline"><button class="link">Abmelden</button></form>{% endif %}

@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     # Rückschreiben in Paperless-Custom-Fields
     writeback_enabled: bool = False
 
+    # Aufbewahrung
+    retention_tag: str = "Löschkandidat"
+    retention_delete_enabled: bool = False
+
     # Erinnerungen
     reminder_days: str = "30,7,1"
     reminder_hour: int = 8

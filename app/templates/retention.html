@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% from "macros.html" import doclink %}
+{% block content %}
+<h1>Aufbewahrung</h1>
+{% if msg %}<div class="notice">{{ msg }}</div>{% endif %}
+<p class="muted">
+  Archiv-Index: {{ indexed }} Dokumente · zuletzt abgeglichen {{ last_index[:16].replace('T', ' ') ~ ' (UTC)' if last_index else 'noch nie' }}
+  <form method="post" action="/retention/index" class="inline"><button class="small link">jetzt abgleichen</button></form>
+</p>
+
+<h2>Löschbar ({{ overview.due|length }})</h2>
+{% if overview.due %}
+<form method="post" action="/retention/apply" id="due-form">
+  <div class="table-wrap"><table class="list">
+    <thead><tr><th><input type="checkbox" aria-label="Alle auswählen" onclick="document.querySelectorAll('#due-form input[name=doc]').forEach(c => c.checked = this.checked)"></th><th>Dokument</th><th>Datum</th><th class="hide-sm">Regel</th><th>Aufbewahrt bis</th></tr></thead>
+    <tbody>
+    {% for s in overview.due %}
+      <tr>
+        <td><input type="checkbox" name="doc" value="{{ s.doc.id }}"></td>
+        <td><a href="/documents/{{ s.doc.id }}">{{ s.doc.title or ('#' ~ s.doc.id) }}</a> {{ doclink(s.doc.id) }}<br><small>{{ s.doc.correspondent or '' }} {{ s.doc.document_type or '' }}</small></td>
+        <td class="nowrap">{{ s.doc.created|d }}</td>
+        <td class="hide-sm">{{ s.rule.name }}</td>
+        <td class="nowrap">{{ s.keep_until|d }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <div class="actions">
+    <button name="action" value="tag">In Paperless als „{{ settings.retention_tag }}“ markieren</button>
+    <button name="action" value="hold">Dauerhaft behalten</button>
+    {% if settings.retention_delete_enabled %}
+      <input type="text" name="confirm" placeholder="LÖSCHEN eintippen" class="confirm-input" autocomplete="off">
+      <button name="action" value="delete" class="danger">In Paperless löschen</button>
+    {% endif %}
+  </div>
+  {% if not settings.retention_delete_enabled %}
+  <p class="hint">Direktes Löschen ist deaktiviert (<code>RETENTION_DELETE_ENABLED=false</code>). Markierte Dokumente kannst du in Paperless über den Tag filtern und dort löschen.</p>
+  {% endif %}
+</form>
+{% else %}
+<p class="empty">Keine Dokumente, deren Aufbewahrungsfrist abgelaufen ist.</p>
+{% endif %}
+
+<h2>In den nächsten 12 Monaten löschbar ({{ overview.soon|length }})</h2>
+{% if overview.soon %}
+<div class="table-wrap"><table class="list">
+  <thead><tr><th>Dokument</th><th>Datum</th><th class="hide-sm">Regel</th><th>Aufbewahrt bis</th></tr></thead>
+  <tbody>
+  {% for s in overview.soon[:100] %}
+    <tr>
+      <td><a href="/documents/{{ s.doc.id }}">{{ s.doc.title or ('#' ~ s.doc.id) }}</a></td>
+      <td class="nowrap">{{ s.doc.created|d }}</td>
+      <td class="hide-sm">{{ s.rule.name }}</td>
+      <td class="nowrap">{{ s.keep_until|d }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% if overview.soon|length > 100 %}<p class="muted">… und {{ overview.soon|length - 100 }} weitere</p>{% endif %}
+{% else %}
+<p class="empty">Nichts in den nächsten 12 Monaten.</p>
+{% endif %}
+
+{% if overview.protected %}
+<details>
+  <summary>Abgelaufen, aber geschützt ({{ overview.protected|length }})</summary>
+  <ul class="plain">
+  {% for s in overview.protected %}
+    <li><a href="/documents/{{ s.doc.id }}">{{ s.doc.title }}</a> – {{ s.blocked }}</li>
+  {% endfor %}
+  </ul>
+</details>
+{% endif %}
+
+<h2>Regeln</h2>
+<p class="muted">Gilt für ein Dokument mehr als eine Regel, zählt die längste Frist. „0 Jahre“ bedeutet dauerhaft aufbewahren.
+  Die Beispielregeln sind für Privathaushalte gedacht und keine Rechtsberatung – für Unternehmen gelten andere Fristen (z.B. 8 bzw. 10 Jahre nach HGB/AO).</p>
+<div class="table-wrap"><table class="list">
+  <thead><tr><th>Name</th><th>Trifft zu bei</th><th>Frist</th><th></th></tr></thead>
+  <tbody>
+  {% for r in rules %}
+    <tr>
+      <td>
+        <details class="edit">
+          <summary>{{ r.name }}</summary>
+          <form method="post" action="/retention/rules" class="rule-form">
+            <input type="hidden" name="rule_id" value="{{ r.id }}">
+            {% include "retention_rule_fields.html" %}
+            <button class="small primary">Speichern</button>
+          </form>
+        </details>
+      </td>
+      <td>{{ MATCH[r.match_type] }} = {{ r.match_value if r.match_type != 'kind' else KINDS.get(r.match_value, r.match_value) }}</td>
+      <td class="nowrap">{% if r.years == 0 %}dauerhaft{% else %}{{ r.years }} Jahre<br><small>{{ BASIS[r.basis] }}</small>{% endif %}</td>
+      <td><form method="post" action="/retention/rules/{{ r.id }}/delete" class="inline"><button class="small link">entfernen</button></form></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+<details class="card">
+  <summary>Neue Regel</summary>
+  <form method="post" action="/retention/rules" class="rule-form">
+    {% set r = none %}
+    {% include "retention_rule_fields.html" %}
+    <button class="small primary">Hinzufügen</button>
+  </form>
+</details>
+
+{% if log_entries %}
+<h2>Protokoll</h2>
+<div class="table-wrap"><table class="list">
+  <thead><tr><th>Zeitpunkt</th><th>Aktion</th><th>Dokument</th><th class="hide-sm">Regel</th></tr></thead>
+  <tbody>
+  {% for e in log_entries %}
+    <tr>
+      <td class="nowrap">{{ e.at.strftime('%d.%m.%Y %H:%M') }}</td>
+      <td>{{ {'tagged': 'markiert', 'deleted': 'gelöscht', 'hold': 'behalten'}[e.action] }}</td>
+      <td>#{{ e.document_id }} {{ e.title }}<br><small>{{ e.correspondent or '' }} {{ e.created|d }}</small></td>
+      <td class="hide-sm">{{ e.rule or '–' }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endif %}
+{% endblock %}

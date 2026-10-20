@@ -9,7 +9,7 @@
   </select>
   <select name="state" onchange="this.form.submit()">
     <option value="">Alle Zustände</option>
-    {% for key, text in [('queued', 'in Warteschlange'), ('running', 'läuft'), ('done', 'analysiert'), ('error', 'Fehler')] %}
+    {% for key, text in [('queued', 'in Warteschlange'), ('running', 'läuft'), ('done', 'analysiert'), ('error', 'Fehler'), ('skipped', 'nur Index')] %}
     <option value="{{ key }}" {{ 'selected' if state == key }}>{{ text }}</option>
     {% endfor %}
   </select>
@@ -26,6 +26,7 @@
       <td class="hide-sm">{{ doc.document_type or '–' }}</td>
       <td>
         {% if doc.extraction_state in ('queued', 'running') %}<span class="tag">{{ 'läuft' if doc.extraction_state == 'running' else 'wartet' }}</span>
+        {% elif doc.extraction_state == 'skipped' %}<span class="tag">nur Index</span>
         {% elif doc.extraction_state == 'error' %}<span class="tag tag-overdue">Fehler</span>
         {% elif doc.review_state == 'pending' %}<span class="tag tag-warn">prüfen</span>
         {% elif doc.review_state == 'confirmed' %}<span class="tag tag-ok">erfasst</span>

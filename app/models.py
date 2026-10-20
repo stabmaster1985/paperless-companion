@@ -23,18 +23,24 @@ class Document(Base):
     modified: Mapped[str | None] = mapped_column(String)
     content_hash: Mapped[str | None] = mapped_column(String)
 
+    tags: Mapped[list] = mapped_column(JSON, default=list)
+    page_count: Mapped[int | None] = mapped_column(Integer)
+    original_file_name: Mapped[str | None] = mapped_column(String)
+
     # invoice | contract | warranty | other
     kind: Mapped[str] = mapped_column(String, default="other")
     # doctype | keyword | manual
     kind_source: Mapped[str] = mapped_column(String, default="keyword")
 
-    # queued | running | done | error
+    # queued | running | done | error | skipped (nur Index, nicht analysiert)
     extraction_state: Mapped[str] = mapped_column(String, default="queued")
     extraction_error: Mapped[str | None] = mapped_column(Text)
     suggestions: Mapped[dict] = mapped_column(JSON, default=dict)
     # none | pending | confirmed
     review_state: Mapped[str] = mapped_column(String, default="none")
     auto_confirmed: Mapped[bool] = mapped_column(default=False)
+    # Aufbewahrung: niemals zur Löschung vorschlagen
+    retention_hold: Mapped[bool] = mapped_column(default=False, server_default="0")
 
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -125,3 +131,32 @@ class KeyValue(Base):
 
     key: Mapped[str] = mapped_column(String, primary_key=True)
     value: Mapped[str] = mapped_column(Text)
+
+
+class RetentionRule(Base):
+    """Aufbewahrungsregel. Treffen mehrere Regeln zu, gilt die längste Frist."""
+
+    __tablename__ = "retention_rules"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String)
+    # doctype | tag | kind
+    match_type: Mapped[str] = mapped_column(String, default="doctype")
+    match_value: Mapped[str] = mapped_column(String)
+    years: Mapped[int] = mapped_column(Integer, default=10)  # 0 = dauerhaft aufbewahren
+    # year_end (ab Ende des Kalenderjahres) | created (ab Dokumentdatum) | contract_end (ab Vertragsende)
+    basis: Mapped[str] = mapped_column(String, default="year_end")
+
+
+class RetentionLog(Base):
+    __tablename__ = "retention_log"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    document_id: Mapped[int] = mapped_column(Integer)
+    title: Mapped[str] = mapped_column(String, default="")
+    correspondent: Mapped[str | None] = mapped_column(String)
+    created: Mapped[date | None] = mapped_column(Date)
+    # tagged | deleted | hold
+    action: Mapped[str] = mapped_column(String)
+    rule: Mapped[str | None] = mapped_column(String)
+    at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

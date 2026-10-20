@@ -3,7 +3,7 @@
 import logging
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import update
@@ -70,6 +70,7 @@ class Worker:
                     self.sync_requested = False
                     self._last_sync = time.monotonic()
                     self._sync(paperless)
+                self._index_sync(paperless)
                 self._reminders()
                 worked = self._process_next(paperless, ollama)
             except Exception as exc:  # noqa: BLE001 - Thread darf nicht sterben
@@ -92,6 +93,26 @@ class Worker:
         except PaperlessError as exc:
             log.warning("Synchronisation fehlgeschlagen: %s", exc)
             self.last_error = str(exc)
+
+    def _index_sync(self, paperless: PaperlessClient) -> None:
+        """Einmal täglich (und beim ersten Start) den Metadaten-Index des ganzen Archivs abgleichen."""
+        if not self.settings.paperless_token:
+            return
+        with session_scope() as session:
+            last = pipeline.kv_get(session, "last_index_sync")
+        if last and datetime.now(timezone.utc) - datetime.fromisoformat(last) < timedelta(hours=24):
+            return
+        try:
+            with session_scope() as session:
+                total, removed = pipeline.index_sync(session, paperless)
+            log.info("Archiv-Index abgeglichen: %s Dokumente, %s entfernt", total, removed)
+        except PaperlessError as exc:
+            log.warning("Archiv-Index fehlgeschlagen: %s", exc)
+            self.last_error = str(exc)
+            with session_scope() as session:
+                # Nicht in jeder Schleife erneut versuchen – in einer Stunde wieder
+                retry = datetime.now(timezone.utc) - timedelta(hours=23)
+                pipeline.kv_set(session, "last_index_sync", retry.isoformat())
 
     def _process_next(self, paperless: PaperlessClient, ollama: OllamaClient | None) -> bool:
         with session_scope() as session:

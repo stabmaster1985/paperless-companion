@@ -13,7 +13,7 @@ OLLAMA = "http://ollama.test"
 DOCS = {
     1: {
         "id": 1, "title": "Stromrechnung Oktober", "correspondent": 10, "document_type": 20,
-        "created": "2026-10-05", "modified": "2026-10-06T10:00:00+02:00", "custom_fields": [],
+        "created": "2026-10-05", "modified": "2026-10-06T10:00:00+02:00", "custom_fields": [], "tags": [30, 31],
         "content": "Rechnungsnummer: RE-1\nRechnungsdatum: 05.10.2026\nGesamtbetrag: 78,00 €\nFällig am 19.10.2026",
     },
     2: {
@@ -63,6 +63,7 @@ def mock_api():
         router.get(f"{PAPERLESS}/api/document_types/").respond(json=page([
             {"id": 20, "name": "Rechnung"}, {"id": 21, "name": "Vertrag"},
         ]))
+        router.get(f"{PAPERLESS}/api/tags/").respond(json=page([{"id": 30, "name": "Steuer"}, {"id": 31, "name": "Haus"}]))
         router.get(f"{PAPERLESS}/api/documents/").respond(json=page(list(DOCS.values())))
         for doc_id, doc in DOCS.items():
             router.get(f"{PAPERLESS}/api/documents/{doc_id}/").respond(json=doc)

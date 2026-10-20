@@ -1,0 +1,16 @@
+<div class="grid">
+  <label class="field"><span>Name</span><input name="name" value="{{ r.name if r else '' }}" required></label>
+  <label class="field"><span>Trifft zu bei</span>
+    <select name="match_type">
+      {% for key, text in MATCH.items() %}<option value="{{ key }}" {{ 'selected' if r and r.match_type == key }}>{{ text }}</option>{% endfor %}
+    </select>
+  </label>
+  <label class="field"><span>Wert</span><input name="match_value" value="{{ r.match_value if r else '' }}" required>
+    <small>Name des Dokumenttyps/Tags bzw. invoice, contract, warranty</small></label>
+  <label class="field"><span>Jahre</span><input type="number" name="years" min="0" max="100" value="{{ r.years if r else 10 }}" required></label>
+  <label class="field"><span>Fristbeginn</span>
+    <select name="basis">
+      {% for key, text in BASIS.items() %}<option value="{{ key }}" {{ 'selected' if r and r.basis == key }}>{{ text }}</option>{% endfor %}
+    </select>
+  </label>
+</div>

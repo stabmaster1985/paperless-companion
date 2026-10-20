@@ -108,26 +108,43 @@ def _parse_dt(value: str) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-def upsert_document(session: Session, data: dict, correspondents: dict, doc_types: dict, force: bool = False) -> Document:
+def load_names(paperless: PaperlessClient) -> dict[str, dict[int, str]]:
+    return {endpoint: paperless.names(endpoint) for endpoint in ("correspondents", "document_types", "tags")}
+
+
+def upsert_document(
+    session: Session, data: dict, names: dict[str, dict[int, str]], force: bool = False, analyze: bool = True
+) -> Document:
+    """Übernimmt Metadaten aus Paperless. Mit analyze=False (Archiv-Index) wird nichts zur Analyse eingereiht."""
     doc = session.get(Document, data["id"])
     is_new = doc is None
     if is_new:
-        doc = Document(id=data["id"], suggestions={})
+        doc = Document(id=data["id"], suggestions={}, tags=[])
         session.add(doc)
 
-    new_type = doc_types.get(data.get("document_type"))
+    new_type = names["document_types"].get(data.get("document_type"))
     type_changed = not is_new and new_type != doc.document_type
     doc.title = data.get("title") or ""
-    doc.correspondent = correspondents.get(data.get("correspondent"))
+    doc.correspondent = names["correspondents"].get(data.get("correspondent"))
     doc.document_type = new_type
+    doc.tags = sorted(names["tags"].get(t, str(t)) for t in data.get("tags") or [])
     created = data.get("created") or data.get("created_date")
     doc.created = date.fromisoformat(created[:10]) if created else None
     doc.modified = data.get("modified")
+    if "page_count" in data:
+        doc.page_count = data.get("page_count")
+    if "original_file_name" in data:
+        doc.original_file_name = data.get("original_file_name")
+
+    if not analyze:
+        if is_new:
+            doc.extraction_state = "skipped"
+        return doc
 
     new_hash = content_hash(data.get("content") or "")
     changed = new_hash != doc.content_hash or type_changed
     doc.content_hash = new_hash
-    if is_new or force or (changed and doc.review_state != "confirmed"):
+    if is_new or force or doc.extraction_state == "skipped" or (changed and doc.review_state != "confirmed"):
         doc.extraction_state = "queued"
         doc.extraction_error = None
     return doc
@@ -137,12 +154,11 @@ def sync(session: Session, paperless: PaperlessClient, settings: Settings) -> in
     since = kv_get(session, "last_modified")
     if since is None:
         since = (datetime.now(timezone.utc) - timedelta(days=settings.initial_sync_days)).isoformat()
-    correspondents = paperless.names("correspondents")
-    doc_types = paperless.names("document_types")
+    names = load_names(paperless)
     newest = _parse_dt(since)
     count = 0
     for data in paperless.documents_modified_after(since):
-        upsert_document(session, data, correspondents, doc_types)
+        upsert_document(session, data, names)
         count += 1
         if data.get("modified") and _parse_dt(data["modified"]) > newest:
             newest = _parse_dt(data["modified"])
@@ -151,11 +167,30 @@ def sync(session: Session, paperless: PaperlessClient, settings: Settings) -> in
     return count
 
 
+def index_sync(session: Session, paperless: PaperlessClient) -> tuple[int, int]:
+    """Gleicht die Metadaten des gesamten Archivs ab. Gibt (Anzahl, entfernt) zurück.
+
+    Dokumente, die es in Paperless nicht mehr gibt, werden samt Datensätzen entfernt –
+    aber nur, wenn der Abgleich vollständig war.
+    """
+    names = load_names(paperless)
+    total, documents = paperless.all_documents_metadata()
+    seen: set[int] = set()
+    for data in documents:
+        upsert_document(session, data, names, analyze=False)
+        seen.add(data["id"])
+    removed = 0
+    if len(seen) >= total:
+        for doc in session.scalars(select(Document).where(Document.id.not_in(seen))):
+            session.delete(doc)
+            removed += 1
+    kv_set(session, "last_index_sync", datetime.now(timezone.utc).isoformat())
+    return len(seen), removed
+
+
 def import_single(session: Session, paperless: PaperlessClient, doc_id: int) -> Document:
     data = paperless.get_document(doc_id)
-    return upsert_document(
-        session, data, paperless.names("correspondents"), paperless.names("document_types"), force=True
-    )
+    return upsert_document(session, data, load_names(paperless), force=True)
 
 
 # --------------------------------------------------------------------------- Analyse

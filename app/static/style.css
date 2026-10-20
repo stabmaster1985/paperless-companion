@@ -155,3 +155,13 @@ body.login { display: grid; place-items: center; min-height: 100vh; padding: 1re
 
 .table-wrap { overflow-x: auto; border-radius: var(--radius); }
 .table-wrap table.list { min-width: 100%; }
+
+button.danger { background: var(--bad); border-color: var(--bad); color: #fff; font-weight: 600; }
+.confirm-input { max-width: 180px; }
+ul.plain { padding-left: 1.2rem; }
+details > summary { cursor: pointer; }
+details.card > summary { font-weight: 600; }
+details.edit[open] { margin-bottom: .5rem; }
+.rule-form { margin-top: .75rem; display: flex; flex-direction: column; gap: .75rem; align-items: flex-start; }
+.rule-form .grid { width: 100%; }
+.tags { display: inline-flex; flex-wrap: wrap; gap: .25rem; }

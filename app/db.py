@@ -1,7 +1,7 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
@@ -28,8 +28,24 @@ def init_db(url: str) -> Engine:
     from app import models  # noqa: F401  (Tabellen registrieren)
 
     Base.metadata.create_all(_engine)
+    _add_missing_columns(_engine)
     _session_factory = sessionmaker(_engine, expire_on_commit=False)
     return _engine
+
+
+def _add_missing_columns(engine: Engine) -> None:
+    """Minimale Migration: neue Spalten bestehender Tabellen per ALTER TABLE ergänzen."""
+    inspector = inspect(engine)
+    with engine.begin() as conn:
+        for table in Base.metadata.sorted_tables:
+            existing = {col["name"] for col in inspector.get_columns(table.name)}
+            for column in table.columns:
+                if column.name in existing:
+                    continue
+                ddl = f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" {column.type.compile(engine.dialect)}'
+                if column.server_default is not None:
+                    ddl += f" DEFAULT {column.server_default.arg}"
+                conn.execute(text(ddl))
 
 
 @contextmanager

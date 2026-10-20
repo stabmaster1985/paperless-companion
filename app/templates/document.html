@@ -5,7 +5,8 @@
 <div class="head">
   <div>
     <h1>{{ doc.title or ('Dokument #' ~ doc.id) }} {{ doclink(doc.id) }}</h1>
-    <p class="muted">{{ doc.correspondent or 'ohne Korrespondent' }} · {{ doc.document_type or 'ohne Dokumenttyp' }} · {{ doc.created|d }}</p>
+    <p class="muted">{{ doc.correspondent or 'ohne Korrespondent' }} · {{ doc.document_type or 'ohne Dokumenttyp' }} · {{ doc.created|d }}
+      {% if doc.tags %}<span class="tags">{% for t in doc.tags %}<span class="tag">{{ t }}</span>{% endfor %}</span>{% endif %}</p>
   </div>
   <form method="post" action="/documents/{{ doc.id }}/kind" class="kind-switch">
     <label>Art
@@ -17,7 +18,10 @@
   </form>
 </div>
 
-{% if doc.extraction_state in ('queued', 'running') %}
+{% if doc.extraction_state == 'skipped' %}
+  <div class="notice">Dieses Dokument ist nur im Archiv-Index und wurde noch nicht analysiert.
+    <form method="post" action="/documents/{{ doc.id }}/reanalyze" class="inline"><button class="small">Jetzt analysieren</button></form></div>
+{% elif doc.extraction_state in ('queued', 'running') %}
   <div class="notice">Dokument wird gerade analysiert{% if doc.extraction_state == 'queued' %} (in der Warteschlange){% endif %}. Seite später neu laden.</div>
 {% elif doc.extraction_state == 'error' %}
   <div class="notice error">Analyse fehlgeschlagen: {{ doc.extraction_error }}</div>
@@ -101,5 +105,9 @@
   {% if doc.kind != 'other' %}
   <form method="post" action="/documents/{{ doc.id }}/ignore" class="inline"><button class="small">Ignorieren</button></form>
   {% endif %}
+  <form method="post" action="/documents/{{ doc.id }}/hold" class="inline">
+    <input type="hidden" name="hold" value="{{ '0' if doc.retention_hold else '1' }}">
+    <button class="small">{{ 'Aufbewahrungssperre aufheben' if doc.retention_hold else 'Dauerhaft aufbewahren' }}</button>
+  </form>
 </div>
 {% endblock %}

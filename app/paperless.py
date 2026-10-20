@@ -1,7 +1,9 @@
 """Schlanker Client für die Paperless-NGX-REST-API."""
 
+import re
 from collections.abc import Iterator
 from datetime import date
+from urllib.parse import unquote
 
 import httpx
 
@@ -65,6 +67,60 @@ class PaperlessClient:
 
     def get_document(self, doc_id: int) -> dict:
         return self._get(f"/api/documents/{doc_id}/")
+
+    def all_documents_metadata(self) -> tuple[int, Iterator[dict]]:
+        """Alle Dokumente ohne Inhalt (für den Archiv-Index). Liefert (Anzahl, Iterator)."""
+        params = {
+            "page_size": 100,
+            "ordering": "id",
+            "truncate_content": "true",
+            "fields": "id,title,correspondent,document_type,created,created_date,modified,tags,"
+                      "page_count,original_file_name",
+        }
+        count = self._get("/api/documents/", page_size=1).get("count", 0)
+        return count, self._paginate("/api/documents/", **params)
+
+    def download(self, doc_id: int, original: bool = False) -> tuple[bytes, str]:
+        """Lädt die (archivierte) Datei. Gibt (Inhalt, Dateiname) zurück."""
+        try:
+            response = self._client.get(
+                f"/api/documents/{doc_id}/download/", params={"original": "true"} if original else None, timeout=120
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise PaperlessError(f"Download {doc_id}: {exc}") from exc
+        disposition = response.headers.get("content-disposition", "")
+        match = re.search(r"filename\*=utf-8''([^;]+)", disposition, re.IGNORECASE) or re.search(
+            r'filename="?([^";]+)"?', disposition
+        )
+        name = unquote(match.group(1)) if match else f"{doc_id}.pdf"
+        return response.content, name
+
+    def ensure_tag(self, name: str) -> int:
+        for item in self._paginate("/api/tags/", page_size=500, name__iexact=name):
+            if item["name"].lower() == name.lower():
+                return item["id"]
+        try:
+            response = self._client.post("/api/tags/", json={"name": name, "matching_algorithm": 0})
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise PaperlessError(f"Tag {name!r} anlegen: {exc}") from exc
+        return response.json()["id"]
+
+    def add_tag(self, doc_ids: list[int], tag_name: str) -> None:
+        tag_id = self.ensure_tag(tag_name)
+        payload = {"documents": doc_ids, "method": "add_tag", "parameters": {"tag": tag_id}}
+        try:
+            self._client.post("/api/documents/bulk_edit/", json=payload).raise_for_status()
+        except httpx.HTTPError as exc:
+            raise PaperlessError(f"Tag setzen: {exc}") from exc
+
+    def delete_document(self, doc_id: int) -> None:
+        """Löscht ein Dokument (landet in Paperless im Papierkorb)."""
+        try:
+            self._client.delete(f"/api/documents/{doc_id}/").raise_for_status()
+        except httpx.HTTPError as exc:
+            raise PaperlessError(f"Löschen {doc_id}: {exc}") from exc
 
     # ------------------------------------------------------------------ Custom Fields
 
