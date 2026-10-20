@@ -21,6 +21,9 @@ services:
       OLLAMA_KEEP_ALIVE: 2m
       OLLAMA_NUM_PARALLEL: "1"
       OLLAMA_MAX_LOADED_MODELS: "1"
+    # Standard: nur vom Docker-Host erreichbar. Fürs ganze Netzwerk in der .env OLLAMA_PUBLISH=11434 setzen.
+    ports:
+      - "${OLLAMA_PUBLISH:-127.0.0.1:11434}:11434"
     volumes:
       - ./ollama:/root/.ollama
     mem_limit: 6g

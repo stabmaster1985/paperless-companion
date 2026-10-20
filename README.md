@@ -69,6 +69,12 @@ Lesen genügen Leserechte. Schreibrechte braucht der Benutzer erst, wenn du Vors
 „Für Paperless“ übernimmst oder Aufbewahrungsaktionen ausführst. Wer ganz sicher gehen will,
 gibt dem Companion einen Benutzer mit reinen Leserechten.
 
+**Ollama im Netzwerk nutzen:** Läuft Ollama im selben Docker (`COMPOSE_PROFILES=ollama`), ist
+es standardmäßig nur vom Docker-Host erreichbar. Mit `OLLAMA_PUBLISH=11434` in der `.env` und
+`docker compose up -d` ist es im ganzen Netzwerk unter `http://<host>:11434` erreichbar,
+z.B. für n8n oder Open WebUI. Ollama hat keine Anmeldung, deshalb nur im Heimnetz verwenden
+und den Port nie im Router freigeben.
+
 **Lokale AI (optional):** siehe [docs/ollama-lxc.md](docs/ollama-lxc.md). Ohne Ollama
 `LLM_PROVIDER=none` setzen. Dann arbeitet der Companion nur mit Regeln und der Inbox.
 
