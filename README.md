@@ -20,7 +20,8 @@ Paperless archiviert Dokumente und macht sie durchsuchbar. Der Companion leitet 
   Archiv mit Protokoll.
 - **Dashboard:** anstehende Fristen, offene Beträge, monatliche Fixkosten.
 - **Erinnerungen** per ntfy oder E-Mail sowie ein **Kalender-Feed (ICS)** für Handy und Outlook.
-- Optional **Rückschreiben** der Ergebnisse in Paperless-Custom-Fields.
+- **Paperless bleibt unangetastet:** Vorschläge für deine Custom Fields übernimmst du gezielt
+  auf der Seite „Für Paperless“.
 
 Alles läuft lokal. Die Dokumente verlassen dein Netzwerk nicht.
 
@@ -62,8 +63,10 @@ docker compose up -d --build
 
 Danach ist die Oberfläche unter `http://<host>:8010` erreichbar.
 
-**Paperless-Token:** In Paperless oben rechts *Profil → API-Auth-Token* erzeugen. Für
-`WRITEBACK_ENABLED=true` braucht der Benutzer Schreibrechte auf Dokumente und Custom Fields.
+**Paperless-Token:** In Paperless oben rechts *Profil → API-Auth-Token* erzeugen. Zum reinen
+Lesen genügen Leserechte. Schreibrechte braucht der Benutzer erst, wenn du Vorschläge unter
+„Für Paperless“ übernimmst oder Aufbewahrungsaktionen ausführst. Wer ganz sicher gehen will,
+gibt dem Companion einen Benutzer mit reinen Leserechten.
 
 **Lokale AI (optional):** siehe [docs/ollama-lxc.md](docs/ollama-lxc.md). Ohne Ollama
 `LLM_PROVIDER=none` setzen. Dann arbeitet der Companion nur mit Regeln und der Inbox.
@@ -118,19 +121,24 @@ FIELD_SUMMARY=Zusammenfassung KI
   Analyse. Offene Rechnungen ohne Betrag werden einmal analysiert, um den Betrag zu finden.
   Rechnungen ohne Bezahlt-Datum, die länger als `FIELDS_OPEN_MAX_AGE_DAYS` fällig sind,
   gelten als erledigt, damit alte Belege nicht als überfällig gemeldet werden.
-- **Rückschreiben** (`WRITEBACK_ENABLED=true`): Was du in der App änderst (bezahlt, wieder
-  offen, Firefly-Treffer, bestätigte Werte), wird in die Felder geschrieben. Das geschieht
-  gesammelt im Hintergrund und nur, wenn sich der Wert unterscheidet. Unbekannte Werte
-  überschreiben nie deine Eingaben in Paperless.
-- **Kommentar:** wird auf der Dokumentseite angezeigt und lässt sich dort bearbeiten.
+- **Nichts ohne deine Zustimmung:** Der Companion liest Paperless nur. Was er für deine Felder
+  vorschlägt (Betrag, bezahlt am, Fristen, Kommentar, Zusammenfassung, Verknüpfungen),
+  erscheint unter **Für Paperless** als Gegenüberstellung *Paperless jetzt → Vorschlag*.
+  Erst wenn du dort Einträge auswählst und übernimmst, wird geschrieben, und zwar nur die
+  ausgewählten Felder. Alle anderen Custom Fields bleiben unverändert. Verworfene Vorschläge
+  erscheinen erst wieder, wenn sich der Wert im Companion ändert. Unbekannte Werte werden nie
+  vorgeschlagen, sie würden deine Eingaben leeren. Die einzige Ausnahme ist „bezahlt am“,
+  wenn du eine Rechnung im Companion wieder auf offen setzt.
+- **Kommentar:** wird auf der Dokumentseite angezeigt. Änderungen werden vorgemerkt.
 - **gehört zu:** Verknüpfte Dokumente erscheinen auf der Dokumentseite, auch über mehrere
   Ecken. Mit „Als Vorgang übernehmen“ entsteht daraus ein Vorgang. Ein Vorgang schlägt
-  verknüpfte Dokumente zum Hinzufügen vor und trägt neue Dokumente in „gehört zu“ ein
-  (`CASES_WRITE_LINKS`).
+  verknüpfte Dokumente zum Hinzufügen vor. Fügst du ein Dokument hinzu, wird die Verknüpfung
+  in „gehört zu“ vorgeschlagen (`CASES_PROPOSE_LINKS`).
 - **KI-Zusammenfassung:** per Knopf auf der Dokumentseite oder automatisch für neue Dokumente
   (`SUMMARY_MODE=new`). Das lokale Modell bekommt den Dokumentanfang, eine feste Gliederung
   (wer, worum, Beträge/Fristen, was zu tun ist) und eine harte Längengrenze. Felder vom Typ
   *Text* fassen in Paperless nur 128 Zeichen, die Zusammenfassung wird passend gekürzt.
+  Sie wird im Companion gespeichert und unter „Für Paperless“ zur Übernahme angeboten.
 
 ### Zahlungsabgleich mit Firefly III
 

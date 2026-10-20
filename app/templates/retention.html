@@ -26,7 +26,7 @@
     </tbody>
   </table></div>
   <div class="actions">
-    <button name="action" value="tag">In Paperless als „{{ settings.retention_tag }}“ markieren</button>
+    <button name="action" value="tag" onclick="return confirm('Ausgewählte Dokumente in Paperless mit dem Tag markieren?')">In Paperless als „{{ settings.retention_tag }}“ markieren</button>
     <button name="action" value="hold">Dauerhaft behalten</button>
     {% if settings.retention_delete_enabled %}
       <input type="text" name="confirm" placeholder="LÖSCHEN eintippen" class="confirm-input" autocomplete="off">

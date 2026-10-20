@@ -6,7 +6,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select, update
+from sqlalchemy import update
 
 from app import payments, pipeline, reminders
 from app.config import Settings
@@ -50,7 +50,7 @@ class Worker:
         self._thread = threading.Thread(target=self._run, name="companion-worker", daemon=True)
         self._last_sync = 0.0
         self._last_payments = -3600.0
-        self._writeback_retry_at = 0.0
+        self._last_tidy = 0.0
         self.sync_requested = True
         self.current_document: int | None = None
         self.last_error: str | None = None
@@ -82,7 +82,7 @@ class Worker:
                     self._sync(paperless)
                 self._index_sync(paperless)
                 self._payments()
-                self._writebacks(paperless)
+                self._tidy_changes()
                 self._reminders()
                 worked = self._process_next(paperless, ollama) or self._summarize_next(paperless, ollama)
             except Exception as exc:  # noqa: BLE001 - Thread darf nicht sterben
@@ -126,18 +126,13 @@ class Worker:
                 retry = datetime.now(timezone.utc) - timedelta(hours=23)
                 pipeline.kv_set(session, "last_index_sync", retry.isoformat())
 
-    def _writebacks(self, paperless: PaperlessClient) -> None:
-        """Vorgemerkte Änderungen nach Paperless schreiben (bei Fehlern höchstens alle 5 Minuten)."""
-        if time.monotonic() < self._writeback_retry_at:
+    def _tidy_changes(self) -> None:
+        """Markierungen ohne tatsächliche Unterschiede entfernen (für die Zahl im Menü). Schreibt nichts nach Paperless."""
+        if time.monotonic() - self._last_tidy < 60:
             return
+        self._last_tidy = time.monotonic()
         with session_scope() as session:
-            pending = session.scalar(select(func.count()).select_from(Document).where(Document.writeback_pending.is_(True)))
-            if not pending:
-                return
-            pipeline.flush_writebacks(session, paperless, self.settings, datetime.now(self.tz).date())
-            still = session.scalar(select(func.count()).select_from(Document).where(Document.writeback_pending.is_(True)))
-        if still:
-            self._writeback_retry_at = time.monotonic() + 300
+            pipeline.documents_with_changes(session, self.settings, datetime.now(self.tz).date())
 
     def _payments(self) -> None:
         """Stündlich offene Rechnungen mit Firefly-III-Buchungen abgleichen."""

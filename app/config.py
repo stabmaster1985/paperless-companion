@@ -45,9 +45,9 @@ class Settings(BaseSettings):
     llm_max_chars: int = 6000
     llm_auto_accept: bool = False
 
-    # Rückschreiben in Paperless-Custom-Fields
-    writeback_enabled: bool = False
-    writeback_create_fields: bool = True  # fehlende Felder (Betrag, Fällig am …) anlegen
+    # Übernahme nach Paperless (nur nach Zustimmung auf der Seite „Für Paperless“):
+    # fehlende Felder (Betrag, Fällig am …) dabei anlegen
+    writeback_create_fields: bool = True
 
     # Namen der Paperless-Custom-Fields je Rolle (leer = nicht verwenden)
     field_amount: str = "Betrag"
@@ -61,8 +61,8 @@ class Settings(BaseSettings):
     field_summary: str = "Zusammenfassung KI"
     # Rechnungen aus „Fällig am“ ohne „Bezahlt am“, die länger als N Tage fällig sind, gelten als erledigt
     fields_open_max_age_days: int = 90
-    # Vorgänge schreiben die Verknüpfung in das Feld „gehört zu“
-    cases_write_links: bool = True
+    # Vorgänge schlagen die Verknüpfung im Feld „gehört zu“ vor
+    cases_propose_links: bool = True
 
     # KI-Zusammenfassung: manual (nur per Knopf) | new (neue Dokumente automatisch) | off
     summary_mode: Literal["off", "manual", "new"] = "manual"

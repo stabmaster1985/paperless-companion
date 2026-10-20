@@ -108,7 +108,8 @@
     <div>
       <strong>{{ settings.field_summary }}</strong>
       {% if doc.summary_state in ('queued', 'running') %}<span class="tag">{{ 'wird erstellt' if doc.summary_state == 'running' else 'in Warteschlange' }}</span>{% endif %}
-      {% set summary_text = pf.get('summary') or doc.summary %}
+      {% set summary_text = (doc.proposed_fields or {}).get('summary') or pf.get('summary') or doc.summary %}
+      {% if 'summary' in (doc.proposed_fields or {}) %}<small class="soon">(neu – noch nicht in Paperless)</small>{% endif %}
       <p class="{{ 'muted' if not summary_text }}">{{ summary_text or 'Noch keine Zusammenfassung.' }}</p>
       {% if doc.summary_state == 'error' %}<p class="bad">{{ doc.extraction_error }}</p>{% endif %}
       {% if settings.llm_enabled and settings.summary_mode != 'off' and doc.summary_state not in ('queued', 'running') %}
@@ -121,9 +122,11 @@
 
     {% if settings.field_comment %}
     <form method="post" action="/documents/{{ doc.id }}/comment" class="stack">
-      <label class="field"><span>{{ settings.field_comment }} <small>(wird in Paperless gespeichert)</small></span>
-        <textarea name="comment" rows="2" maxlength="128">{{ pf.get('comment') or '' }}</textarea></label>
-      <div><button class="small">Kommentar speichern</button></div>
+      {% set proposed = doc.proposed_fields or {} %}
+      <label class="field"><span>{{ settings.field_comment }}
+        {% if 'comment' in proposed %}<small class="soon">(geändert – noch nicht in Paperless)</small>{% endif %}</span>
+        <textarea name="comment" rows="2" maxlength="128">{{ proposed['comment'] if 'comment' in proposed else (pf.get('comment') or '') }}</textarea></label>
+      <div><button class="small">Kommentar vormerken</button> <small class="muted">Übernahme nach Paperless unter „Für Paperless“</small></div>
     </form>
     {% endif %}
 

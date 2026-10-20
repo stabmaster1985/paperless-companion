@@ -36,12 +36,13 @@ def ensure_document(session: Session, paperless: PaperlessClient, doc_id: int, s
     return doc
 
 
-def write_links(session: Session, paperless: PaperlessClient, settings, case: Case, doc: Document) -> None:
-    """Verknüpft doc im Feld „gehört zu“ mit den übrigen Dokumenten des Vorgangs."""
+def propose_links(case: Case, doc: Document) -> None:
+    """Schlägt vor, doc im Feld „gehört zu“ mit den übrigen Dokumenten des Vorgangs zu verknüpfen."""
     others = {link.document_id for link in case.links if link.document_id != doc.id}
-    current = set((doc.paperless_fields or {}).get("related") or [])
+    proposed = (doc.proposed_fields or {}).get("related")
+    current = set(proposed if proposed is not None else (doc.paperless_fields or {}).get("related") or [])
     if others and not others <= current:
-        pipeline.write_fields(paperless, doc, settings, {"related": sorted(current | others)})
+        pipeline.propose(doc, "related", current | others)
 
 
 def link_suggestions(session: Session, case: Case) -> list[Document]:

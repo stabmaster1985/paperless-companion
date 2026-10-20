@@ -54,7 +54,6 @@ def settings(tmp_path):
         ollama_url=OLLAMA,
         webhook_token="hook",
         ics_token="cal",
-        writeback_enabled=True,
     )
 
 

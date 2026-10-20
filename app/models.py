@@ -29,8 +29,12 @@ class Document(Base):
     summary: Mapped[str | None] = mapped_column(Text)
     # None | queued | running | done | error
     summary_state: Mapped[str | None] = mapped_column(String)
-    # Änderungen, die noch nach Paperless zurückgeschrieben werden müssen
+    # Companion-Daten haben sich geändert -> evtl. Vorschläge für Paperless (siehe „Für Paperless“)
     writeback_pending: Mapped[bool] = mapped_column(default=False, server_default="0")
+    # Eigene Eingaben für Paperless-Felder (Kommentar, Zusammenfassung, Verknüpfungen), noch nicht übernommen
+    proposed_fields: Mapped[dict | None] = mapped_column(JSON)
+    # Abgelehnte Vorschläge (Rolle -> Wert), damit sie nicht erneut erscheinen
+    dismissed_fields: Mapped[dict | None] = mapped_column(JSON)
     page_count: Mapped[int | None] = mapped_column(Integer)
     original_file_name: Mapped[str | None] = mapped_column(String)
 

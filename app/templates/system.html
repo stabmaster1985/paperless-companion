@@ -81,5 +81,5 @@
     {% endif %}
   </div>
 </section>
-<p class="muted">Rückschreiben in Paperless-Custom-Fields: {{ 'aktiv' if settings.writeback_enabled else 'aus' }} · Automatische Übernahme von AI-Werten: {{ 'aktiv' if settings.llm_auto_accept else 'aus' }}</p>
+<p class="muted">Paperless wird nur gelesen. Änderungen an Paperless erfolgen ausschließlich nach deiner Zustimmung unter <a href="/paperless-changes">Für Paperless</a> (sowie über die Aktionen unter Aufbewahrung). · Automatische Übernahme von AI-Werten in den Companion: {{ 'aktiv' if settings.llm_auto_accept else 'aus' }}</p>
 {% endblock %}

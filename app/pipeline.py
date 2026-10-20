@@ -352,7 +352,7 @@ def process_document(
         apply_values(session, doc, kind, parse_values(kind, suggestion_values(doc)))
         doc.review_state = "confirmed"
         doc.auto_confirmed = True
-        doc.writeback_pending = True
+        mark_changed(doc)
     else:
         doc.review_state = "pending"
         doc.auto_confirmed = False
@@ -438,53 +438,114 @@ def write_fields(paperless: PaperlessClient, doc: Document, settings: Settings, 
     return [role for role in values if role not in defs]
 
 
-def writeback_values(doc: Document, today: date) -> dict[str, object]:
+def _norm(value):
+    """Vergleichbare, JSON-taugliche Form eines Feldwerts."""
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, float):
+        return round(value, 2)
+    if isinstance(value, (list, set, tuple)):
+        return sorted(int(v) for v in value)
+    if isinstance(value, str):
+        return value.strip() or None
+    return value
+
+
+def companion_values(doc: Document, today: date) -> dict[str, object]:
+    """Werte, die der Companion für die Paperless-Felder vorschlagen würde."""
     values: dict[str, object] = {}
     pf = doc.paperless_fields or {}
-    if doc.invoice:
-        values["amount"] = doc.invoice.amount
-        values["due_date"] = doc.invoice.due_date
-        if doc.invoice.status == "paid":
-            values["paid_on"] = doc.invoice.paid_on
-        elif pf.get("paid_on"):
-            values["paid_on"] = None  # wieder offen: Feld leeren
-    if doc.contract:
-        result = deadlines.compute(deadlines.terms_from_contract(doc.contract), today)
-        values["cancel_by"] = None if result.anytime else result.cancel_by
-        values["term_end"] = result.term_end
-    if doc.warranty:
-        values["warranty_end"] = doc.warranty.expires_on
-    # Unbekannte Werte nicht schreiben (würde Eingaben in Paperless löschen) – außer bewusstem Leeren
-    return {role: v for role, v in values.items() if v is not None or (role == "paid_on" and pf.get("paid_on"))}
+    if doc.review_state == "confirmed":
+        if doc.invoice:
+            values["amount"] = doc.invoice.amount
+            values["due_date"] = doc.invoice.due_date
+            if doc.invoice.status == "paid":
+                values["paid_on"] = doc.invoice.paid_on
+            elif pf.get("paid_on"):
+                values["paid_on"] = None  # wieder offen: Feld leeren
+        if doc.contract:
+            result = deadlines.compute(deadlines.terms_from_contract(doc.contract), today)
+            values["cancel_by"] = None if result.anytime else result.cancel_by
+            values["term_end"] = result.term_end
+        if doc.warranty:
+            values["warranty_end"] = doc.warranty.expires_on
+        # Unbekannte Werte nie vorschlagen (würde Eingaben in Paperless löschen) – außer bewusstem Leeren
+        values = {role: v for role, v in values.items() if v is not None or (role == "paid_on" and pf.get("paid_on"))}
+    values.update(doc.proposed_fields or {})
+    return values
 
 
-def writeback(paperless: PaperlessClient, doc: Document, settings: Settings, today: date | None = None) -> None:
-    if not settings.writeback_enabled:
-        return
-    values = writeback_values(doc, today or date.today())
-    # Nur ändern, was sich vom Stand in Paperless unterscheidet
-    current = doc.paperless_fields or {}
-    changed = {
-        role: v for role, v in values.items()
-        if (v.isoformat() if isinstance(v, date) else v) != current.get(role)
-    }
-    if changed:
-        write_fields(paperless, doc, settings, changed)
+def pending_changes(doc: Document, settings: Settings, today: date) -> list[tuple[str, object, object]]:
+    """Unterschiede Companion -> Paperless als (Rolle, Paperless-Wert, Vorschlag)."""
+    configured = fields.role_names(settings)
+    pf = doc.paperless_fields or {}
+    dismissed = doc.dismissed_fields or {}
+    changes = []
+    for role, value in companion_values(doc, today).items():
+        if role not in configured:
+            continue
+        new, current = _norm(value), _norm(pf.get(role))
+        if new == current or (role in dismissed and dismissed[role] == new):
+            continue
+        changes.append((role, current, new))
+    return changes
 
 
-def flush_writebacks(session: Session, paperless: PaperlessClient, settings: Settings, today: date | None = None) -> int:
-    """Schreibt alle vorgemerkten Änderungen nach Paperless."""
-    done = 0
-    for doc in session.scalars(select(Document).where(Document.writeback_pending.is_(True))):
-        if settings.writeback_enabled:
-            try:
-                writeback(paperless, doc, settings, today)
-            except PaperlessError as exc:
-                log.warning("Rückschreiben nach Paperless fehlgeschlagen (Dokument %s): %s", doc.id, exc)
-                break
-            done += 1
-        doc.writeback_pending = False
-    return done
+def mark_changed(doc: Document) -> None:
+    doc.writeback_pending = True
+
+
+def propose(doc: Document, role: str, value) -> None:
+    """Eigene Eingabe für ein Paperless-Feld vormerken (wird erst nach Zustimmung geschrieben)."""
+    proposed = dict(doc.proposed_fields or {})
+    proposed[role] = _norm(value)
+    doc.proposed_fields = proposed
+    dismissed = dict(doc.dismissed_fields or {})
+    dismissed.pop(role, None)
+    doc.dismissed_fields = dismissed
+    doc.writeback_pending = True
+
+
+def approve_changes(
+    paperless: PaperlessClient, doc: Document, settings: Settings, roles: list[str], today: date
+) -> list[str]:
+    """Schreibt die ausgewählten Vorschläge nach Paperless. Gibt nicht zuordenbare Rollen zurück."""
+    wanted = {role: new for role, _, new in pending_changes(doc, settings, today) if role in roles}
+    if not wanted:
+        return []
+    missing = write_fields(paperless, doc, settings, wanted)
+    proposed = {k: v for k, v in (doc.proposed_fields or {}).items() if k not in wanted or k in missing}
+    doc.proposed_fields = proposed or None
+    doc.writeback_pending = bool(pending_changes(doc, settings, today))
+    return missing
+
+
+def dismiss_changes(doc: Document, settings: Settings, roles: list[str], today: date) -> None:
+    """Vorschläge verwerfen; sie erscheinen erst wieder, wenn sich der Wert im Companion ändert."""
+    dismissed = dict(doc.dismissed_fields or {})
+    proposed = dict(doc.proposed_fields or {})
+    for role, _, new in pending_changes(doc, settings, today):
+        if role in roles:
+            if role in proposed:
+                proposed.pop(role)  # eigene Eingabe zurücknehmen
+            else:
+                dismissed[role] = new
+    doc.proposed_fields = proposed or None
+    doc.dismissed_fields = dismissed or None
+    doc.writeback_pending = bool(pending_changes(doc, settings, today))
+    if not doc.writeback_pending:
+        apply_paperless_fields(doc)  # Paperless-Stand wieder maßgeblich
+
+
+def documents_with_changes(session: Session, settings: Settings, today: date) -> list[tuple[Document, list]]:
+    result = []
+    for doc in session.scalars(select(Document).where(Document.writeback_pending.is_(True)).order_by(Document.id)):
+        changes = pending_changes(doc, settings, today)
+        if changes:
+            result.append((doc, changes))
+        else:
+            doc.writeback_pending = False
+    return result
 
 
 def related_ids(session: Session, doc_id: int) -> set[int]:
@@ -508,15 +569,15 @@ def process_summary(
 ) -> None:
     from app import summary  # lokal, um Importzyklen zu vermeiden
 
-    defs = ensure_fields(paperless, settings, ["summary"])
+    # Nur lesen – fehlende Felder werden hier nicht angelegt
+    defs = fields.resolve(paperless.custom_field_definitions(), settings)
     limit = (defs["summary"].text_limit if "summary" in defs else None) or summary.DEFAULT_LIMIT
     data = paperless.get_document(doc.id)
     text = summary.generate(
         ollama, doc.title, doc.correspondent, data.get("content") or "", limit, settings.summary_max_input_chars
     )
     doc.summary = text
-    if "summary" in defs:
-        write_fields(paperless, doc, settings, {"summary": text})
+    propose(doc, "summary", text)  # erst nach Zustimmung in Paperless
     doc.summary_state = "done"
 
 

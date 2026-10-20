@@ -89,41 +89,58 @@ def test_paid_in_paperless_updates_existing_invoice(db, my_settings, mock_api):
         assert s.get(Document, 30).invoice.status == "open"
 
 
-def test_writeback_uses_user_fields_and_clears_paid(db, my_settings, mock_api):
-    my_settings.writeback_enabled = True
+def no_writes(mock_api):
+    return not [c for c in mock_api.calls if c.request.method in ("PATCH", "POST", "PUT", "DELETE")]
+
+
+def test_changes_only_written_after_approval(db, my_settings, mock_api):
     names = names_for(my_settings)
     client = PaperlessClient(PAPERLESS, "x")
+    today = date(2026, 10, 20)
     mock_api.get(f"{PAPERLESS}/api/documents/20/").respond(json=meta(20, []))
     with db() as s:
         doc = pipeline.upsert_document(s, meta(20, [{"field": 40, "value": "2026-11-01"}]), names, analyze=False)
         doc.invoice.amount = 78.0
         doc.invoice.status, doc.invoice.paid_on = "paid", date(2026, 10, 15)
-        doc.writeback_pending = True
+        pipeline.mark_changed(doc)
     with db() as s:
-        assert pipeline.flush_writebacks(s, client, my_settings, date(2026, 10, 20)) == 1
-    body = patches(mock_api)[-1]["custom_fields"]
-    assert {"field": 41, "value": "2026-10-15"} in body and {"field": 1, "value": "EUR78.00"} in body
-    assert not any(c.request.method == "POST" and "custom_fields" in str(c.request.url) for c in mock_api.calls)
+        [(doc, changes)] = pipeline.documents_with_changes(s, my_settings, today)
+        assert sorted(changes) == [("amount", None, 78.0), ("paid_on", None, "2026-10-15")]  # Fälligkeit unverändert
+    assert no_writes(mock_api)
 
     with db() as s:
         doc = s.get(Document, 20)
-        assert doc.paperless_fields["paid_on"] == "2026-10-15"
-        doc.invoice.status, doc.invoice.paid_on, doc.writeback_pending = "open", None, True
+        pipeline.approve_changes(client, doc, my_settings, ["paid_on"], today)
+        assert doc.writeback_pending  # Betrag noch offen
+    body = patches(mock_api)[-1]["custom_fields"]
+    assert body == [{"field": 41, "value": "2026-10-15"}]
+
+    # Betrag verwerfen -> verschwindet, bis sich der Wert ändert
     with db() as s:
-        pipeline.flush_writebacks(s, client, my_settings, date(2026, 10, 20))
-    assert {"field": 41, "value": None} in patches(mock_api)[-1]["custom_fields"]
+        doc = s.get(Document, 20)
+        pipeline.dismiss_changes(doc, my_settings, ["amount"], today)
+        assert pipeline.pending_changes(doc, my_settings, today) == [] and not doc.writeback_pending
+        doc.invoice.amount = 80.0
+        assert pipeline.pending_changes(doc, my_settings, today) == [("amount", None, 80.0)]
+
+    # Wieder offen -> Vorschlag, „bezahlt am“ zu leeren
+    with db() as s:
+        doc = s.get(Document, 20)
+        doc.invoice.status, doc.invoice.paid_on = "open", None
+        assert ("paid_on", "2026-10-15", None) in pipeline.pending_changes(doc, my_settings, today)
+        pipeline.approve_changes(client, doc, my_settings, ["paid_on"], today)
+    assert patches(mock_api)[-1]["custom_fields"] == [{"field": 41, "value": None}]
 
 
-def test_disabled_writeback_only_clears_flag(db, my_settings, mock_api):
-    my_settings.writeback_enabled = False
+def test_unconfigured_roles_are_not_proposed(db, my_settings):
+    my_settings.field_amount = ""
     with db() as s:
-        doc = Document(id=31, title="R", suggestions={}, writeback_pending=True)
-        doc.invoice = Invoice(amount=10, status="paid", paid_on=date(2026, 1, 1))
+        doc = Document(id=31, title="R", suggestions={}, review_state="confirmed", writeback_pending=True)
+        doc.invoice = Invoice(amount=10, status="open", due_date=date(2026, 11, 1))
         s.add(doc)
     with db() as s:
-        assert pipeline.flush_writebacks(s, PaperlessClient(PAPERLESS, "x"), my_settings) == 0
-        assert not s.get(Document, 31).writeback_pending
-    assert patches(mock_api) == []
+        changes = pipeline.pending_changes(s.get(Document, 31), my_settings, date(2026, 10, 20))
+        assert [c[0] for c in changes] == ["due_date"]
 
 
 def test_related_graph(db):
@@ -147,9 +164,10 @@ def test_summary_written_to_field(db, my_settings, mock_api):
         doc = pipeline.next_summary(s)
         pipeline.process_summary(s, doc, PaperlessClient(PAPERLESS, "x"), OllamaClient(OLLAMA, "m"), my_settings)
         assert doc.summary_state == "done" and len(doc.summary) <= 128 and doc.summary.endswith("…")
+        assert pipeline.pending_changes(doc, my_settings, date(2026, 10, 20)) == [("summary", None, doc.summary)]
     prompt = json.loads(chat.calls.last.request.content)["messages"][1]["content"]
     assert "höchstens 128 Zeichen" in prompt and "Rechnungsnummer: RE-1" in prompt
-    assert {"field": 44, "value": doc.summary} in patches(mock_api)[-1]["custom_fields"]
+    assert patches(mock_api) == []  # nur vorgeschlagen
 
 
 @pytest.fixture
@@ -168,17 +186,30 @@ def test_document_page_comment_and_links(client, mock_api):
     assert "Gutachten" in page and "Als Vorgang übernehmen" in page and ">alt</textarea>" in page
 
     client.post("/documents/1/comment", data={"comment": "Rückruf am Montag"})
-    assert {"field": 42, "value": "Rückruf am Montag"} in patches(mock_api)[-1]["custom_fields"]
+    assert patches(mock_api) == []
+    assert "noch nicht in Paperless" in client.get("/documents/1").text
 
     response = client.post("/documents/1/case-from-links", follow_redirects=False)
     case_id = int(response.headers["location"].rsplit("/", 1)[1])
     with session_scope() as s:
         assert {link.document_id for link in s.get(Case, case_id).links} == {1, 2}
 
-    # Hinzufügen schreibt die Verknüpfung in „gehört zu“
-    mock_api.get(f"{PAPERLESS}/api/documents/3/").respond(json=meta(3, []))
+    # Hinzufügen schlägt die Verknüpfung in „gehört zu“ nur vor
     client.post(f"/cases/{case_id}/documents", data={"document_id": "3"})
-    assert {"field": 43, "value": [1, 2]} in patches(mock_api)[-1]["custom_fields"]
+    assert patches(mock_api) == []
+
+    page = client.get("/paperless-changes").text
+    assert "Rückruf am Montag" in page and "gehört zu" in page and "Für Paperless <span class=\"pill\">2</span>" in page
+
+    # Zustimmung für beide Vorschläge
+    mock_api.get(f"{PAPERLESS}/api/documents/3/").respond(json=meta(3, []))
+    mock_api.get(f"{PAPERLESS}/api/documents/1/").respond(json=meta(1, [{"field": 42, "value": "alt"}, {"field": 43, "value": [2]}]))
+    client.post("/paperless-changes", data={"action": "approve", "change": ["1:comment", "3:related"]})
+    bodies = patches(mock_api)
+    assert {"field": 42, "value": "Rückruf am Montag"} in bodies[0]["custom_fields"]
+    assert {"field": 43, "value": [2]} in bodies[0]["custom_fields"]  # übrige Felder bleiben erhalten
+    assert bodies[1]["custom_fields"] == [{"field": 43, "value": [1, 2]}]
+    assert "Keine Vorschläge für Paperless" in client.get("/paperless-changes").text
 
 
 def test_summary_button_queues(client):

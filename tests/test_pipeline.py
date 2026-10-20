@@ -46,13 +46,17 @@ def test_sync_and_rules_only(db, settings, mock_api):
         scan = s.get(Document, 3)
         assert (scan.kind, scan.kind_source) == ("invoice", "keyword")
 
-    # Rückschreiben der automatisch übernommenen Rechnung (gesammelt durch den Worker)
+    # Nichts wird von selbst nach Paperless geschrieben – nur vorgeschlagen
+    assert not [c for c in mock_api.calls if c.request.method in ("PATCH", "POST", "PUT", "DELETE")]
     with db() as s:
-        assert s.get(Document, 1).writeback_pending
-        assert pipeline.flush_writebacks(s, PaperlessClient(PAPERLESS, "x"), settings, date(2026, 10, 20)) == 1
-        assert not s.get(Document, 1).writeback_pending
+        rows = pipeline.documents_with_changes(s, settings, date(2026, 10, 20))
+        changes = {doc.id: ch for doc, ch in rows}
+        assert ("amount", None, 78.0) in changes[1] and ("due_date", None, "2026-10-19") in changes[1]
+
+        # Nach Zustimmung wird geschrieben
+        pipeline.approve_changes(PaperlessClient(PAPERLESS, "x"), s.get(Document, 1), settings, ["amount"], date(2026, 10, 20))
     patch = [c for c in mock_api.calls if c.request.method == "PATCH"]
-    assert patch and "/api/documents/1/" in str(patch[0].request.url)
+    assert len(patch) == 1 and "/api/documents/1/" in str(patch[0].request.url)
     body = json.loads(patch[0].request.content)
     assert {"field": 1, "value": "EUR78.00"} in body["custom_fields"]
 

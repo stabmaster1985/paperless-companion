@@ -17,7 +17,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import cases, deadlines, events, ics, notify, payments, pipeline, reminders, retention, tax
+from app import cases, deadlines, events, fields, ics, notify, payments, pipeline, reminders, retention, tax
 from app.config import Settings, get_settings
 from app.db import get_session, init_db, session_scope
 from app.models import Case, CaseDocument, CaseEntry, Contract, Document, Invoice, RetentionLog, RetentionRule, Warranty
@@ -73,7 +73,10 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     def render(request: Request, name: str, **ctx) -> HTMLResponse:
         with session_scope() as s:
             inbox_count = s.scalar(select(func.count()).select_from(Document).where(Document.review_state == "pending"))
-        return templates.TemplateResponse(request, name, {"inbox_count": inbox_count, "today": today(), **ctx})
+            outgoing = s.scalar(select(func.count()).select_from(Document).where(Document.writeback_pending.is_(True)))
+        return templates.TemplateResponse(
+            request, name, {"inbox_count": inbox_count, "outgoing_count": outgoing, "today": today(), **ctx}
+        )
 
     def check_token(expected: str, given: str | None) -> None:
         if not expected or not given or not hmac.compare_digest(expected, given):
@@ -194,14 +197,8 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         doc = session.get(Document, doc_id)
         if doc is None:
             raise HTTPException(404)
-        paperless = make_paperless(settings, timeout=15)
-        try:
-            missing = pipeline.write_fields(paperless, doc, settings, {"comment": comment.strip() or None})
-            msg = f"Feld „{settings.field_comment}“ gibt es in Paperless nicht" if missing else "Kommentar gespeichert"
-        except PaperlessError as exc:
-            msg = f"Kommentar konnte nicht gespeichert werden: {exc}"
-        finally:
-            paperless.close()
+        pipeline.propose(doc, "comment", comment.strip() or None)
+        msg = "Kommentar vorgemerkt – unter „Für Paperless“ übernehmen"
         return RedirectResponse(f"/documents/{doc_id}?msg={quote(msg)}", status_code=303)
 
     @app.post("/documents/{doc_id}/summary")
@@ -613,16 +610,59 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                 return f"Dokument {doc_id} nicht gefunden: {exc}"
             if not cases.add_document(session, case, doc):
                 return "Dokument ist bereits im Vorgang"
-            if settings.cases_write_links:
+            if settings.cases_propose_links and settings.field_related:
                 session.flush()
                 session.refresh(case)
-                try:
-                    cases.write_links(session, paperless, settings, case, doc)
-                except PaperlessError as exc:
-                    return f"Hinzugefügt, aber „{settings.field_related}“ konnte nicht gesetzt werden: {exc}"
+                cases.propose_links(case, doc)
             return ""
         finally:
             paperless.close()
+
+    # ------------------------------------------------------------------ Für Paperless (nur mit Zustimmung)
+
+    @app.get("/paperless-changes", response_class=HTMLResponse)
+    def paperless_changes(request: Request, msg: str = "", session: Session = Depends(get_session)):
+        rows = pipeline.documents_with_changes(session, settings, today())
+        names = fields.role_names(settings)
+        return render(
+            request, "paperless_changes.html", rows=rows, names=names, msg=msg, create_fields=settings.writeback_create_fields
+        )
+
+    @app.post("/paperless-changes")
+    async def paperless_changes_apply(request: Request, session: Session = Depends(get_session)):
+        form = await request.form()
+        action = form.get("action")
+        selected: dict[int, list[str]] = {}
+        for item in form.getlist("change"):
+            doc_id, _, role = str(item).partition(":")
+            if doc_id.isdigit() and role in fields.ROLES:
+                selected.setdefault(int(doc_id), []).append(role)
+        if not selected or action not in ("approve", "dismiss"):
+            return RedirectResponse(f"/paperless-changes?msg={quote('Nichts ausgewählt')}", status_code=303)
+        done, errors = 0, []
+        paperless = make_paperless(settings, timeout=30) if action == "approve" else None
+        try:
+            for doc_id, roles in selected.items():
+                doc = session.get(Document, doc_id)
+                if doc is None:
+                    continue
+                if action == "dismiss":
+                    pipeline.dismiss_changes(doc, settings, roles, today())
+                    done += len(roles)
+                    continue
+                try:
+                    missing = pipeline.approve_changes(paperless, doc, settings, roles, today())
+                    done += len(roles) - len(missing)
+                    errors += [f"#{doc_id}: Feld „{fields.role_names(settings)[r]}“ fehlt in Paperless" for r in missing]
+                except PaperlessError as exc:
+                    errors.append(f"#{doc_id}: {exc}")
+                session.flush()
+        finally:
+            if paperless:
+                paperless.close()
+        verb = "in Paperless übernommen" if action == "approve" else "verworfen"
+        msg = f"{done} Änderungen {verb}" + (f". Probleme: {'; '.join(errors[:5])}" if errors else "")
+        return RedirectResponse(f"/paperless-changes?msg={quote(msg)}", status_code=303)
 
     # ------------------------------------------------------------------ Steuer
 

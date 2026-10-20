@@ -20,6 +20,7 @@
     <a href="/tax" class="{{ 'active' if path.startswith('/tax') }}">Steuer</a>
     <a href="/retention" class="{{ 'active' if path.startswith('/retention') }}">Aufbewahrung</a>
     <a href="/documents" class="{{ 'active' if path.startswith('/documents') }}">Dokumente</a>
+    <a href="/paperless-changes" class="{{ 'active' if path.startswith('/paperless-changes') }}">Für Paperless{% if outgoing_count %} <span class="pill">{{ outgoing_count }}</span>{% endif %}</a>
     <a href="/system" class="{{ 'active' if path.startswith('/system') }}">System</a>
     {% if auth %}<form method="post" action="/logout" class="inline"><button class="link">Abmelden</button></form>{% endif %}
   </nav>
