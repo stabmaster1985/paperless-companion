@@ -29,7 +29,11 @@
 {% endif %}
 {% if sugg.get('_llm_error') and doc.extraction_state == 'done' %}
   {% set err = sugg['_llm_error'] %}
+  {% if err.deferred %}
+  <div class="notice">Bisher nur mit Regeln analysiert – die AI-Abfrage wird im AI-Zeitfenster ({{ settings.llm_active_hours }} Uhr) automatisch nachgeholt.
+  {% else %}
   <div class="notice warn">Bei der Analyse{% if err.at %} am {{ err.at[8:10] }}.{{ err.at[5:7] }}.{{ err.at[:4] }} um {{ err.at[11:16] }} (UTC){% endif %} war die AI nicht erreichbar ({{ err.value }}). Es wurden nur Regeln verwendet.
+  {% endif %}
     <form method="post" action="/documents/{{ doc.id }}/reanalyze" class="inline"><button class="small">Jetzt mit AI neu analysieren</button></form></div>
 {% endif %}
 {% if doc.review_state == 'confirmed' %}

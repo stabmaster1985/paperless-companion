@@ -44,6 +44,11 @@ class Settings(BaseSettings):
     ollama_timeout_seconds: int = 900
     llm_max_chars: int = 6000
     llm_auto_accept: bool = False
+    # Zeitfenster für die AI, z.B. "22-6" (nachts) – leer = immer. Außerhalb läuft nur die Regel-Erkennung,
+    # die AI-Abfrage wird im nächsten Zeitfenster nachgeholt.
+    llm_active_hours: str = ""
+    # CPU-Threads für Ollama (0 = Ollama entscheidet). Weniger Threads = langsamer, aber schonender.
+    ollama_num_thread: int = 0
 
     # Übernahme nach Paperless (nur nach Zustimmung auf der Seite „Für Paperless“):
     # fehlende Felder (Betrag, Fällig am …) dabei anlegen
@@ -137,6 +142,19 @@ class Settings(BaseSettings):
             for name in _split(raw):
                 mapping[name.lower()] = kind
         return mapping
+
+    def llm_allowed_at(self, hour: int) -> bool:
+        """Liegt die Stunde im AI-Zeitfenster (LLM_ACTIVE_HOURS)?"""
+        spec = self.llm_active_hours.strip()
+        if not spec:
+            return True
+        try:
+            start, end = (int(part) % 24 for part in spec.split("-", 1))
+        except ValueError:
+            return True
+        if start == end:
+            return True
+        return start <= hour < end if start < end else hour >= start or hour < end
 
     @property
     def llm_enabled(self) -> bool:

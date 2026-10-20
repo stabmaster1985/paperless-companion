@@ -185,3 +185,20 @@ details.edit[open] { margin-bottom: .5rem; }
 .badge.method-rules_ai_failed { background: var(--warn-bg); color: var(--warn); }
 .badge.method-fields { background: var(--ok-bg); color: var(--ok); }
 .badge.method-none { background: var(--bg); color: var(--muted); }
+
+/* Dokumentliste: feste Spalten, nichts ragt über den Rand */
+.doc-list { table-layout: fixed; }
+.doc-list .col-check { width: 2.4rem; }
+.doc-list .col-state { width: 15rem; }
+.doc-list td { overflow-wrap: anywhere; }
+.doc-list .meta { font-size: .8rem; color: var(--muted); margin-top: .15rem; }
+.doc-list .tags { display: flex; flex-wrap: wrap; gap: .25rem; margin-top: .3rem; }
+.doc-list .tag { white-space: normal; }
+.doc-list .badge { margin-left: 0; white-space: normal; }
+.state-line { display: flex; flex-wrap: wrap; gap: .3rem; align-items: center; }
+.state-line .kind { font-weight: 500; }
+@media (max-width: 640px) {
+  .doc-list .col-state { width: 8.5rem; }
+  .doc-list td, .doc-list th { padding: .45rem .35rem; }
+}
+.badge.method-rules_ai_deferred { background: var(--info-bg); color: var(--muted); }

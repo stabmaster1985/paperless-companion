@@ -86,9 +86,11 @@ document.getElementById('update-btn').addEventListener('click', async (e) => {
       {% if not ollama_status.reachable %}<p class="bad">✘ nicht erreichbar: {{ ollama_status.error }}</p>
       {% elif not ollama_status.model_present %}<p class="bad">✘ Modell fehlt – auf dem Ollama-Server <code>ollama pull {{ settings.ollama_model }}</code> ausführen</p>
       {% else %}<p class="ok">✔ bereit</p>{% endif %}
+      <p class="muted">AI-Zeiten: {{ settings.llm_active_hours ~ ' Uhr' if settings.llm_active_hours else 'immer' }}{% if not llm_now %} · gerade pausiert (nur Regeln){% endif %}
+        · CPU-Threads: {{ settings.ollama_num_thread or 'automatisch' }}</p>
       {% if llm_error_count %}
-      <p class="muted">{{ llm_error_count }} {{ 'Dokument wurde' if llm_error_count == 1 else 'Dokumente wurden' }} ohne AI analysiert, weil Ollama nicht erreichbar war.
-        Sie werden automatisch erneut analysiert, sobald die AI bereit ist.</p>
+      <p class="muted">{{ llm_error_count }} {{ 'Dokument wurde' if llm_error_count == 1 else 'Dokumente wurden' }} bisher nur mit Regeln analysiert (AI nicht erreichbar oder außerhalb der AI-Zeiten).
+        Die AI-Abfrage wird automatisch nachgeholt, sobald die AI bereit ist.</p>
       <form method="post" action="/system/retry-llm" class="inline"><button class="small">Jetzt mit AI neu analysieren</button></form>
       {% endif %}
       <p class="muted">Zusammenfassungen: {{ {'off': 'aus', 'manual': 'nur per Knopf', 'new': 'automatisch für neue Dokumente'}[settings.summary_mode] }}</p>
@@ -114,14 +116,26 @@ document.getElementById('update-btn').addEventListener('click', async (e) => {
 
   <div class="card">
     <h2>Warteschlange</h2>
-    <p>Wartend: {{ counts.get('queued', 0) }} · läuft: {{ counts.get('running', 0) }} · fertig: {{ counts.get('done', 0) }} · Fehler: {{ counts.get('error', 0) }}</p>
+    {% if queue_paused %}<p class="notice warn">Angehalten – es werden keine Dokumente analysiert.</p>{% endif %}
+    <p>Analysen wartend: <strong>{{ counts.get('queued', 0) }}</strong> · läuft: {{ counts.get('running', 0) }} · Zusammenfassungen wartend: {{ summaries_queued }}</p>
+    <p class="muted">Analysiert: {{ counts.get('done', 0) }} · nur im Index: {{ counts.get('skipped', 0) }} · Fehler: {{ counts.get('error', 0) }}</p>
+    <div class="actions">
+      {% if queue_paused %}
+      <form method="post" action="/system/queue/resume" class="inline"><button class="small primary">Fortsetzen</button></form>
+      {% else %}
+      <form method="post" action="/system/queue/pause" class="inline"><button class="small">Anhalten</button></form>
+      {% endif %}
+      {% if counts.get('queued', 0) or summaries_queued %}
+      <form method="post" action="/system/queue/clear" class="inline" onsubmit="return confirm('Alle wartenden Analysen und Zusammenfassungen zurücknehmen? Bereits ermittelte Werte bleiben erhalten.')"><button class="small">Warteschlange leeren</button></form>
+      {% endif %}
+    </div>
     {% if worker.current_document %}<p>Analysiert gerade Dokument <a href="/documents/{{ worker.current_document }}">#{{ worker.current_document }}</a></p>{% endif %}
     {% if worker.last_error %}<p class="bad">Letzter Fehler: {{ worker.last_error }}</p>{% endif %}
     <p class="muted">Erkennung: Version {{ analysis_version }}{% if outdated_count %} · {{ outdated_count }} nicht bestätigte {{ 'Dokument wurde' if outdated_count == 1 else 'Dokumente wurden' }} mit einer älteren Version analysiert{% endif %}</p>
     {% if outdated_count %}
     <form method="post" action="/system/reanalyze-outdated" class="inline"><button class="small">Mit aktueller Erkennung neu analysieren</button></form>
     {% endif %}
-    <p class="muted">Weitere Dokumente gezielt analysieren: unter <a href="/documents?state=skipped">Dokumente</a> nach Tag, Typ, Zeitraum oder IDs filtern.</p>
+    <p class="muted">Weitere Dokumente gezielt analysieren: unter <a href="/documents?view=index">Dokumente → Nur Index</a> nach Tag, Typ, Zeitraum oder IDs filtern.</p>
     <form method="post" action="/system/import" class="inline-form">
       <input type="number" name="doc_id" placeholder="Paperless-ID" required>
       <button class="small">Dokument einlesen</button>

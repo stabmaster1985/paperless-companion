@@ -263,6 +263,14 @@ analysieren“** oder per Häkchen werden die Dokumente in die Warteschlange ges
 bestätigte Dokumente werden dabei übersprungen, außer du setzt das Häkchen „auch bereits
 bestätigte“.
 
+**Last begrenzen:** Analysiert werden automatisch nur neue und kürzlich geänderte Dokumente,
+alles andere erst nach deiner Auswahl. Die AI wird nur für Felder gefragt, die die Regeln nicht
+sicher finden. Zusätzlich gibt es drei Bremsen:
+- `LLM_ACTIVE_HOURS=22-6`: Die AI läuft nur nachts, tagsüber arbeiten nur die Regeln.
+- `OLLAMA_NUM_THREAD=2`: Ollama nutzt höchstens zwei CPU-Threads.
+- Unter **System → Warteschlange** kannst du die Analyse **anhalten** oder die Warteschlange
+  **leeren**.
+
 **Methode:** Die Spalte zeigt, womit die Werte ermittelt wurden: *Regeln*, *Regeln + AI*,
 *nur Regeln (AI nicht erreichbar)*, *aus Paperless-Feldern* oder *nicht analysiert*. Auf der
 Dokumentseite steht an jedem Feld außerdem die Quelle mit der Sicherheit.

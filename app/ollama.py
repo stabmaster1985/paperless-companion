@@ -17,11 +17,13 @@ class OllamaClient:
         keep_alive: str = "2m",
         num_ctx: int = 4096,
         timeout: float = 900.0,
+        num_thread: int = 0,
         transport: httpx.BaseTransport | None = None,
     ):
         self.model = model
         self.keep_alive = keep_alive
         self.num_ctx = num_ctx
+        self.num_thread = num_thread
         self._client = httpx.Client(base_url=base_url.rstrip("/"), timeout=timeout, transport=transport)
 
     def close(self) -> None:
@@ -47,6 +49,8 @@ class OllamaClient:
             "keep_alive": self.keep_alive,
             "options": {"temperature": 0, "num_ctx": self.num_ctx},
         }
+        if self.num_thread:
+            payload["options"]["num_thread"] = self.num_thread
         try:
             response = self._client.post("/api/chat", json=payload)
             response.raise_for_status()

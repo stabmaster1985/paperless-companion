@@ -101,3 +101,12 @@ def test_retry_llm_button(client):
     client.post("/system/retry-llm")
     with scope() as s:
         assert s.get(Document, 2).extraction_state == "queued"
+
+
+def test_pause_resume_queue(client):
+    client.post("/system/queue/pause")
+    page = client.get("/system").text
+    assert "Angehalten" in page and "Fortsetzen" in page
+    assert client.app.state.worker.paused()
+    client.post("/system/queue/resume")
+    assert not client.app.state.worker.paused()

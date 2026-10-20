@@ -314,6 +314,7 @@ def process_document(
     paperless: PaperlessClient,
     ollama: OllamaClient | None,
     settings: Settings,
+    llm_allowed: bool = True,
 ) -> None:
     data = paperless.get_document(doc.id)
     text = data.get("content") or ""
@@ -329,7 +330,14 @@ def process_document(
         if kind == "invoice":
             _inject_paperless_fields(doc, sugg)
         wanted = _missing(kind, sugg)
-        if ollama is not None and wanted:
+        if ollama is not None and wanted and not llm_allowed:
+            # Außerhalb des AI-Zeitfensters: nur Regeln, AI wird im nächsten Fenster nachgeholt
+            sugg["_llm_error"] = {
+                "value": f"AI pausiert außerhalb der AI-Zeiten ({settings.llm_active_hours} Uhr)", "confidence": 0,
+                "source": "llm", "at": datetime.now(timezone.utc).isoformat(timespec="minutes"),
+                "attempts": 0, "deferred": True,
+            }
+        elif ollama is not None and wanted:
             try:
                 found = llm.extract(ollama, kind, text, wanted, settings.llm_max_chars)
             except OllamaError as exc:
@@ -595,6 +603,7 @@ METHODS = {
     "rules_ai": "Regeln + AI",
     "rules": "Regeln",
     "rules_ai_failed": "nur Regeln (AI nicht erreichbar)",
+    "rules_ai_deferred": "nur Regeln (AI folgt im AI-Zeitfenster)",
     "fields": "aus Paperless-Feldern",
     "none": "nicht analysiert",
 }
@@ -606,7 +615,7 @@ def analysis_method(doc: Document) -> str:
         return "fields" if doc.kind_source == "fields" else "none"
     sugg = doc.suggestions or {}
     if "_llm_error" in sugg:
-        return "rules_ai_failed"
+        return "rules_ai_deferred" if sugg["_llm_error"].get("deferred") else "rules_ai_failed"
     if any(isinstance(v, dict) and v.get("source") == "llm" for k, v in sugg.items() if not k.startswith("_")):
         return "rules_ai"
     if doc.kind_source == "fields" and not doc.analyzed_at:
@@ -638,6 +647,18 @@ def documents_with_llm_error(session: Session, include_exhausted: bool = False) 
         ):
             result.append(doc)
     return result
+
+
+def clear_queue(session: Session) -> int:
+    """Wartende Analysen und Zusammenfassungen zurücknehmen (nichts geht verloren)."""
+    count = 0
+    for doc in session.scalars(select(Document).where(Document.extraction_state == "queued")):
+        doc.extraction_state = "done" if doc.analyzed_at or doc.suggestions else "skipped"
+        count += 1
+    for doc in session.scalars(select(Document).where(Document.summary_state == "queued")):
+        doc.summary_state = None
+        count += 1
+    return count
 
 
 def requeue_llm_errors(session: Session, include_exhausted: bool = False) -> int:

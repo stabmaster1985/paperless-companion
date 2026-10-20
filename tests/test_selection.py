@@ -41,7 +41,7 @@ def test_filter(db):
         add(s, 2, tags=["Haus"], document_type="Vertrag", created=date(2025, 6, 1))
         add(s, 3, tags=["steuer"], created=date(2026, 1, 1))
     with db() as s:
-        ids = lambda **kw: sorted(d.id for d in Filter(**kw).apply(s))
+        ids = lambda **kw: sorted(d.id for d in Filter(**{"view": "all", **kw}).apply(s))
         assert ids(tag="Steuer") == [1, 3]
         assert ids(doctype="Vertrag") == [2]
         assert ids(correspondent="Stadtwerke") == [1]
@@ -64,10 +64,14 @@ def client(settings, mock_api):
 
 
 def test_documents_page_and_bulk_analyze(client):
-    page = client.get("/documents?tag=Steuer").text
-    assert "2 Dokumente" in page and "nicht analysiert" in page and "Dok 12" not in page
+    # Standardansicht zeigt nur Bearbeitetes, nicht den reinen Index
+    default = client.get("/documents").text
+    assert "Dok 10" not in default and "Dok 11" in default
+    page = client.get("/documents?view=index&tag=Steuer").text
+    assert "1 Dokument" in page and "nicht analysiert" in page and "Dok 12" not in page
 
-    response = client.post("/documents/analyze", data={"scope": "filter", "tag": "Steuer"}, follow_redirects=False)
+    response = client.post("/documents/analyze", data={"scope": "filter", "tag": "Steuer", "view": "all"},
+                           follow_redirects=False)
     assert "tag=Steuer" in response.headers["location"] and "best%C3%A4tigte" in response.headers["location"]
     with session_scope() as s:
         assert s.get(Document, 10).extraction_state == "queued"

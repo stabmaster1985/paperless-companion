@@ -251,6 +251,21 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                 cases.add_document(session, case, session.get(Document, other_id))
         return RedirectResponse(f"/cases/{case.id}", status_code=303)
 
+    @app.post("/system/queue/{action}")
+    def system_queue(action: str, session: Session = Depends(get_session)):
+        if action == "pause":
+            pipeline.kv_set(session, "queue_paused", "1")
+            msg = "Warteschlange angehalten – laufende Analyse wird noch beendet"
+        elif action == "resume":
+            pipeline.kv_set(session, "queue_paused", "0")
+            request_worker(app)
+            msg = "Warteschlange läuft weiter"
+        elif action == "clear":
+            msg = f"{pipeline.clear_queue(session)} wartende Aufträge zurückgenommen"
+        else:
+            raise HTTPException(404)
+        return RedirectResponse(f"/system?msg={quote(msg)}", status_code=303)
+
     @app.post("/system/reanalyze-outdated")
     def system_reanalyze_outdated(session: Session = Depends(get_session)):
         docs = pipeline.outdated_documents(session)
@@ -402,6 +417,9 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             last_sync=pipeline.kv_get(session, "last_sync"), channels=notify.channels(settings),
             version=app.state.version.get(), llm_error_count=len(pipeline.documents_with_llm_error(session, True)),
             outdated_count=len(pipeline.outdated_documents(session)), analysis_version=pipeline.ANALYSIS_VERSION,
+            queue_paused=pipeline.kv_get(session, "queue_paused") == "1",
+            summaries_queued=session.scalar(select(func.count()).select_from(Document).where(Document.summary_state == "queued")),
+            llm_now=settings.llm_allowed_at(datetime.now(ZoneInfo(settings.timezone)).hour),
         )
 
     @app.post("/system/version-check")

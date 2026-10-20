@@ -38,6 +38,7 @@ def make_ollama(settings: Settings) -> OllamaClient | None:
         keep_alive=settings.ollama_keep_alive,
         num_ctx=settings.ollama_num_ctx,
         timeout=settings.ollama_timeout_seconds,
+        num_thread=settings.ollama_num_thread,
     )
 
 
@@ -133,7 +134,7 @@ class Worker:
 
     def _retry_llm_errors(self, ollama: OllamaClient | None) -> None:
         """Ist Ollama (wieder) erreichbar, Dokumente erneut analysieren, bei denen die AI fehlte."""
-        if ollama is None or time.monotonic() - self._last_llm_retry < 600:
+        if ollama is None or time.monotonic() - self._last_llm_retry < 600 or not self.llm_allowed_now():
             return
         self._last_llm_retry = time.monotonic()
         with session_scope() as session:
@@ -174,7 +175,7 @@ class Worker:
 
     def _summarize_next(self, paperless: PaperlessClient, ollama: OllamaClient | None) -> bool:
         """Eine Zusammenfassung erzeugen – erst wenn keine Analyse mehr wartet."""
-        if ollama is None:
+        if ollama is None or self.paused() or not self.llm_allowed_now():
             return False
         with session_scope() as session:
             doc = pipeline.next_summary(session)
@@ -196,7 +197,16 @@ class Worker:
             self.current_document = None
         return True
 
+    def llm_allowed_now(self) -> bool:
+        return self.settings.llm_allowed_at(datetime.now(self.tz).hour)
+
+    def paused(self) -> bool:
+        with session_scope() as session:
+            return pipeline.kv_get(session, "queue_paused") == "1"
+
     def _process_next(self, paperless: PaperlessClient, ollama: OllamaClient | None) -> bool:
+        if self.paused():
+            return False
         with session_scope() as session:
             doc = pipeline.next_queued(session)
             if doc is None:
@@ -207,7 +217,9 @@ class Worker:
         try:
             with session_scope() as session:
                 doc = session.get(Document, doc_id)
-                pipeline.process_document(session, doc, paperless, ollama, self.settings)
+                pipeline.process_document(
+                    session, doc, paperless, ollama, self.settings, llm_allowed=self.llm_allowed_now()
+                )
         except Exception as exc:  # noqa: BLE001
             log.warning("Analyse von Dokument %s fehlgeschlagen: %s", doc_id, exc)
             with session_scope() as session:

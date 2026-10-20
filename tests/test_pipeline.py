@@ -183,3 +183,48 @@ def test_llm_errors_are_retried_when_ai_is_back(db, settings, mock_api):
     run_all(db, settings, ollama)
     with db() as s:
         assert "_llm_error" not in s.get(Document, 2).suggestions
+
+
+def test_llm_active_hours(settings):
+    settings.llm_active_hours = "22-6"
+    assert settings.llm_allowed_at(23) and settings.llm_allowed_at(3)
+    assert not settings.llm_allowed_at(6) and not settings.llm_allowed_at(14)
+    settings.llm_active_hours = "9-17"
+    assert settings.llm_allowed_at(9) and not settings.llm_allowed_at(17)
+    settings.llm_active_hours = ""
+    assert settings.llm_allowed_at(12)
+
+
+def test_outside_ai_hours_rules_only_and_deferred(db, settings, mock_api):
+    settings.llm_active_hours = "22-6"
+    chat = mock_api.post(f"{OLLAMA}/api/chat").respond(json={"message": {"content": "{}"}})
+    paperless = PaperlessClient(PAPERLESS, "x")
+    ollama = OllamaClient(OLLAMA, "m", num_thread=2)
+    with db() as s:
+        pipeline.sync(s, paperless, settings)
+    with db() as s:
+        while (doc := pipeline.next_queued(s)) is not None:
+            pipeline.process_document(s, doc, paperless, ollama, settings, llm_allowed=False)
+    assert not chat.called
+    with db() as s:
+        doc = s.get(Document, 2)
+        assert doc.suggestions["_llm_error"]["deferred"]
+        assert pipeline.analysis_method(doc) == "rules_ai_deferred"
+        assert 2 in [d.id for d in pipeline.documents_with_llm_error(s)]  # wird im Zeitfenster nachgeholt
+        pipeline.requeue_llm_errors(s)
+    with db() as s:
+        while (doc := pipeline.next_queued(s)) is not None:
+            pipeline.process_document(s, doc, paperless, ollama, settings, llm_allowed=True)
+    assert chat.called and json.loads(chat.calls.last.request.content)["options"]["num_thread"] == 2
+
+
+def test_clear_queue(db):
+    with db() as s:
+        s.add(Document(id=1, title="a", suggestions={}, extraction_state="queued"))
+        s.add(Document(id=2, title="b", suggestions={"amount": {}}, extraction_state="queued"))
+        s.add(Document(id=3, title="c", suggestions={}, extraction_state="done", summary_state="queued"))
+    with db() as s:
+        assert pipeline.clear_queue(s) == 3
+    with db() as s:
+        assert [s.get(Document, i).extraction_state for i in (1, 2, 3)] == ["skipped", "done", "done"]
+        assert s.get(Document, 3).summary_state is None

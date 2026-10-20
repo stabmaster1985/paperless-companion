@@ -44,6 +44,8 @@ class Filter:
     date_from: str = ""
     date_to: str = ""
     ids: str = ""
+    # analyzed (Standard: analysiert, in Arbeit oder aus Paperless-Feldern) | index (nur Index) | all
+    view: str = ""
     errors: list[str] = field(default_factory=list)
 
     @classmethod
@@ -52,7 +54,14 @@ class Filter:
 
     @property
     def active(self) -> bool:
-        return any(getattr(self, k) for k in self.__dataclass_fields__ if k != "errors")
+        return any(getattr(self, k) for k in self.__dataclass_fields__ if k not in ("errors", "view"))
+
+    @property
+    def effective_view(self) -> str:
+        # Ein ausdrücklicher Status- oder ID-Filter gilt über alle Dokumente
+        if self.state or self.ids:
+            return "all"
+        return self.view if self.view in ("index", "all") else "analyzed"
 
     def query_string(self) -> str:
         from urllib.parse import urlencode
@@ -68,6 +77,11 @@ class Filter:
             query = query.where(Document.kind == self.kind)
         if self.state:
             query = query.where(Document.extraction_state == self.state)
+        view = self.effective_view
+        if view == "index":
+            query = query.where(Document.extraction_state == "skipped", Document.kind_source != "fields")
+        elif view == "analyzed":
+            query = query.where((Document.extraction_state != "skipped") | (Document.kind_source == "fields"))
         if self.doctype:
             query = query.where(Document.document_type == self.doctype)
         if self.correspondent:
