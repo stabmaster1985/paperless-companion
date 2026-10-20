@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% from "macros.html" import doclink %}
+{% block content %}
+<div class="head">
+  <h1>Steuer {{ year }}</h1>
+  <form method="get" class="filters">
+    <select name="year" onchange="this.form.submit()" aria-label="Jahr">
+      {% for y in years %}<option value="{{ y }}" {{ 'selected' if y == year }}>{{ y }}</option>{% endfor %}
+    </select>
+    <noscript><button class="small">Anzeigen</button></noscript>
+  </form>
+</div>
+<p class="muted">Steuerrelevant sind Dokumente mit dem Tag {% for t in settings.tax_tags.split(',') %}„{{ t.strip() }}“{{ ', ' if not loop.last }}{% endfor %}
+  (Kategorie per Tag wie „Steuer: Werbungskosten“, sonst der Dokumenttyp){% if settings.tax_doctypes %} sowie die Dokumenttypen {{ settings.tax_doctypes }}{% endif %}.
+  Das Jahr richtet sich nach dem Dokumentdatum und lässt sich pro Dokument ändern.</p>
+
+{% if groups %}
+<div class="actions">
+  <a class="button primary" href="/tax/export?year={{ year }}">ZIP herunterladen ({{ count }} Dokumente)</a>
+</div>
+{% for category, group in groups|dictsort %}
+<h2>{{ category }} <small>· {{ group['items']|length }} Dokumente{% if group.with_amount %} · {{ group.sum|eur }}{% endif %}</small></h2>
+<div class="table-wrap"><table class="list">
+  <thead><tr><th>Dokument</th><th>Datum</th><th>Betrag</th><th class="hide-sm">Steuerjahr</th></tr></thead>
+  <tbody>
+  {% for item in group['items'] %}
+    <tr>
+      <td><a href="/documents/{{ item.doc.id }}">{{ item.doc.title }}</a> {{ doclink(item.doc.id) }}<br><small>{{ item.doc.correspondent or '' }}</small></td>
+      <td class="nowrap">{{ item.doc.created|d }}</td>
+      <td class="nowrap">{{ item.amount|eur }}</td>
+      <td class="hide-sm">
+        <form method="post" action="/documents/{{ item.doc.id }}/tax-year" class="inline">
+          <input type="hidden" name="back" value="/tax?year={{ year }}">
+          <select name="tax_year" onchange="this.form.submit()" aria-label="Steuerjahr">
+            <option value="">{{ item.doc.created.year if item.doc.created else '–' }} (Dokumentdatum)</option>
+            {% for y in [year - 1, year, year + 1] %}<option value="{{ y }}" {{ 'selected' if item.doc.tax_year == y }}>{{ y }}</option>{% endfor %}
+            <option value="0">nicht exportieren</option>
+          </select>
+          <noscript><button class="small">OK</button></noscript>
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endfor %}
+{% else %}
+<p class="empty">Keine steuerrelevanten Dokumente für {{ year }}. Vergib in Paperless den Tag „{{ settings.tax_tags.split(',')[0].strip() }}“ – nach dem nächsten Abgleich erscheinen die Dokumente hier.</p>
+{% endif %}
+
+{% if excluded %}
+<details class="card">
+  <summary>Vom Export ausgeschlossen ({{ excluded|length }})</summary>
+  <ul class="plain">
+  {% for doc in excluded %}
+    <li><a href="/documents/{{ doc.id }}">{{ doc.title }}</a> ({{ doc.created|d }})
+      <form method="post" action="/documents/{{ doc.id }}/tax-year" class="inline">
+        <input type="hidden" name="back" value="/tax?year={{ year }}"><input type="hidden" name="tax_year" value="">
+        <button class="small link">wieder aufnehmen</button>
+      </form></li>
+  {% endfor %}
+  </ul>
+</details>
+{% endif %}
+{% endblock %}

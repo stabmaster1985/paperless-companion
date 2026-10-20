@@ -1,4 +1,5 @@
 import hmac
+import tempfile
 import logging
 import re
 from contextlib import asynccontextmanager
@@ -8,14 +9,15 @@ from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
+from starlette.background import BackgroundTask
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import deadlines, events, ics, notify, pipeline, reminders, retention
+from app import deadlines, events, ics, notify, pipeline, reminders, retention, tax
 from app.config import Settings, get_settings
 from app.db import get_session, init_db, session_scope
 from app.models import Contract, Document, Invoice, RetentionLog, RetentionRule, Warranty
@@ -399,6 +401,46 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             raise HTTPException(404)
         doc.retention_hold = hold == "1"
         return RedirectResponse(f"/documents/{doc_id}", status_code=303)
+
+    # ------------------------------------------------------------------ Steuer
+
+    @app.get("/tax", response_class=HTMLResponse)
+    def tax_page(request: Request, year: int | None = None, session: Session = Depends(get_session)):
+        years = tax.available_years(session, settings)
+        if year is None:
+            year = today().year - 1 if (today().year - 1) in years or not years else years[0]
+        items = tax.collect(session, year, settings)
+        return render(
+            request, "tax.html", year=year, years=sorted(set(years) | {year}, reverse=True),
+            groups=tax.grouped(items), count=len(items), excluded=tax.excluded(session, settings), settings=settings,
+        )
+
+    @app.get("/tax/export")
+    def tax_export(year: int, session: Session = Depends(get_session)):
+        items = tax.collect(session, year, settings)
+        if not items:
+            raise HTTPException(404, f"Keine steuerrelevanten Dokumente für {year}")
+        buffer = tempfile.SpooledTemporaryFile(max_size=50 * 1024 * 1024, dir=settings.data_dir)
+        paperless = make_paperless(settings, timeout=120)
+        try:
+            tax.build_zip(items, year, paperless, buffer)
+        finally:
+            paperless.close()
+        buffer.seek(0)
+        return StreamingResponse(
+            iter(lambda: buffer.read(64 * 1024), b""),
+            media_type="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="Steuer_{year}.zip"'},
+            background=BackgroundTask(buffer.close),
+        )
+
+    @app.post("/documents/{doc_id}/tax-year")
+    def document_tax_year(doc_id: int, tax_year: str = Form(""), back: str = Form(""), session: Session = Depends(get_session)):
+        doc = session.get(Document, doc_id)
+        if doc is None:
+            raise HTTPException(404)
+        doc.tax_year = int(tax_year) if tax_year.strip().isdigit() else None
+        return RedirectResponse(back if back.startswith("/") else f"/documents/{doc_id}", status_code=303)
 
     # ------------------------------------------------------------------ API
 

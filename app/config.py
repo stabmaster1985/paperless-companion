@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     # Rückschreiben in Paperless-Custom-Fields
     writeback_enabled: bool = False
 
+    # Steuer-Export: Tags (auch „Steuer: Kategorie“) und Dokumenttypen, die steuerrelevant sind
+    tax_tags: str = "Steuer"
+    tax_doctypes: str = ""
+
     # Aufbewahrung
     retention_tag: str = "Löschkandidat"
     retention_delete_enabled: bool = False
@@ -76,6 +80,14 @@ class Settings(BaseSettings):
     @property
     def reminder_day_list(self) -> list[int]:
         return sorted({int(d) for d in _split(self.reminder_days)}, reverse=True)
+
+    @property
+    def tax_tag_list(self) -> list[str]:
+        return [t.lower() for t in _split(self.tax_tags)]
+
+    @property
+    def tax_doctype_list(self) -> list[str]:
+        return [t.lower() for t in _split(self.tax_doctypes)]
 
     def doctype_map(self) -> dict[str, str]:
         mapping: dict[str, str] = {}

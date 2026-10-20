@@ -39,6 +39,8 @@ class Document(Base):
     # none | pending | confirmed
     review_state: Mapped[str] = mapped_column(String, default="none")
     auto_confirmed: Mapped[bool] = mapped_column(default=False)
+    # Steuerjahr-Überschreibung: None = Jahr des Dokumentdatums, 0 = nicht im Steuer-Export
+    tax_year: Mapped[int | None] = mapped_column(Integer)
     # Aufbewahrung: niemals zur Löschung vorschlagen
     retention_hold: Mapped[bool] = mapped_column(default=False, server_default="0")
 
