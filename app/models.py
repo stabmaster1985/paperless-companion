@@ -1,6 +1,6 @@
 from datetime import date, datetime, timezone
 
-from sqlalchemy import JSON, Date, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Date, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -162,3 +162,26 @@ class RetentionLog(Base):
     action: Mapped[str] = mapped_column(String)
     rule: Mapped[str | None] = mapped_column(String)
     at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class PaymentMatch(Base):
+    """Zuordnung einer Firefly-Buchung zu einer Rechnung."""
+
+    __tablename__ = "payment_matches"
+    __table_args__ = (UniqueConstraint("invoice_id", "tx_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    invoice_id: Mapped[int] = mapped_column(ForeignKey("invoices.id", ondelete="CASCADE"))
+    tx_id: Mapped[str] = mapped_column(String)
+    tx_group_id: Mapped[str] = mapped_column(String)
+    tx_date: Mapped[date] = mapped_column(Date)
+    amount: Mapped[float] = mapped_column(Float)
+    counterparty: Mapped[str] = mapped_column(String, default="")
+    description: Mapped[str] = mapped_column(String, default="")
+    score: Mapped[int] = mapped_column(Integer)
+    reasons: Mapped[str] = mapped_column(String, default="")
+    # suggested | accepted | rejected
+    state: Mapped[str] = mapped_column(String, default="suggested")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    invoice: Mapped[Invoice] = relationship()

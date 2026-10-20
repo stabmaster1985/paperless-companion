@@ -25,6 +25,18 @@
   </div>
 
   <div class="card">
+    <h2>Firefly III</h2>
+    {% if firefly_status is none %}
+      <p class="muted">Nicht konfiguriert. Mit <code>FIREFLY_URL</code> und <code>FIREFLY_TOKEN</code> werden offene Rechnungen stündlich mit deinen Abbuchungen abgeglichen.</p>
+    {% elif firefly_status.ok %}
+      <p>{{ settings.firefly_url }}</p><p class="ok">✔ verbunden (Version {{ firefly_status.version }})</p>
+      <p class="muted">Automatische Übernahme eindeutiger Treffer: {{ 'an' if settings.firefly_auto_accept else 'aus' }}</p>
+    {% else %}
+      <p>{{ settings.firefly_url }}</p><p class="bad">✘ {{ firefly_status.error }}</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
     <h2>Warteschlange</h2>
     <p>Wartend: {{ counts.get('queued', 0) }} · läuft: {{ counts.get('running', 0) }} · fertig: {{ counts.get('done', 0) }} · Fehler: {{ counts.get('error', 0) }}</p>
     {% if worker.current_document %}<p>Analysiert gerade Dokument <a href="/documents/{{ worker.current_document }}">#{{ worker.current_document }}</a></p>{% endif %}

@@ -8,10 +8,11 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import update
 
-from app import pipeline, reminders
+from app import payments, pipeline, reminders
 from app.config import Settings
 from app.db import session_scope
 from app.models import Document
+from app.firefly import FireflyClient, FireflyError
 from app.ollama import OllamaClient
 from app.paperless import PaperlessClient, PaperlessError
 
@@ -20,6 +21,12 @@ log = logging.getLogger(__name__)
 
 def make_paperless(settings: Settings, timeout: float = 30.0) -> PaperlessClient:
     return PaperlessClient(settings.paperless_url, settings.paperless_token, timeout=timeout)
+
+
+def make_firefly(settings: Settings) -> FireflyClient | None:
+    if not settings.firefly_enabled:
+        return None
+    return FireflyClient(settings.firefly_url, settings.firefly_token)
 
 
 def make_ollama(settings: Settings) -> OllamaClient | None:
@@ -42,6 +49,7 @@ class Worker:
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name="companion-worker", daemon=True)
         self._last_sync = 0.0
+        self._last_payments = -3600.0
         self.sync_requested = True
         self.current_document: int | None = None
         self.last_error: str | None = None
@@ -71,6 +79,7 @@ class Worker:
                     self._last_sync = time.monotonic()
                     self._sync(paperless)
                 self._index_sync(paperless)
+                self._payments()
                 self._reminders()
                 worked = self._process_next(paperless, ollama)
             except Exception as exc:  # noqa: BLE001 - Thread darf nicht sterben
@@ -113,6 +122,23 @@ class Worker:
                 # Nicht in jeder Schleife erneut versuchen – in einer Stunde wieder
                 retry = datetime.now(timezone.utc) - timedelta(hours=23)
                 pipeline.kv_set(session, "last_index_sync", retry.isoformat())
+
+    def _payments(self) -> None:
+        """Stündlich offene Rechnungen mit Firefly-III-Buchungen abgleichen."""
+        if not self.settings.firefly_enabled or time.monotonic() - self._last_payments < 3600:
+            return
+        self._last_payments = time.monotonic()
+        client = make_firefly(self.settings)
+        try:
+            with session_scope() as session:
+                counts = payments.run(session, client, self.settings, datetime.now(self.tz).date())
+            if any(counts.values()):
+                log.info("Zahlungsabgleich: %s", counts)
+        except FireflyError as exc:
+            log.warning("Zahlungsabgleich fehlgeschlagen: %s", exc)
+            self.last_error = str(exc)
+        finally:
+            client.close()
 
     def _process_next(self, paperless: PaperlessClient, ollama: OllamaClient | None) -> bool:
         with session_scope() as session:

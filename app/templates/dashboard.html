@@ -4,7 +4,7 @@
 <h1>Übersicht</h1>
 <section class="stats">
   <a class="stat" href="/inbox"><span class="num">{{ inbox_count }}</span><span>zu prüfen</span></a>
-  <a class="stat {{ 'warn' if stats.overdue }}" href="/invoices"><span class="num">{{ stats.open_sum|eur }}</span><span>{{ stats.open_count }} offene Rechnungen{% if stats.overdue %}, {{ stats.overdue }} überfällig{% endif %}</span></a>
+  <a class="stat {{ 'warn' if stats.overdue }}" href="/invoices"><span class="num">{{ stats.open_sum|eur }}</span><span>{{ stats.open_count }} offene Rechnungen{% if stats.overdue %}, {{ stats.overdue }} überfällig{% endif %}{% if stats.payment_suggestions %}, {{ stats.payment_suggestions }} Zahlungen gefunden{% endif %}</span></a>
   <a class="stat" href="/contracts"><span class="num">{{ stats.fixed_costs|eur }}</span><span>Fixkosten / Monat ({{ stats.contracts }} Verträge)</span></a>
   <a class="stat" href="/documents?state=queued"><span class="num">{{ stats.queued }}</span><span>in Analyse</span></a>
 </section>

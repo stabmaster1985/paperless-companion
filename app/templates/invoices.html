@@ -1,7 +1,35 @@
 {% extends "base.html" %}
 {% from "macros.html" import doclink %}
 {% block content %}
-<h1>Rechnungen</h1>
+<div class="head">
+  <h1>Rechnungen</h1>
+  {% if firefly_enabled %}<form method="post" action="/payments/run" class="inline"><button class="small">Mit Firefly III abgleichen</button></form>{% endif %}
+</div>
+{% if msg %}<div class="notice">{{ msg }}</div>{% endif %}
+{% if matches %}
+<section class="card">
+  <h2>Zahlungen gefunden ({{ matches|length }})</h2>
+  <p class="muted">Diese Abbuchungen aus Firefly III passen zu offenen Rechnungen.</p>
+  <div class="table-wrap"><table class="list">
+    <thead><tr><th>Rechnung</th><th>Buchung</th><th class="hide-sm">Treffer</th><th></th></tr></thead>
+    <tbody>
+    {% for m in matches %}
+      <tr>
+        <td><a href="/documents/{{ m.invoice.document_id }}">{{ m.invoice.issuer or m.invoice.document.title }}</a><br>
+          <small>{{ m.invoice.amount|eur }}{% if m.invoice.invoice_number %} · Nr. {{ m.invoice.invoice_number }}{% endif %} · fällig {{ m.invoice.due_date|d }}</small></td>
+        <td>{{ m.tx_date|d }} · {{ m.amount|eur }}<br>
+          <small>{% if firefly_link %}<a href="{{ firefly_link(m.tx_group_id) }}" target="_blank" rel="noopener">{{ m.counterparty or 'Buchung' }} ↗</a>{% else %}{{ m.counterparty }}{% endif %} – {{ m.description }}</small></td>
+        <td class="hide-sm"><span class="badge {{ 'low' if m.score < 90 }}">{{ m.reasons }}</span></td>
+        <td class="nowrap">
+          <form method="post" action="/payments/{{ m.id }}/accept" class="inline"><button class="small primary">Bezahlt</button></form>
+          <form method="post" action="/payments/{{ m.id }}/reject" class="inline"><button class="small link">passt nicht</button></form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</section>
+{% endif %}
 <nav class="tabs">
   <a href="/invoices?status=open" class="{{ 'active' if status == 'open' }}">Offen</a>
   <a href="/invoices?status=paid" class="{{ 'active' if status == 'paid' }}">Bezahlt</a>

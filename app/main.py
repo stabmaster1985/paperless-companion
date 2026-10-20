@@ -17,12 +17,13 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import deadlines, events, ics, notify, pipeline, reminders, retention, tax
+from app import deadlines, events, ics, notify, payments, pipeline, reminders, retention, tax
 from app.config import Settings, get_settings
 from app.db import get_session, init_db, session_scope
 from app.models import Contract, Document, Invoice, RetentionLog, RetentionRule, Warranty
 from app.paperless import PaperlessError
-from app.worker import Worker, make_ollama, make_paperless
+from app.firefly import FireflyError
+from app.worker import Worker, make_firefly, make_ollama, make_paperless
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger(__name__)
@@ -108,6 +109,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             "open_count": len([i for i in open_invoices if i.payment_method != "debit"]),
             "overdue": len([e for e in all_events if e.type == "overdue"]),
             "fixed_costs": events.monthly_fixed_costs(session),
+            "payment_suggestions": len(payments.suggestions(session)),
             "contracts": session.scalar(select(func.count()).select_from(Contract).where(Contract.status == "active")),
             "queued": session.scalar(
                 select(func.count()).select_from(Document).where(Document.extraction_state.in_(("queued", "running")))
@@ -211,11 +213,45 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         return RedirectResponse("/contracts", status_code=303)
 
     @app.get("/invoices", response_class=HTMLResponse)
-    def invoices(request: Request, status: str = "open", session: Session = Depends(get_session)):
+    def invoices(request: Request, status: str = "open", msg: str = "", session: Session = Depends(get_session)):
         query = select(Invoice).order_by(Invoice.due_date.asc().nulls_last())
         if status in ("open", "paid"):
             query = query.where(Invoice.status == status)
-        return render(request, "invoices.html", invoices=session.scalars(query).all(), status=status)
+        firefly = make_firefly(settings)
+        firefly_link = firefly.link if firefly else None
+        if firefly:
+            firefly.close()
+        return render(
+            request, "invoices.html", invoices=session.scalars(query).all(), status=status,
+            matches=payments.suggestions(session), firefly_link=firefly_link, msg=msg,
+            firefly_enabled=settings.firefly_enabled,
+        )
+
+    @app.post("/payments/run")
+    def payments_run(session: Session = Depends(get_session)):
+        client = make_firefly(settings)
+        if client is None:
+            return RedirectResponse(f"/invoices?msg={quote('Firefly III ist nicht konfiguriert')}", status_code=303)
+        try:
+            counts = payments.run(session, client, settings, today())
+            msg = f"Abgleich fertig: {counts['suggested']} Vorschläge, {counts['accepted']} automatisch als bezahlt markiert"
+        except FireflyError as exc:
+            msg = f"Fehler beim Abgleich: {exc}"
+        finally:
+            client.close()
+        return RedirectResponse(f"/invoices?msg={quote(msg)}", status_code=303)
+
+    @app.post("/payments/{match_id}/{decision}")
+    def payments_decide(match_id: int, decision: str, session: Session = Depends(get_session)):
+        if decision == "accept":
+            found = payments.accept(session, match_id)
+        elif decision == "reject":
+            found = payments.reject(session, match_id)
+        else:
+            raise HTTPException(404)
+        if found is None:
+            raise HTTPException(404)
+        return RedirectResponse("/invoices", status_code=303)
 
     @app.post("/invoices/{invoice_id}/paid")
     def invoice_paid(invoice_id: int, session: Session = Depends(get_session)):
@@ -252,13 +288,22 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         if (ollama := make_ollama(settings)) is not None:
             ollama_status = ollama.status()
             ollama.close()
+        firefly_status = None
+        if (firefly := make_firefly(settings)) is not None:
+            try:
+                about = firefly.ping()
+                firefly_status = {"ok": True, "version": about.get("version", "?")}
+            except FireflyError as exc:
+                firefly_status = {"ok": False, "error": str(exc)}
+            finally:
+                firefly.close()
         worker: Worker = app.state.worker
         counts = dict(session.execute(
             select(Document.extraction_state, func.count()).group_by(Document.extraction_state)
         ).all())
         return render(
             request, "system.html", settings=settings, paperless_status=paperless_status,
-            ollama_status=ollama_status, worker=worker, counts=counts, msg=msg,
+            ollama_status=ollama_status, firefly_status=firefly_status, worker=worker, counts=counts, msg=msg,
             last_sync=pipeline.kv_get(session, "last_sync"), channels=notify.channels(settings),
         )
 

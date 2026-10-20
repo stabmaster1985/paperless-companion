@@ -52,6 +52,12 @@ class Settings(BaseSettings):
     tax_tags: str = "Steuer"
     tax_doctypes: str = ""
 
+    # Zahlungsabgleich mit Firefly III
+    firefly_url: str = ""
+    firefly_token: str = ""
+    firefly_lookback_days: int = 120
+    firefly_auto_accept: bool = False  # eindeutige Treffer (Betrag + Rechnungsnr./IBAN) direkt als bezahlt markieren
+
     # Aufbewahrung
     retention_tag: str = "Löschkandidat"
     retention_delete_enabled: bool = False
@@ -80,6 +86,10 @@ class Settings(BaseSettings):
     @property
     def reminder_day_list(self) -> list[int]:
         return sorted({int(d) for d in _split(self.reminder_days)}, reverse=True)
+
+    @property
+    def firefly_enabled(self) -> bool:
+        return bool(self.firefly_url and self.firefly_token)
 
     @property
     def tax_tag_list(self) -> list[str]:
