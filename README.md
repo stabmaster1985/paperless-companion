@@ -255,8 +255,22 @@ Die mitgelieferten Regeln sind Beispiele für Privathaushalte und keine Rechtsbe
 3. In der Oberfläche kann die Art jederzeit manuell geändert werden. Das Dokument wird dann
    neu analysiert.
 
-Beim ersten Start werden Dokumente der letzten `INITIAL_SYNC_DAYS` Tage eingelesen. Ältere
-Dokumente lassen sich unter **System** einzeln per Paperless-ID einlesen.
+Beim ersten Start werden Dokumente der letzten `INITIAL_SYNC_DAYS` Tage analysiert. Danach
+folgt jedes neue oder geänderte Dokument automatisch. Alle übrigen stehen als „nur Index“ in
+der Liste **Dokumente**. Dort kannst du nach Tag, Paperless-Dokumenttyp, Korrespondent,
+Zeitraum, Paperless-IDs (`12, 15-20`), Art, Status und Methode filtern. Mit **„Alle gefilterten
+analysieren“** oder per Häkchen werden die Dokumente in die Warteschlange gestellt. Bereits
+bestätigte Dokumente werden dabei übersprungen, außer du setzt das Häkchen „auch bereits
+bestätigte“.
+
+**Methode:** Die Spalte zeigt, womit die Werte ermittelt wurden: *Regeln*, *Regeln + AI*,
+*nur Regeln (AI nicht erreichbar)*, *aus Paperless-Feldern* oder *nicht analysiert*. Auf der
+Dokumentseite steht an jedem Feld außerdem die Quelle mit der Sicherheit.
+
+**Neue Erkennung, kein neues Scannen:** Die OCR bleibt in Paperless. Wird die Erkennung im
+Companion erweitert (neue Felder, bessere Regeln), steigt die Analyse-Version. Unter **System**
+steht dann, wie viele nicht bestätigte Dokumente mit einer älteren Version analysiert wurden,
+mit einem Knopf zum Neu-Analysieren. Bestätigte Dokumente bleiben unangetastet.
 
 ## Fristberechnung
 

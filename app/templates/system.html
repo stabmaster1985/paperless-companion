@@ -117,6 +117,11 @@ document.getElementById('update-btn').addEventListener('click', async (e) => {
     <p>Wartend: {{ counts.get('queued', 0) }} · läuft: {{ counts.get('running', 0) }} · fertig: {{ counts.get('done', 0) }} · Fehler: {{ counts.get('error', 0) }}</p>
     {% if worker.current_document %}<p>Analysiert gerade Dokument <a href="/documents/{{ worker.current_document }}">#{{ worker.current_document }}</a></p>{% endif %}
     {% if worker.last_error %}<p class="bad">Letzter Fehler: {{ worker.last_error }}</p>{% endif %}
+    <p class="muted">Erkennung: Version {{ analysis_version }}{% if outdated_count %} · {{ outdated_count }} nicht bestätigte {{ 'Dokument wurde' if outdated_count == 1 else 'Dokumente wurden' }} mit einer älteren Version analysiert{% endif %}</p>
+    {% if outdated_count %}
+    <form method="post" action="/system/reanalyze-outdated" class="inline"><button class="small">Mit aktueller Erkennung neu analysieren</button></form>
+    {% endif %}
+    <p class="muted">Weitere Dokumente gezielt analysieren: unter <a href="/documents?state=skipped">Dokumente</a> nach Tag, Typ, Zeitraum oder IDs filtern.</p>
     <form method="post" action="/system/import" class="inline-form">
       <input type="number" name="doc_id" placeholder="Paperless-ID" required>
       <button class="small">Dokument einlesen</button>

@@ -2,42 +2,86 @@
 {% from "macros.html" import doclink %}
 {% block content %}
 <h1>Dokumente</h1>
-<form method="get" class="filters">
-  <input type="search" name="q" value="{{ q }}" placeholder="Titel oder Korrespondent" aria-label="Suche" style="max-width:240px">
-  <select name="kind" onchange="this.form.submit()">
-    <option value="">Alle Arten</option>
-    {% for key, text in KINDS.items() %}<option value="{{ key }}" {{ 'selected' if kind == key }}>{{ text }}</option>{% endfor %}
-  </select>
-  <select name="state" onchange="this.form.submit()">
-    <option value="">Alle Zustände</option>
-    {% for key, text in [('queued', 'in Warteschlange'), ('running', 'läuft'), ('done', 'analysiert'), ('error', 'Fehler'), ('skipped', 'nur Index')] %}
-    <option value="{{ key }}" {{ 'selected' if state == key }}>{{ text }}</option>
-    {% endfor %}
-  </select>
-  <noscript><button class="small">Filtern</button></noscript>
+{% if msg %}<div class="notice">{{ msg }}</div>{% endif %}
+<p class="muted">Alle Dokumente aus dem Archiv-Index. Neue und kürzlich geänderte Dokumente werden automatisch analysiert –
+  ältere lassen sich hier gezielt auswählen (nach Tag, Typ, Korrespondent, Zeitraum oder Paperless-IDs) und analysieren.</p>
+
+<form method="get" class="card filter-card">
+  <div class="grid">
+    <label class="field"><span>Suche</span><input type="search" name="q" value="{{ flt.q }}" placeholder="Titel oder Korrespondent"></label>
+    <label class="field"><span>Tag</span>
+      <select name="tag"><option value="">alle</option>
+        {% for t in facets.tags %}<option {{ 'selected' if flt.tag == t }}>{{ t }}</option>{% endfor %}</select></label>
+    <label class="field"><span>Dokumenttyp (Paperless)</span>
+      <select name="doctype"><option value="">alle</option>
+        {% for t in facets.doctypes %}<option {{ 'selected' if flt.doctype == t }}>{{ t }}</option>{% endfor %}</select></label>
+    <label class="field"><span>Korrespondent</span>
+      <select name="correspondent"><option value="">alle</option>
+        {% for t in facets.correspondents %}<option {{ 'selected' if flt.correspondent == t }}>{{ t }}</option>{% endfor %}</select></label>
+    <label class="field"><span>Datum von</span><input type="date" name="date_from" value="{{ flt.date_from }}"></label>
+    <label class="field"><span>Datum bis</span><input type="date" name="date_to" value="{{ flt.date_to }}"></label>
+    <label class="field"><span>Paperless-IDs</span><input name="ids" value="{{ flt.ids }}" placeholder="z.B. 12, 15-20"></label>
+    <label class="field"><span>Art</span>
+      <select name="kind"><option value="">alle</option>
+        {% for key, text in KINDS.items() %}<option value="{{ key }}" {{ 'selected' if flt.kind == key }}>{{ text }}</option>{% endfor %}</select></label>
+    <label class="field"><span>Status</span>
+      <select name="state"><option value="">alle</option>
+        {% for key, text in [('skipped', 'nur Index (nicht analysiert)'), ('queued', 'in Warteschlange'), ('running', 'läuft'), ('done', 'analysiert'), ('error', 'Fehler')] %}
+        <option value="{{ key }}" {{ 'selected' if flt.state == key }}>{{ text }}</option>{% endfor %}</select></label>
+    <label class="field"><span>Methode</span>
+      <select name="method"><option value="">alle</option>
+        {% for key, text in METHODS.items() %}<option value="{{ key }}" {{ 'selected' if flt.method == key }}>{{ text }}</option>{% endfor %}</select></label>
+  </div>
+  <div class="actions">
+    <button class="small primary">Filtern</button>
+    {% if flt.active %}<a class="button small" href="/documents">Zurücksetzen</a>{% endif %}
+  </div>
 </form>
+
 {% if docs %}
-<div class="table-wrap"><table class="list">
-  <thead><tr><th>Dokument</th><th>Art</th><th class="hide-sm">Typ in Paperless</th><th>Status</th></tr></thead>
-  <tbody>
-  {% for doc in docs %}
-    <tr>
-      <td><a href="/documents/{{ doc.id }}">{{ doc.title or ('#' ~ doc.id) }}</a> {{ doclink(doc.id) }}<br><small>{{ doc.correspondent or '' }} {{ doc.created|d }}</small></td>
-      <td>{{ KINDS[doc.kind] }}</td>
-      <td class="hide-sm">{{ doc.document_type or '–' }}</td>
-      <td>
-        {% if doc.extraction_state in ('queued', 'running') %}<span class="tag">{{ 'läuft' if doc.extraction_state == 'running' else 'wartet' }}</span>
-        {% elif doc.extraction_state == 'skipped' %}<span class="tag">nur Index</span>
-        {% elif doc.extraction_state == 'error' %}<span class="tag tag-overdue">Fehler</span>
-        {% elif doc.review_state == 'pending' %}<span class="tag tag-warn">prüfen</span>
-        {% elif doc.review_state == 'confirmed' %}<span class="tag tag-ok">erfasst</span>
-        {% else %}–{% endif %}
-      </td>
-    </tr>
+<form method="post" action="/documents/analyze" id="docs-form">
+  {% for key in ['q', 'kind', 'state', 'method', 'tag', 'doctype', 'correspondent', 'date_from', 'date_to', 'ids'] %}
+    {% if flt[key] %}<input type="hidden" name="{{ key }}" value="{{ flt[key] }}">{% endif %}
   {% endfor %}
-  </tbody>
-</table></div>
+  <div class="actions bulk">
+    <span class="muted">{{ total }} {{ 'Dokument' if total == 1 else 'Dokumente' }}{% if total > docs|length %} (die ersten {{ docs|length }} angezeigt){% endif %}</span>
+    <button name="scope" value="selected" class="small">Ausgewählte analysieren</button>
+    <button name="scope" value="filter" class="small" onclick="return confirm('Alle {{ total }} gefilterten Dokumente analysieren? Mit AI dauert das auf der CPU je Dokument bis zu einige Minuten.')">Alle {{ total }} gefilterten analysieren</button>
+    <label class="check small-check"><input type="checkbox" name="include_confirmed" value="1"> auch bereits bestätigte</label>
+  </div>
+  <div class="table-wrap"><table class="list">
+    <thead><tr>
+      <th><input type="checkbox" aria-label="Alle auswählen" onclick="document.querySelectorAll('#docs-form input[name=doc]').forEach(c => c.checked = this.checked)"></th>
+      <th>Dokument</th><th>Art</th><th class="hide-sm">Typ in Paperless</th><th>Status</th><th class="hide-sm">Methode</th>
+    </tr></thead>
+    <tbody>
+    {% for doc in docs %}
+      {% set m = method_of(doc) %}
+      <tr>
+        <td><input type="checkbox" name="doc" value="{{ doc.id }}"></td>
+        <td><a href="/documents/{{ doc.id }}">{{ doc.title or ('#' ~ doc.id) }}</a> {{ doclink(doc.id) }}<br>
+          <small>#{{ doc.id }} · {{ doc.correspondent or '' }} {{ doc.created|d }}</small>
+          {% if doc.tags %}<br><span class="tags">{% for t in doc.tags %}<span class="tag">{{ t }}</span>{% endfor %}</span>{% endif %}</td>
+        <td>{{ KINDS[doc.kind] }}</td>
+        <td class="hide-sm">{{ doc.document_type or '–' }}</td>
+        <td>
+          {% if doc.extraction_state in ('queued', 'running') %}<span class="tag">{{ 'läuft' if doc.extraction_state == 'running' else 'wartet' }}</span>
+          {% elif doc.extraction_state == 'skipped' and doc.kind_source != 'fields' %}<span class="tag">nur Index</span>
+          {% elif doc.extraction_state == 'error' %}<span class="tag tag-overdue">Fehler</span>
+          {% elif doc.review_state == 'pending' %}<span class="tag tag-warn">prüfen</span>
+          {% elif doc.review_state == 'confirmed' %}<span class="tag tag-ok">{{ 'automatisch erfasst' if doc.auto_confirmed else 'bestätigt' }}</span>
+          {% else %}–{% endif %}
+        </td>
+        <td class="hide-sm">
+          <span class="badge method-{{ m }}">{{ METHODS[m] }}</span>
+          {% if doc.analyzed_at %}<br><small>{{ doc.analyzed_at.strftime('%d.%m.%Y %H:%M') }}</small>{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</form>
 {% else %}
-<p class="empty">Noch keine Dokumente synchronisiert. Unter „System“ kannst du die Verbindung prüfen.</p>
+<p class="empty">{{ 'Keine Dokumente für diese Auswahl.' if flt.active else 'Noch keine Dokumente synchronisiert. Unter „System“ kannst du die Verbindung prüfen.' }}</p>
 {% endif %}
 {% endblock %}

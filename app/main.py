@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import cases, deadlines, events, fields, ics, notify, payments, pipeline, reminders, retention, tax
+from app import cases, deadlines, events, fields, ics, notify, payments, pipeline, reminders, retention, selection, tax
 from app.config import Settings, get_settings
 from app.db import get_session, init_db, session_scope
 from app.models import Case, CaseDocument, CaseEntry, Contract, Document, Invoice, RetentionLog, RetentionRule, Warranty
@@ -135,16 +135,38 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         return render(request, "inbox.html", docs=docs)
 
     @app.get("/documents", response_class=HTMLResponse)
-    def documents(request: Request, kind: str = "", state: str = "", q: str = "", session: Session = Depends(get_session)):
-        query = select(Document).order_by(Document.created.desc().nulls_last(), Document.id.desc()).limit(500)
-        if q.strip():
-            pattern = f"%{q.strip()}%"
-            query = query.where(Document.title.ilike(pattern) | Document.correspondent.ilike(pattern))
-        if kind:
-            query = query.where(Document.kind == kind)
-        if state:
-            query = query.where(Document.extraction_state == state)
-        return render(request, "documents.html", docs=session.scalars(query).all(), kind=kind, state=state, q=q)
+    def documents(request: Request, msg: str = "", session: Session = Depends(get_session)):
+        flt = selection.Filter.from_mapping(request.query_params)
+        docs = flt.apply(session)
+        return render(
+            request, "documents.html", docs=docs[:500], total=len(docs), flt=flt, msg=msg,
+            facets=selection.facets(session), METHODS=pipeline.METHODS, method_of=pipeline.analysis_method,
+        )
+
+    @app.post("/documents/analyze")
+    async def documents_analyze(request: Request, session: Session = Depends(get_session)):
+        """Ausgewählte oder alle gefilterten Dokumente zur Analyse einreihen."""
+        form = await request.form()
+        flt = selection.Filter.from_mapping(form)
+        if form.get("scope") == "selected":
+            ids = [int(i) for i in form.getlist("doc") if str(i).isdigit()]
+            docs = [d for d in (session.get(Document, i) for i in ids) if d is not None]
+        else:
+            docs = flt.apply(session)
+        skip_confirmed = form.get("include_confirmed") != "1"
+        count = 0
+        for doc in docs:
+            if skip_confirmed and doc.review_state == "confirmed":
+                continue
+            if doc.extraction_state not in ("queued", "running"):
+                doc.extraction_state = "queued"
+                count += 1
+        request_worker(app)
+        msg = f"{count} Dokumente zur Analyse eingereiht"
+        if skip_confirmed and any(d.review_state == "confirmed" for d in docs):
+            msg += " (bereits bestätigte übersprungen)"
+        query = flt.query_string()
+        return RedirectResponse(f"/documents?{query}{'&' if query else ''}msg={quote(msg)}", status_code=303)
 
     @app.get("/documents/{doc_id}", response_class=HTMLResponse)
     def document_detail(request: Request, doc_id: int, msg: str = "", session: Session = Depends(get_session)):
@@ -228,6 +250,14 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             if session.get(Document, other_id) is not None:
                 cases.add_document(session, case, session.get(Document, other_id))
         return RedirectResponse(f"/cases/{case.id}", status_code=303)
+
+    @app.post("/system/reanalyze-outdated")
+    def system_reanalyze_outdated(session: Session = Depends(get_session)):
+        docs = pipeline.outdated_documents(session)
+        for doc in docs:
+            doc.extraction_state = "queued"
+        request_worker(app)
+        return RedirectResponse(f"/system?msg={quote(f'{len(docs)} Dokumente werden mit der aktuellen Erkennung neu analysiert')}", status_code=303)
 
     @app.post("/system/retry-llm")
     def system_retry_llm(session: Session = Depends(get_session)):
@@ -371,6 +401,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             ollama_status=ollama_status, firefly_status=firefly_status, worker=worker, counts=counts, msg=msg,
             last_sync=pipeline.kv_get(session, "last_sync"), channels=notify.channels(settings),
             version=app.state.version.get(), llm_error_count=len(pipeline.documents_with_llm_error(session, True)),
+            outdated_count=len(pipeline.outdated_documents(session)), analysis_version=pipeline.ANALYSIS_VERSION,
         )
 
     @app.post("/system/version-check")

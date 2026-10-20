@@ -47,6 +47,9 @@ class Document(Base):
     extraction_state: Mapped[str] = mapped_column(String, default="queued")
     extraction_error: Mapped[str | None] = mapped_column(Text)
     suggestions: Mapped[dict] = mapped_column(JSON, default=dict)
+    analyzed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    # Stand der Erkennung bei der letzten Analyse (siehe pipeline.ANALYSIS_VERSION)
+    analysis_version: Mapped[int | None] = mapped_column(Integer)
     # none | pending | confirmed
     review_state: Mapped[str] = mapped_column(String, default="none")
     auto_confirmed: Mapped[bool] = mapped_column(default=False)

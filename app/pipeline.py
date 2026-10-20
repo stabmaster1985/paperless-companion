@@ -18,6 +18,9 @@ from app.paperless import PaperlessClient, PaperlessError
 
 log = logging.getLogger(__name__)
 
+# Bei Erweiterungen der Erkennung erhöhen – die Systemseite bietet dann an, betroffene Dokumente neu zu analysieren
+ANALYSIS_VERSION = 2
+
 KINDS = {"invoice": "Rechnung", "contract": "Vertrag", "warranty": "Garantie", "other": "Sonstiges"}
 AUTO_THRESHOLD = 0.8
 
@@ -346,6 +349,8 @@ def process_document(
     doc.suggestions = sugg
     doc.extraction_state = "done"
     doc.extraction_error = None
+    doc.analyzed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    doc.analysis_version = ANALYSIS_VERSION
 
     if settings.summary_mode == "new" and settings.llm_enabled and doc.summary_state is None \
             and not (doc.paperless_fields or {}).get("summary"):
@@ -584,6 +589,40 @@ def process_summary(
     doc.summary = text
     propose(doc, "summary", text)  # erst nach Zustimmung in Paperless
     doc.summary_state = "done"
+
+
+METHODS = {
+    "rules_ai": "Regeln + AI",
+    "rules": "Regeln",
+    "rules_ai_failed": "nur Regeln (AI nicht erreichbar)",
+    "fields": "aus Paperless-Feldern",
+    "none": "nicht analysiert",
+}
+
+
+def analysis_method(doc: Document) -> str:
+    """Womit wurden die Werte des Dokuments ermittelt?"""
+    if doc.extraction_state != "done" and not doc.analyzed_at:
+        return "fields" if doc.kind_source == "fields" else "none"
+    sugg = doc.suggestions or {}
+    if "_llm_error" in sugg:
+        return "rules_ai_failed"
+    if any(isinstance(v, dict) and v.get("source") == "llm" for k, v in sugg.items() if not k.startswith("_")):
+        return "rules_ai"
+    if doc.kind_source == "fields" and not doc.analyzed_at:
+        return "fields"
+    return "rules"
+
+
+def outdated_documents(session: Session) -> list[Document]:
+    """Analysierte, nicht bestätigte Dokumente mit älterem Erkennungsstand."""
+    return list(session.scalars(
+        select(Document).where(
+            Document.extraction_state == "done",
+            Document.review_state != "confirmed",
+            (Document.analysis_version.is_(None)) | (Document.analysis_version < ANALYSIS_VERSION),
+        )
+    ))
 
 
 LLM_RETRY_LIMIT = 3
