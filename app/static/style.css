@@ -175,3 +175,5 @@ details.edit[open] { margin-bottom: .5rem; }
 .stack { display: flex; flex-direction: column; gap: .75rem; }
 .row { display: flex; gap: .5rem; flex-wrap: wrap; align-items: flex-end; }
 .row .field { flex: 1 1 160px; }
+.commit-list { margin: .5rem 0 0; font-size: .9rem; }
+.commit-list li { margin-bottom: .2rem; }

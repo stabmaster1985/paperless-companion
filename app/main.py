@@ -1,28 +1,30 @@
 import hmac
-import tempfile
 import logging
 import re
+import tempfile
 from contextlib import asynccontextmanager
 from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
+import httpx
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
-from starlette.background import BackgroundTask
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
+from starlette.background import BackgroundTask
 from starlette.middleware.sessions import SessionMiddleware
 
 from app import cases, deadlines, events, fields, ics, notify, payments, pipeline, reminders, retention, tax
 from app.config import Settings, get_settings
 from app.db import get_session, init_db, session_scope
 from app.models import Case, CaseDocument, CaseEntry, Contract, Document, Invoice, RetentionLog, RetentionRule, Warranty
-from app.paperless import PaperlessError
 from app.firefly import FireflyError
+from app.paperless import PaperlessError
+from app.version import Version
 from app.worker import Worker, make_firefly, make_ollama, make_paperless
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -41,7 +43,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         init_db(settings.database_url)
         with session_scope() as s:
             retention.seed_defaults(s)
-        worker = Worker(settings)
+        worker = Worker(settings, version)
         app.state.worker = worker
         if start_worker:
             worker.start()
@@ -49,8 +51,10 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         if start_worker:
             worker.stop()
 
+    version = Version(BASE.parent, settings.update_repo, settings.update_check, settings.update_github_token)
     app = FastAPI(title="Paperless Companion", lifespan=lifespan)
     app.state.settings = settings
+    app.state.version = version
     templates = Jinja2Templates(directory=BASE / "templates")
     templates.env.filters["d"] = events.fmt_date
     templates.env.filters["eur"] = events.fmt_money
@@ -74,9 +78,10 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         with session_scope() as s:
             inbox_count = s.scalar(select(func.count()).select_from(Document).where(Document.review_state == "pending"))
             outgoing = s.scalar(select(func.count()).select_from(Document).where(Document.writeback_pending.is_(True)))
-        return templates.TemplateResponse(
-            request, name, {"inbox_count": inbox_count, "outgoing_count": outgoing, "today": today(), **ctx}
-        )
+        return templates.TemplateResponse(request, name, {
+            "inbox_count": inbox_count, "outgoing_count": outgoing, "today": today(),
+            "update_available": app.state.version.update_available, **ctx,
+        })
 
     def check_token(expected: str, given: str | None) -> None:
         if not expected or not given or not hmac.compare_digest(expected, given):
@@ -359,7 +364,37 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             request, "system.html", settings=settings, paperless_status=paperless_status,
             ollama_status=ollama_status, firefly_status=firefly_status, worker=worker, counts=counts, msg=msg,
             last_sync=pipeline.kv_get(session, "last_sync"), channels=notify.channels(settings),
+            version=app.state.version.get(),
         )
+
+    @app.post("/system/version-check")
+    def system_version_check():
+        app.state.version.refresh(force=True)
+        return RedirectResponse("/system#version", status_code=303)
+
+    @app.post("/system/update")
+    def system_update():
+        if not settings.update_webhook_url:
+            raise HTTPException(400, "UPDATE_WEBHOOK_URL ist nicht gesetzt")
+        info = app.state.version.get()
+        headers = {}
+        if settings.update_webhook_secret:
+            headers[settings.update_webhook_header] = settings.update_webhook_secret
+        payload = {
+            "typ": "update",
+            "von": info["current"].get("commit"),
+            "auf": (info.get("latest") or {}).get("commit"),
+        }
+        try:
+            response = httpx.post(settings.update_webhook_url, json=payload, headers=headers, timeout=20)
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "status": response.status_code, "von": payload["von"]}
+
+    @app.get("/api/version")
+    def api_version():
+        return app.state.version.get()
 
     @app.post("/system/sync")
     def system_sync():

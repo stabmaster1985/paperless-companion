@@ -54,6 +54,7 @@ eine VM unter Proxmox sein, gern derselbe Host wie Paperless. Der Companion brau
 150–300 MB RAM.
 
 ```bash
+cd ~
 git clone https://github.com/stabmaster1985/paperless-companion.git
 cd paperless-companion
 cp .env.example .env
@@ -70,6 +71,55 @@ gibt dem Companion einen Benutzer mit reinen Leserechten.
 
 **Lokale AI (optional):** siehe [docs/ollama-lxc.md](docs/ollama-lxc.md). Ohne Ollama
 `LLM_PROVIDER=none` setzen. Dann arbeitet der Companion nur mit Regeln und der Inbox.
+
+### Aktualisieren per n8n
+
+Das läuft wie beim firefly-dashboard. `n8n/paperless-companion-update.json` ist ein fertiger
+n8n-Workflow, der den Companion auf dem Docker-Host per SSH aktualisiert:
+
+1. Das Repository unter `~/paperless-companion` holen: beim ersten Lauf klonen, danach
+   `git pull --rebase --autostash`.
+2. Neu bauen und starten (`docker compose up -d --build`).
+3. Alte Images aufräumen und prüfen, ob der Container läuft.
+
+Die `.env` und der Datenordner `data/` sind nicht im Repository und bleiben bei jedem Update
+erhalten.
+
+1. In n8n **Import from File** → `n8n/paperless-companion-update.json` wählen.
+2. Im Knoten **Update auf Companion-Host** SSH-Zugangsdaten anlegen: Host ist die IP des
+   LXC/der VM mit Docker, dazu Benutzer und privater Schlüssel. Der Benutzer braucht
+   Docker-Rechte (root oder Gruppe `docker`) sowie `git` auf dem Host.
+3. Im Knoten **Webhook** Header-Auth-Zugangsdaten anlegen (Name `X-Update-Key`, langer
+   Zufallswert) und den Workflow aktivieren.
+4. In der `.env` des Companion `UPDATE_WEBHOOK_URL` (Production URL des Webhooks) und
+   `UPDATE_WEBHOOK_SECRET` (der Zufallswert) eintragen.
+
+**Update-Knopf:** Unter **System** zeigt die Karte **Companion-Version** den laufenden Commit.
+Sobald es auf GitHub Neues gibt, erscheinen dort die neuen Commits und der Knopf **Jetzt
+aktualisieren**, und im Menü steht bei „System“ ein Hinweis „Update“. Nach dem Klick ruft der
+Companion den n8n-Webhook auf (mit `typ`, `von`, `auf`). Die Seite lädt nach dem Neustart von
+selbst neu. Die Prüfung fragt höchstens einmal pro Stunde bei GitHub nach. `UPDATE_CHECK=false`
+schaltet sie ab, `UPDATE_REPO` wählt ein anderes Repository. Die Version schreibt der
+Docker-Build aus dem `.git`-Verzeichnis in die Datei `version.json`.
+
+Alternativ startest du den Workflow per **Test workflow** oder, wenn aktiviert, täglich um
+4 Uhr. Der Webhook antwortet sofort mit 202, weil sich der Companion beim Neustart beendet.
+Das Ergebnis steht in den n8n-Ausführungen. Ein Fehler bricht den Workflow mit der Ausgabe ab.
+
+**Solange das Repository privat ist:**
+- Für die Update-Prüfung braucht der Companion ein Token (`UPDATE_GITHUB_TOKEN`). Das ist ein
+  Fine-grained Personal Access Token, beschränkt auf dieses Repository, mit der Berechtigung
+  *Contents: Read-only*.
+- Der Host braucht Lesezugriff für `git pull`. Am einfachsten geht das mit einem
+  **Deploy Key**: Auf dem Host `ssh-keygen -t ed25519 -f ~/.ssh/paperless_companion` erzeugen,
+  den öffentlichen Schlüssel auf GitHub unter *Settings → Deploy keys* (ohne Schreibrecht)
+  eintragen und einmalig per SSH klonen:
+  ```bash
+  GIT_SSH_COMMAND="ssh -i ~/.ssh/paperless_companion" \
+    git clone git@github.com:stabmaster1985/paperless-companion.git ~/paperless-companion
+  git -C ~/paperless-companion config core.sshCommand "ssh -i ~/.ssh/paperless_companion"
+  ```
+  Der n8n-Workflow arbeitet danach mit diesem Klon weiter.
 
 ### Sofortige Verarbeitung per Paperless-Workflow (optional)
 
@@ -239,6 +289,8 @@ Aufbau:
 | `app/cases.py` | Vorgänge und Zeitstrahl |
 | `app/tax.py` | Steuer-Export |
 | `app/retention.py` | Aufbewahrungsregeln |
+| `app/version.py`, `app/gitinfo.py` | Version und Update-Prüfung |
+| `n8n/paperless-companion-update.json` | n8n-Workflow für Updates per SSH |
 | `app/worker.py` | Hintergrund-Thread (Abgleich, Warteschlange, Index, Zahlungen, Erinnerungen) |
 | `app/main.py` | Weboberfläche und API |
 

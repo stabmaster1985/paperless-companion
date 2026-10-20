@@ -42,8 +42,9 @@ def make_ollama(settings: Settings) -> OllamaClient | None:
 
 
 class Worker:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, version=None):
         self.settings = settings
+        self.version = version
         self.tz = ZoneInfo(settings.timezone)
         self.wake = threading.Event()
         self._stop = threading.Event()
@@ -83,6 +84,8 @@ class Worker:
                 self._index_sync(paperless)
                 self._payments()
                 self._tidy_changes()
+                if self.version is not None:
+                    self.version.refresh()  # höchstens stündlich bei GitHub
                 self._reminders()
                 worked = self._process_next(paperless, ollama) or self._summarize_next(paperless, ollama)
             except Exception as exc:  # noqa: BLE001 - Thread darf nicht sterben

@@ -82,6 +82,14 @@ class Settings(BaseSettings):
     retention_tag: str = "Löschkandidat"
     retention_delete_enabled: bool = False
 
+    # Update-Prüfung und Update-Knopf (wie im firefly-dashboard)
+    update_check: bool = True
+    update_repo: str = "stabmaster1985/paperless-companion"
+    update_github_token: str = ""  # nötig, solange das Repository privat ist (nur Lesezugriff)
+    update_webhook_url: str = ""  # n8n-Workflow n8n/paperless-companion-update.json
+    update_webhook_header: str = "X-Update-Key"
+    update_webhook_secret: str = ""
+
     # Erinnerungen
     reminder_days: str = "30,7,1"
     reminder_hour: int = 8

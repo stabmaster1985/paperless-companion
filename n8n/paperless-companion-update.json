@@ -1,0 +1,215 @@
+{
+  "name": "Paperless Companion aktualisieren",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "a1",
+      "name": "Manuell starten",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "paperless-companion-update",
+        "authentication": "headerAuth",
+        "responseMode": "onReceived",
+        "responseData": "noData",
+        "options": {
+          "responseCode": 202
+        }
+      },
+      "id": "a2",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        200
+      ],
+      "webhookId": "paperless-companion-update"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 4
+            }
+          ]
+        }
+      },
+      "id": "a3",
+      "name": "Täglich 4 Uhr (optional)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        400
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "authentication": "privateKey",
+        "command": "set -eu\nDIR=\"$HOME/paperless-companion\"\nREPO=\"https://github.com/stabmaster1985/paperless-companion.git\"\nBRANCH=\"main\"\n\nif [ ! -d \"$DIR/.git\" ]; then\n  if [ -d \"$DIR\" ] && [ -n \"$(ls -A \"$DIR\")\" ]; then\n    echo \"FEHLER: $DIR existiert, ist aber kein Git-Repository.\"; exit 1\n  fi\n  echo \"== Erstinstallation: klone $REPO nach $DIR\"\n  git clone --branch \"$BRANCH\" \"$REPO\" \"$DIR\"\nfi\ncd \"$DIR\"\n\nORIGIN=\"$(git remote get-url origin)\"\ncase \"$ORIGIN\" in\n  *paperless-companion*) ;;\n  *) echo \"FEHLER: origin ist $ORIGIN – erwartet wird $REPO.\"; exit 1 ;;\nesac\nif [ ! -f .env ]; then\n  echo \"FEHLER: $DIR/.env fehlt – einmalig aus .env.example anlegen und ausfüllen.\"; exit 1\nfi\n\nBEFORE=\"$(git rev-parse --short HEAD)\"\necho \"== Vorher:  $(git log -1 --format='%h %s')\"\ngit pull --rebase --autostash origin \"$BRANCH\"\nAFTER=\"$(git rev-parse --short HEAD)\"\necho \"== Nachher: $(git log -1 --format='%h %s')\"\nif [ \"$BEFORE\" != \"$AFTER\" ]; then\n  echo \"== Neue Commits:\"; git log --oneline \"$BEFORE..$AFTER\"\nfi\n\nif docker compose version >/dev/null 2>&1; then DC=\"docker compose\"; else DC=\"docker-compose\"; fi\necho \"== Baue und starte neu\"\n$DC up -d --build --remove-orphans\ndocker image prune -f >/dev/null\nsleep 5\n$DC ps\nif [ -z \"$($DC ps --status running -q 2>/dev/null || $DC ps -q)\" ]; then\n  echo \"FEHLER: Container läuft nicht.\"; $DC logs --tail 50; exit 1\nfi\necho \"== Fertig: $AFTER läuft\"",
+        "cwd": "/"
+      },
+      "id": "a4",
+      "name": "Update auf Companion-Host",
+      "type": "n8n-nodes-base.ssh",
+      "typeVersion": 1,
+      "position": [
+        300,
+        200
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.code }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a5",
+      "name": "Erfolgreich?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        560,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "s1",
+              "name": "status",
+              "value": "ok",
+              "type": "string"
+            },
+            {
+              "id": "s2",
+              "name": "ausgabe",
+              "value": "={{ $json.stdout }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a6",
+      "name": "Ergebnis",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        820,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "errorMessage": "=Update fehlgeschlagen (Exit {{ $json.code ?? '?' }}):\n{{ $json.stdout }}\n{{ $json.stderr ?? $json.error?.message ?? '' }}"
+      },
+      "id": "a7",
+      "name": "Fehler melden",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        820,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Manuell starten": {
+      "main": [
+        [
+          {
+            "node": "Update auf Companion-Host",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Update auf Companion-Host",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Täglich 4 Uhr (optional)": {
+      "main": [
+        [
+          {
+            "node": "Update auf Companion-Host",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update auf Companion-Host": {
+      "main": [
+        [
+          {
+            "node": "Erfolgreich?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Erfolgreich?": {
+      "main": [
+        [
+          {
+            "node": "Ergebnis",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Fehler melden",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

@@ -1,6 +1,7 @@
+# .git wird nur in der Build-Stufe „version“ gelesen, nicht ins Image kopiert
 .venv
-.git
 data
+ollama
 tests
 __pycache__
 *.pyc

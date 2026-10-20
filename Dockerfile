@@ -1,3 +1,11 @@
+# Version (Commit) aus dem .git-Verzeichnis ablesen – ohne git im Image
+FROM python:3.12-slim AS version
+WORKDIR /src
+COPY .git ./.git
+COPY app/gitinfo.py ./gitinfo.py
+RUN python -c "import json, sys; from pathlib import Path; sys.path.insert(0, '.'); \
+from gitinfo import read_git_version; print(json.dumps(read_git_version(Path('.'))))" > /version.json
+
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -9,6 +17,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
+COPY --from=version /version.json ./version.json
 
 RUN useradd --create-home --uid 1000 companion \
     && mkdir -p /data && chown companion:companion /data

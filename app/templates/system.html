@@ -3,6 +3,71 @@
 <h1>System</h1>
 {% if msg %}<div class="notice">{{ msg }}</div>{% endif %}
 
+<section class="card" id="version">
+  <div class="head">
+    <h2>Companion-Version</h2>
+    {% if version.repo %}<a class="muted" href="https://github.com/{{ version.repo }}/commits" target="_blank" rel="noopener">{{ version.repo }} ↗</a>{% endif %}
+  </div>
+  {% set cur = version.current %}
+  <p>Läuft: {% if cur.commit %}<strong><code>{{ cur.commit[:7] }}</code></strong>{% if cur.branch %} ({{ cur.branch }}){% endif %}{% if cur.updated_at %} · Stand {{ cur.updated_at[:16].replace('T', ' ') }} (UTC){% endif %}
+    {% else %}<span class="muted">unbekannt (ohne Git-Daten gebaut)</span>{% endif %}</p>
+  <div>
+    {% if not version.enabled %}<span class="muted">Update-Prüfung ist ausgeschaltet (UPDATE_CHECK=false).</span>
+    {% elif version.error %}<span class="tag tag-warn">Prüfung fehlgeschlagen</span> <span class="muted">{{ version.error }}</span>
+    {% elif not version.status %}<span class="muted">Noch nicht geprüft.</span>
+    {% elif version.status == 'current' %}<span class="tag tag-ok">aktuell</span>
+    {% elif version.status == 'unknown' %}<span class="tag tag-warn">Eigener Stand</span> <span class="muted">Dieser Commit ist auf GitHub nicht bekannt.</span>
+    {% else %}
+      <span class="tag tag-warn">Update verfügbar{% if version.behind %} · {{ version.behind }} {{ 'neuer Commit' if version.behind == 1 else 'neue Commits' }}{% endif %}</span>
+      <ul class="plain commit-list">
+        {% for c in (version.commits or [version.latest]) %}<li><code>{{ (c.commit or '')[:7] }}</code> {{ c.message }} <small class="muted">{{ (c.date or '')[:10] }}</small></li>{% endfor %}
+      </ul>
+    {% endif %}
+  </div>
+  <div class="actions">
+    {% if version.enabled %}<form method="post" action="/system/version-check" class="inline"><button class="small">Jetzt prüfen</button></form>{% endif %}
+    {% if settings.update_webhook_url %}
+      <button class="small {{ 'primary' if version.status == 'update' }}" id="update-btn" data-from="{{ cur.commit or '' }}">▶ Jetzt aktualisieren</button>
+    {% else %}
+      <span class="muted">Für einen Update-Knopf: n8n-Workflow <code>n8n/paperless-companion-update.json</code> importieren und <code>UPDATE_WEBHOOK_URL</code> setzen.</span>
+    {% endif %}
+  </div>
+  <div id="update-out" class="muted"></div>
+</section>
+{% if settings.update_webhook_url %}
+<script>
+document.getElementById('update-btn').addEventListener('click', async (e) => {
+  if (!confirm('Companion jetzt aktualisieren? Er ist danach kurz nicht erreichbar.')) return;
+  const btn = e.target, out = document.getElementById('update-out'), from = btn.dataset.from;
+  btn.disabled = true;
+  out.textContent = 'Starte Update …';
+  let result;
+  try {
+    result = await fetch('/system/update', { method: 'POST' }).then((r) => r.json());
+  } catch (err) {
+    result = { ok: false, error: String(err) };
+  }
+  if (!result.ok) {
+    out.textContent = 'Update konnte nicht gestartet werden: ' + (result.error || result.detail || 'unbekannter Fehler');
+    btn.disabled = false;
+    return;
+  }
+  out.textContent = 'Update gestartet – der Companion wird neu gebaut und startet neu. Die Seite lädt danach von selbst neu (meist 1–3 Minuten).';
+  const started = Date.now();
+  const poll = async () => {
+    const now = await fetch('/api/version', { cache: 'no-store' }).then((r) => r.json()).catch(() => null);
+    if (now && now.current && now.current.commit && now.current.commit !== from) return location.reload();
+    if (Date.now() - started > 10 * 60 * 1000) {
+      out.textContent = 'Noch keine neue Version – bitte in n8n die Ausführung des Workflows prüfen.';
+      return;
+    }
+    setTimeout(poll, 10000);
+  };
+  setTimeout(poll, 15000);
+});
+</script>
+{% endif %}
+
 <section class="cards">
   <div class="card">
     <h2>Paperless</h2>
