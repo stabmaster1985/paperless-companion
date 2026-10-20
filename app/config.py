@@ -47,6 +47,26 @@ class Settings(BaseSettings):
 
     # Rückschreiben in Paperless-Custom-Fields
     writeback_enabled: bool = False
+    writeback_create_fields: bool = True  # fehlende Felder (Betrag, Fällig am …) anlegen
+
+    # Namen der Paperless-Custom-Fields je Rolle (leer = nicht verwenden)
+    field_amount: str = "Betrag"
+    field_due_date: str = "Fällig am"
+    field_paid_on: str = "Bezahlt am"
+    field_cancel_by: str = "Kündigung bis"
+    field_term_end: str = "Vertragsende"
+    field_warranty_end: str = "Garantie bis"
+    field_comment: str = "Kommentar"
+    field_related: str = "gehört zu"
+    field_summary: str = "Zusammenfassung KI"
+    # Rechnungen aus „Fällig am“ ohne „Bezahlt am“, die länger als N Tage fällig sind, gelten als erledigt
+    fields_open_max_age_days: int = 90
+    # Vorgänge schreiben die Verknüpfung in das Feld „gehört zu“
+    cases_write_links: bool = True
+
+    # KI-Zusammenfassung: manual (nur per Knopf) | new (neue Dokumente automatisch) | off
+    summary_mode: Literal["off", "manual", "new"] = "manual"
+    summary_max_input_chars: int = 3500
 
     # Steuer-Export: Tags (auch „Steuer: Kategorie“) und Dokumenttypen, die steuerrelevant sind
     tax_tags: str = "Steuer"

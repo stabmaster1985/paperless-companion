@@ -18,6 +18,7 @@
   </form>
 </div>
 
+{% if msg %}<div class="notice">{{ msg }}</div>{% endif %}
 {% if doc.extraction_state == 'skipped' %}
   <div class="notice">Dieses Dokument ist nur im Archiv-Index und wurde noch nicht analysiert.
     <form method="post" action="/documents/{{ doc.id }}/reanalyze" class="inline"><button class="small">Jetzt analysieren</button></form></div>
@@ -99,6 +100,50 @@
   </div>
 </form>
 {% endif %}
+
+<section class="card">
+  <h2>Notizen &amp; Zusammenhänge</h2>
+  <div class="stack">
+    {% if settings.field_summary %}
+    <div>
+      <strong>{{ settings.field_summary }}</strong>
+      {% if doc.summary_state in ('queued', 'running') %}<span class="tag">{{ 'wird erstellt' if doc.summary_state == 'running' else 'in Warteschlange' }}</span>{% endif %}
+      {% set summary_text = pf.get('summary') or doc.summary %}
+      <p class="{{ 'muted' if not summary_text }}">{{ summary_text or 'Noch keine Zusammenfassung.' }}</p>
+      {% if doc.summary_state == 'error' %}<p class="bad">{{ doc.extraction_error }}</p>{% endif %}
+      {% if settings.llm_enabled and settings.summary_mode != 'off' and doc.summary_state not in ('queued', 'running') %}
+      <form method="post" action="/documents/{{ doc.id }}/summary" class="inline">
+        <button class="small">{{ 'Neu erstellen' if summary_text else 'Mit lokaler KI erstellen' }}</button>
+      </form>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if settings.field_comment %}
+    <form method="post" action="/documents/{{ doc.id }}/comment" class="stack">
+      <label class="field"><span>{{ settings.field_comment }} <small>(wird in Paperless gespeichert)</small></span>
+        <textarea name="comment" rows="2" maxlength="128">{{ pf.get('comment') or '' }}</textarea></label>
+      <div><button class="small">Kommentar speichern</button></div>
+    </form>
+    {% endif %}
+
+    {% if settings.field_related %}
+    <div>
+      <strong>{{ settings.field_related }}</strong>
+      {% if related %}
+      <ul class="plain">
+        {% for rid, rdoc in related %}
+        <li>{% if rdoc %}<a href="/documents/{{ rid }}">{{ rdoc.title }}</a> <small>{{ rdoc.correspondent or '' }} {{ rdoc.created|d }}</small>{% else %}Dokument #{{ rid }}{% endif %} {{ doclink(rid) }}</li>
+        {% endfor %}
+      </ul>
+      <form method="post" action="/documents/{{ doc.id }}/case-from-links" class="inline"><button class="small">Als Vorgang übernehmen</button></form>
+      {% else %}
+      <p class="muted">Keine verknüpften Dokumente.</p>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+</section>
 
 <section class="card">
   <h2>Vorgänge</h2>

@@ -100,6 +100,38 @@ Sammelnachricht für Fristen, die in `REMINDER_DAYS` (Standard 30, 7 und 1 Tag) 
 sowie für überfällige Rechnungen. Unter **System** lassen sich ein Test und eine
 Sofortprüfung auslösen.
 
+### Eigene Paperless-Custom-Fields nutzen
+
+Der Companion arbeitet mit deinen vorhandenen Custom Fields. In der `.env` trägst du ein,
+welches Feld was bedeutet. Feldtypen werden aus Paperless gelesen. Beispiel:
+
+```env
+FIELD_DUE_DATE=bezahlbar bis
+FIELD_PAID_ON=bezahlt am
+FIELD_COMMENT=Kommentar
+FIELD_RELATED=gehört zu
+FIELD_SUMMARY=Zusammenfassung KI
+```
+
+- **Fälligkeit / bezahlt am / Betrag:** Werte aus Paperless haben Vorrang vor der Erkennung.
+  Dokumente mit Fälligkeits- oder Bezahlt-Datum erscheinen sofort als Rechnung, auch ohne
+  Analyse. Offene Rechnungen ohne Betrag werden einmal analysiert, um den Betrag zu finden.
+  Rechnungen ohne Bezahlt-Datum, die länger als `FIELDS_OPEN_MAX_AGE_DAYS` fällig sind,
+  gelten als erledigt, damit alte Belege nicht als überfällig gemeldet werden.
+- **Rückschreiben** (`WRITEBACK_ENABLED=true`): Was du in der App änderst (bezahlt, wieder
+  offen, Firefly-Treffer, bestätigte Werte), wird in die Felder geschrieben. Das geschieht
+  gesammelt im Hintergrund und nur, wenn sich der Wert unterscheidet. Unbekannte Werte
+  überschreiben nie deine Eingaben in Paperless.
+- **Kommentar:** wird auf der Dokumentseite angezeigt und lässt sich dort bearbeiten.
+- **gehört zu:** Verknüpfte Dokumente erscheinen auf der Dokumentseite, auch über mehrere
+  Ecken. Mit „Als Vorgang übernehmen“ entsteht daraus ein Vorgang. Ein Vorgang schlägt
+  verknüpfte Dokumente zum Hinzufügen vor und trägt neue Dokumente in „gehört zu“ ein
+  (`CASES_WRITE_LINKS`).
+- **KI-Zusammenfassung:** per Knopf auf der Dokumentseite oder automatisch für neue Dokumente
+  (`SUMMARY_MODE=new`). Das lokale Modell bekommt den Dokumentanfang, eine feste Gliederung
+  (wer, worum, Beträge/Fristen, was zu tun ist) und eine harte Längengrenze. Felder vom Typ
+  *Text* fassen in Paperless nur 128 Zeichen, die Zusammenfassung wird passend gekürzt.
+
 ### Zahlungsabgleich mit Firefly III
 
 `FIREFLY_URL` und `FIREFLY_TOKEN` setzen. Das Token ist ein persönliches Zugangstoken aus

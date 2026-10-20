@@ -30,6 +30,16 @@ DOCS = {
 }
 
 
+CUSTOM_FIELDS = [
+    {"id": 1, "name": "Betrag", "data_type": "monetary"},
+    {"id": 40, "name": "bezahlbar bis", "data_type": "date"},
+    {"id": 41, "name": "bezahlt am", "data_type": "date"},
+    {"id": 42, "name": "Kommentar", "data_type": "string"},
+    {"id": 43, "name": "gehört zu", "data_type": "documentlink"},
+    {"id": 44, "name": "Zusammenfassung KI", "data_type": "string"},
+]
+
+
 def page(results):
     return {"count": len(results), "next": None, "previous": None, "results": results}
 
@@ -67,7 +77,7 @@ def mock_api():
         router.get(f"{PAPERLESS}/api/documents/").respond(json=page(list(DOCS.values())))
         for doc_id, doc in DOCS.items():
             router.get(f"{PAPERLESS}/api/documents/{doc_id}/").respond(json=doc)
-        router.get(f"{PAPERLESS}/api/custom_fields/").respond(json=page([{"id": 1, "name": "Betrag"}]))
+        router.get(f"{PAPERLESS}/api/custom_fields/").respond(json=page(CUSTOM_FIELDS))
         counter = iter(range(2, 100))
         router.post(f"{PAPERLESS}/api/custom_fields/").mock(
             side_effect=lambda request: httpx.Response(201, json={"id": next(counter), **json.loads(request.content)})

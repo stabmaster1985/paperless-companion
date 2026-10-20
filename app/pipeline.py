@@ -8,7 +8,7 @@ from datetime import date, datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app import deadlines
+from app import deadlines, fields
 from app.config import Settings
 from app.extraction import llm
 from app.extraction.rules import EXTRACTORS, classify_by_keywords, field
@@ -108,8 +108,49 @@ def _parse_dt(value: str) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
-def load_names(paperless: PaperlessClient) -> dict[str, dict[int, str]]:
-    return {endpoint: paperless.names(endpoint) for endpoint in ("correspondents", "document_types", "tags")}
+def load_names(paperless: PaperlessClient, settings: Settings | None = None) -> dict:
+    names: dict = {endpoint: paperless.names(endpoint) for endpoint in ("correspondents", "document_types", "tags")}
+    names["fields"] = fields.resolve(paperless.custom_field_definitions(), settings) if settings else {}
+    names["open_max_age_days"] = settings.fields_open_max_age_days if settings else 90
+    return names
+
+
+def _iso_date(value) -> date | None:
+    try:
+        return date.fromisoformat(str(value)[:10]) if value else None
+    except ValueError:
+        return None
+
+
+def apply_paperless_fields(doc: Document, open_max_age_days: int = 90, today: date | None = None) -> None:
+    """Übernimmt in Paperless gepflegte Werte (Fälligkeit, bezahlt am, Betrag).
+
+    Dokumente mit Fälligkeits- oder Bezahlt-Datum gelten als Rechnung – auch ohne Analyse.
+    """
+    if doc.writeback_pending:
+        return  # eigene, noch nicht zurückgeschriebene Änderungen haben Vorrang
+    pf = doc.paperless_fields or {}
+    due, paid, amount = _iso_date(pf.get("due_date")), _iso_date(pf.get("paid_on")), pf.get("amount")
+    if doc.invoice is not None:
+        inv = doc.invoice
+        if paid and (inv.status != "paid" or inv.paid_on != paid):
+            inv.status, inv.paid_on = "paid", paid
+        if due and inv.due_date != due:
+            inv.due_date = due
+        if amount and inv.amount is None:
+            inv.amount = amount
+        return
+    if not (due or paid) or doc.contract is not None or doc.kind_source == "manual" or doc.kind not in ("other", "invoice"):
+        return
+    # Alte Rechnungen ohne Bezahlt-Datum wurden früher nicht nachgepflegt -> als erledigt annehmen
+    stale = not paid and due and due < (today or date.today()) - timedelta(days=open_max_age_days)
+    doc.invoice = Invoice(
+        document_id=doc.id, issuer=doc.correspondent, invoice_date=doc.created, due_date=due, amount=amount,
+        status="paid" if paid or stale else "open", paid_on=paid,
+    )
+    doc.kind, doc.kind_source, doc.review_state = "invoice", "fields", "confirmed"
+    if not paid and not stale and amount is None and doc.extraction_state == "skipped":
+        doc.extraction_state = "queued"  # Betrag für offene Rechnung per Analyse ermitteln
 
 
 def upsert_document(
@@ -119,7 +160,10 @@ def upsert_document(
     doc = session.get(Document, data["id"])
     is_new = doc is None
     if is_new:
-        doc = Document(id=data["id"], suggestions={}, tags=[])
+        doc = Document(
+            id=data["id"], suggestions={}, tags=[], kind="other", kind_source="keyword", review_state="none",
+            extraction_state="queued" if analyze else "skipped",
+        )
         session.add(doc)
 
     new_type = names["document_types"].get(data.get("document_type"))
@@ -135,10 +179,11 @@ def upsert_document(
         doc.page_count = data.get("page_count")
     if "original_file_name" in data:
         doc.original_file_name = data.get("original_file_name")
+    if "custom_fields" in data and names.get("fields"):
+        doc.paperless_fields = fields.extract(data.get("custom_fields"), names["fields"])
+        apply_paperless_fields(doc, names.get("open_max_age_days", 90))
 
     if not analyze:
-        if is_new:
-            doc.extraction_state = "skipped"
         return doc
 
     new_hash = content_hash(data.get("content") or "")
@@ -154,7 +199,7 @@ def sync(session: Session, paperless: PaperlessClient, settings: Settings) -> in
     since = kv_get(session, "last_modified")
     if since is None:
         since = (datetime.now(timezone.utc) - timedelta(days=settings.initial_sync_days)).isoformat()
-    names = load_names(paperless)
+    names = load_names(paperless, settings)
     newest = _parse_dt(since)
     count = 0
     for data in paperless.documents_modified_after(since):
@@ -167,13 +212,13 @@ def sync(session: Session, paperless: PaperlessClient, settings: Settings) -> in
     return count
 
 
-def index_sync(session: Session, paperless: PaperlessClient) -> tuple[int, int]:
+def index_sync(session: Session, paperless: PaperlessClient, settings: Settings | None = None) -> tuple[int, int]:
     """Gleicht die Metadaten des gesamten Archivs ab. Gibt (Anzahl, entfernt) zurück.
 
     Dokumente, die es in Paperless nicht mehr gibt, werden samt Datensätzen entfernt –
     aber nur, wenn der Abgleich vollständig war.
     """
-    names = load_names(paperless)
+    names = load_names(paperless, settings)
     total, documents = paperless.all_documents_metadata()
     seen: set[int] = set()
     for data in documents:
@@ -188,9 +233,9 @@ def index_sync(session: Session, paperless: PaperlessClient) -> tuple[int, int]:
     return len(seen), removed
 
 
-def import_single(session: Session, paperless: PaperlessClient, doc_id: int) -> Document:
+def import_single(session: Session, paperless: PaperlessClient, doc_id: int, settings: Settings | None = None) -> Document:
     data = paperless.get_document(doc_id)
-    return upsert_document(session, data, load_names(paperless), force=True)
+    return upsert_document(session, data, load_names(paperless, settings), force=True)
 
 
 # --------------------------------------------------------------------------- Analyse
@@ -219,6 +264,16 @@ def _fill_defaults(kind: str, doc: Document, sugg: dict) -> None:
             sugg.setdefault("provider", field(doc.correspondent, 0.9, "paperless"))
     elif kind == "warranty":
         sugg.setdefault("product", field(doc.title, 0.9, "paperless"))
+
+
+def _inject_paperless_fields(doc: Document, sugg: dict) -> None:
+    """In Paperless gepflegte Werte sind sicherer als jede Erkennung."""
+    pf = doc.paperless_fields or {}
+    for role in ("due_date", "paid_on", "amount"):
+        if pf.get(role) is not None:
+            sugg[role] = field(pf[role], 0.95, "paperless")
+    if pf.get("paid_on"):
+        sugg["status"] = field("paid", 0.95, "paperless")
 
 
 def _missing(kind: str, sugg: dict) -> list[str]:
@@ -260,11 +315,16 @@ def process_document(
     data = paperless.get_document(doc.id)
     text = data.get("content") or ""
 
-    kind, source = (doc.kind, "manual") if doc.kind_source == "manual" else classify(doc, text, settings)
+    if doc.kind_source in ("manual", "fields"):
+        kind, source = doc.kind, doc.kind_source
+    else:
+        kind, source = classify(doc, text, settings)
     sugg: dict = {}
     if kind != "other":
         sugg = EXTRACTORS[kind](text, doc.created)
         _fill_defaults(kind, doc, sugg)
+        if kind == "invoice":
+            _inject_paperless_fields(doc, sugg)
         wanted = _missing(kind, sugg)
         if ollama is not None and wanted:
             try:
@@ -282,13 +342,17 @@ def process_document(
     doc.extraction_state = "done"
     doc.extraction_error = None
 
+    if settings.summary_mode == "new" and settings.llm_enabled and doc.summary_state is None \
+            and not (doc.paperless_fields or {}).get("summary"):
+        doc.summary_state = "queued"
+
     if kind == "other":
         doc.review_state = "none"
     elif can_auto_accept(kind, sugg, settings):
         apply_values(session, doc, kind, parse_values(kind, suggestion_values(doc)))
         doc.review_state = "confirmed"
         doc.auto_confirmed = True
-        writeback(paperless, doc, settings)
+        doc.writeback_pending = True
     else:
         doc.review_state = "pending"
         doc.auto_confirmed = False
@@ -341,28 +405,128 @@ def apply_values(session: Session, doc: Document, kind: str, values: dict) -> No
     session.flush()
 
 
+def ensure_fields(paperless: PaperlessClient, settings: Settings, roles) -> dict[str, fields.FieldDef]:
+    """Löst Rollen zu Paperless-Feldern auf und legt fehlende (erlaubte) Felder an."""
+    definitions = paperless.custom_field_definitions()
+    defs = fields.resolve(definitions, settings)
+    names = fields.role_names(settings)
+    for role in roles:
+        if role in defs or role not in names:
+            continue
+        _, data_type, creatable = fields.ROLES[role]
+        if creatable and settings.writeback_create_fields:
+            created = paperless.create_custom_field(names[role], data_type)
+            defs[role] = fields.FieldDef(created["id"], created["name"], created.get("data_type", data_type))
+    return defs
+
+
+def write_fields(paperless: PaperlessClient, doc: Document, settings: Settings, values: dict[str, object]) -> list[str]:
+    """Schreibt Rollenwerte (None = Feld leeren) nach Paperless. Gibt nicht zuordenbare Rollen zurück."""
+    defs = ensure_fields(paperless, settings, values.keys())
+    payload = {defs[role].id: fields.encode(defs[role], value) for role, value in values.items() if role in defs}
+    if payload:
+        paperless.set_custom_fields(doc.id, payload)
+        current = dict(doc.paperless_fields or {})
+        for role, value in values.items():
+            if role not in defs:
+                continue
+            if value is None:
+                current.pop(role, None)
+            else:
+                current[role] = fields.decode(defs[role], fields.encode(defs[role], value))
+        doc.paperless_fields = current
+    return [role for role in values if role not in defs]
+
+
+def writeback_values(doc: Document, today: date) -> dict[str, object]:
+    values: dict[str, object] = {}
+    pf = doc.paperless_fields or {}
+    if doc.invoice:
+        values["amount"] = doc.invoice.amount
+        values["due_date"] = doc.invoice.due_date
+        if doc.invoice.status == "paid":
+            values["paid_on"] = doc.invoice.paid_on
+        elif pf.get("paid_on"):
+            values["paid_on"] = None  # wieder offen: Feld leeren
+    if doc.contract:
+        result = deadlines.compute(deadlines.terms_from_contract(doc.contract), today)
+        values["cancel_by"] = None if result.anytime else result.cancel_by
+        values["term_end"] = result.term_end
+    if doc.warranty:
+        values["warranty_end"] = doc.warranty.expires_on
+    # Unbekannte Werte nicht schreiben (würde Eingaben in Paperless löschen) – außer bewusstem Leeren
+    return {role: v for role, v in values.items() if v is not None or (role == "paid_on" and pf.get("paid_on"))}
+
+
 def writeback(paperless: PaperlessClient, doc: Document, settings: Settings, today: date | None = None) -> None:
     if not settings.writeback_enabled:
         return
-    values: dict[str, object] = {}
-    if doc.invoice:
-        values["Betrag"] = doc.invoice.amount
-        values["Fällig am"] = doc.invoice.due_date
-    if doc.contract:
-        result = deadlines.compute(deadlines.terms_from_contract(doc.contract), today or date.today())
-        values["Kündigung bis"] = None if result.anytime else result.cancel_by
-        values["Vertragsende"] = result.term_end
-    if doc.warranty:
-        values["Garantie bis"] = doc.warranty.expires_on
-    if not any(v is not None for v in values.values()):
-        return
-    try:
-        paperless.set_custom_fields(doc.id, values)
-    except PaperlessError as exc:
-        log.warning("Rückschreiben nach Paperless fehlgeschlagen (Dokument %s): %s", doc.id, exc)
+    values = writeback_values(doc, today or date.today())
+    # Nur ändern, was sich vom Stand in Paperless unterscheidet
+    current = doc.paperless_fields or {}
+    changed = {
+        role: v for role, v in values.items()
+        if (v.isoformat() if isinstance(v, date) else v) != current.get(role)
+    }
+    if changed:
+        write_fields(paperless, doc, settings, changed)
+
+
+def flush_writebacks(session: Session, paperless: PaperlessClient, settings: Settings, today: date | None = None) -> int:
+    """Schreibt alle vorgemerkten Änderungen nach Paperless."""
+    done = 0
+    for doc in session.scalars(select(Document).where(Document.writeback_pending.is_(True))):
+        if settings.writeback_enabled:
+            try:
+                writeback(paperless, doc, settings, today)
+            except PaperlessError as exc:
+                log.warning("Rückschreiben nach Paperless fehlgeschlagen (Dokument %s): %s", doc.id, exc)
+                break
+            done += 1
+        doc.writeback_pending = False
+    return done
+
+
+def related_ids(session: Session, doc_id: int) -> set[int]:
+    """Alle über „gehört zu“ verbundenen Dokumente (in beide Richtungen, transitiv), ohne doc_id selbst."""
+    graph: dict[int, set[int]] = {}
+    for doc in session.scalars(select(Document).where(Document.paperless_fields.is_not(None))):
+        for other in (doc.paperless_fields or {}).get("related") or []:
+            graph.setdefault(doc.id, set()).add(other)
+            graph.setdefault(other, set()).add(doc.id)
+    seen, todo = {doc_id}, [doc_id]
+    while todo:
+        for nxt in graph.get(todo.pop(), ()):
+            if nxt not in seen:
+                seen.add(nxt)
+                todo.append(nxt)
+    return seen - {doc_id}
+
+
+def process_summary(
+    session: Session, doc: Document, paperless: PaperlessClient, ollama: OllamaClient, settings: Settings
+) -> None:
+    from app import summary  # lokal, um Importzyklen zu vermeiden
+
+    defs = ensure_fields(paperless, settings, ["summary"])
+    limit = (defs["summary"].text_limit if "summary" in defs else None) or summary.DEFAULT_LIMIT
+    data = paperless.get_document(doc.id)
+    text = summary.generate(
+        ollama, doc.title, doc.correspondent, data.get("content") or "", limit, settings.summary_max_input_chars
+    )
+    doc.summary = text
+    if "summary" in defs:
+        write_fields(paperless, doc, settings, {"summary": text})
+    doc.summary_state = "done"
 
 
 def next_queued(session: Session) -> Document | None:
     return session.scalars(
         select(Document).where(Document.extraction_state == "queued").order_by(Document.updated_at).limit(1)
+    ).first()
+
+
+def next_summary(session: Session) -> Document | None:
+    return session.scalars(
+        select(Document).where(Document.summary_state == "queued").order_by(Document.updated_at).limit(1)
     ).first()

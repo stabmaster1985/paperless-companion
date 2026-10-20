@@ -26,13 +26,31 @@ def timeline(case: Case) -> list[TimelineItem]:
     return items
 
 
-def ensure_document(session: Session, paperless: PaperlessClient, doc_id: int) -> Document:
+def ensure_document(session: Session, paperless: PaperlessClient, doc_id: int, settings=None) -> Document:
     """Dokument aus dem lokalen Index holen oder (ohne Analyse) aus Paperless übernehmen."""
     doc = session.get(Document, doc_id)
     if doc is None:
-        doc = pipeline.upsert_document(session, paperless.get_document(doc_id), pipeline.load_names(paperless), analyze=False)
+        names = pipeline.load_names(paperless, settings)
+        doc = pipeline.upsert_document(session, paperless.get_document(doc_id), names, analyze=False)
         session.flush()
     return doc
+
+
+def write_links(session: Session, paperless: PaperlessClient, settings, case: Case, doc: Document) -> None:
+    """Verknüpft doc im Feld „gehört zu“ mit den übrigen Dokumenten des Vorgangs."""
+    others = {link.document_id for link in case.links if link.document_id != doc.id}
+    current = set((doc.paperless_fields or {}).get("related") or [])
+    if others and not others <= current:
+        pipeline.write_fields(paperless, doc, settings, {"related": sorted(current | others)})
+
+
+def link_suggestions(session: Session, case: Case) -> list[Document]:
+    """Dokumente, die über „gehört zu“ mit dem Vorgang verbunden, aber noch nicht enthalten sind."""
+    in_case = {link.document_id for link in case.links}
+    found: set[int] = set()
+    for doc_id in in_case:
+        found |= pipeline.related_ids(session, doc_id)
+    return [d for d in (session.get(Document, i) for i in sorted(found - in_case)) if d is not None]
 
 
 def add_document(session: Session, case: Case, doc: Document) -> bool:

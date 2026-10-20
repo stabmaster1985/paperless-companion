@@ -6,7 +6,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import update
+from sqlalchemy import func, select, update
 
 from app import payments, pipeline, reminders
 from app.config import Settings
@@ -50,6 +50,7 @@ class Worker:
         self._thread = threading.Thread(target=self._run, name="companion-worker", daemon=True)
         self._last_sync = 0.0
         self._last_payments = -3600.0
+        self._writeback_retry_at = 0.0
         self.sync_requested = True
         self.current_document: int | None = None
         self.last_error: str | None = None
@@ -58,6 +59,7 @@ class Worker:
         with session_scope() as session:
             # Nach Neustart abgebrochene Analysen erneut einreihen
             session.execute(update(Document).where(Document.extraction_state == "running").values(extraction_state="queued"))
+            session.execute(update(Document).where(Document.summary_state == "running").values(summary_state="queued"))
         self._thread.start()
 
     def stop(self) -> None:
@@ -80,8 +82,9 @@ class Worker:
                     self._sync(paperless)
                 self._index_sync(paperless)
                 self._payments()
+                self._writebacks(paperless)
                 self._reminders()
-                worked = self._process_next(paperless, ollama)
+                worked = self._process_next(paperless, ollama) or self._summarize_next(paperless, ollama)
             except Exception as exc:  # noqa: BLE001 - Thread darf nicht sterben
                 log.exception("Fehler im Hintergrundprozess")
                 self.last_error = str(exc)
@@ -113,7 +116,7 @@ class Worker:
             return
         try:
             with session_scope() as session:
-                total, removed = pipeline.index_sync(session, paperless)
+                total, removed = pipeline.index_sync(session, paperless, self.settings)
             log.info("Archiv-Index abgeglichen: %s Dokumente, %s entfernt", total, removed)
         except PaperlessError as exc:
             log.warning("Archiv-Index fehlgeschlagen: %s", exc)
@@ -122,6 +125,19 @@ class Worker:
                 # Nicht in jeder Schleife erneut versuchen – in einer Stunde wieder
                 retry = datetime.now(timezone.utc) - timedelta(hours=23)
                 pipeline.kv_set(session, "last_index_sync", retry.isoformat())
+
+    def _writebacks(self, paperless: PaperlessClient) -> None:
+        """Vorgemerkte Änderungen nach Paperless schreiben (bei Fehlern höchstens alle 5 Minuten)."""
+        if time.monotonic() < self._writeback_retry_at:
+            return
+        with session_scope() as session:
+            pending = session.scalar(select(func.count()).select_from(Document).where(Document.writeback_pending.is_(True)))
+            if not pending:
+                return
+            pipeline.flush_writebacks(session, paperless, self.settings, datetime.now(self.tz).date())
+            still = session.scalar(select(func.count()).select_from(Document).where(Document.writeback_pending.is_(True)))
+        if still:
+            self._writeback_retry_at = time.monotonic() + 300
 
     def _payments(self) -> None:
         """Stündlich offene Rechnungen mit Firefly-III-Buchungen abgleichen."""
@@ -139,6 +155,30 @@ class Worker:
             self.last_error = str(exc)
         finally:
             client.close()
+
+    def _summarize_next(self, paperless: PaperlessClient, ollama: OllamaClient | None) -> bool:
+        """Eine Zusammenfassung erzeugen – erst wenn keine Analyse mehr wartet."""
+        if ollama is None:
+            return False
+        with session_scope() as session:
+            doc = pipeline.next_summary(session)
+            if doc is None:
+                return False
+            doc.summary_state = "running"
+            doc_id = doc.id
+        self.current_document = doc_id
+        try:
+            with session_scope() as session:
+                pipeline.process_summary(session, session.get(Document, doc_id), paperless, ollama, self.settings)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Zusammenfassung von Dokument %s fehlgeschlagen: %s", doc_id, exc)
+            with session_scope() as session:
+                doc = session.get(Document, doc_id)
+                doc.summary_state = "error"
+                doc.extraction_error = f"Zusammenfassung: {str(exc)[:500]}"
+        finally:
+            self.current_document = None
+        return True
 
     def _process_next(self, paperless: PaperlessClient, ollama: OllamaClient | None) -> bool:
         with session_scope() as session:

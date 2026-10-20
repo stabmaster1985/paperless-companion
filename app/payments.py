@@ -100,6 +100,7 @@ def match(session: Session, transactions: list[Transaction], settings: Settings)
         ))
         if auto:
             inv.status, inv.paid_on = "paid", tx.date
+            inv.document.writeback_pending = True
             counts["accepted"] += 1
         else:
             counts["suggested"] += 1
@@ -124,6 +125,7 @@ def accept(session: Session, match_id: int) -> PaymentMatch | None:
         return None
     m.state = "accepted"
     m.invoice.status, m.invoice.paid_on = "paid", m.tx_date
+    m.invoice.document.writeback_pending = True
     return m
 
 

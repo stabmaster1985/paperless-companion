@@ -21,6 +21,12 @@
       {% if not ollama_status.reachable %}<p class="bad">✘ nicht erreichbar: {{ ollama_status.error }}</p>
       {% elif not ollama_status.model_present %}<p class="bad">✘ Modell fehlt – auf dem Ollama-Server <code>ollama pull {{ settings.ollama_model }}</code> ausführen</p>
       {% else %}<p class="ok">✔ bereit</p>{% endif %}
+      <p class="muted">Zusammenfassungen: {{ {'off': 'aus', 'manual': 'nur per Knopf', 'new': 'automatisch für neue Dokumente'}[settings.summary_mode] }}</p>
+      {% if settings.summary_mode != 'off' %}
+      <form method="post" action="/system/summaries" class="inline" onsubmit="return confirm('Alle Dokumente ohne Zusammenfassung einreihen? Das kann auf der CPU viele Stunden dauern.')">
+        <button class="small">Alle ohne Zusammenfassung einreihen</button>
+      </form>
+      {% endif %}
     {% endif %}
   </div>
 

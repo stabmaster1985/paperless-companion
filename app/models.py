@@ -24,6 +24,13 @@ class Document(Base):
     content_hash: Mapped[str | None] = mapped_column(String)
 
     tags: Mapped[list] = mapped_column(JSON, default=list)
+    # Werte der zugeordneten Paperless-Custom-Fields je Rolle (siehe app/fields.py)
+    paperless_fields: Mapped[dict | None] = mapped_column(JSON)
+    summary: Mapped[str | None] = mapped_column(Text)
+    # None | queued | running | done | error
+    summary_state: Mapped[str | None] = mapped_column(String)
+    # Änderungen, die noch nach Paperless zurückgeschrieben werden müssen
+    writeback_pending: Mapped[bool] = mapped_column(default=False, server_default="0")
     page_count: Mapped[int | None] = mapped_column(Integer)
     original_file_name: Mapped[str | None] = mapped_column(String)
 

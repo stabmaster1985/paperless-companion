@@ -138,7 +138,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         return render(request, "documents.html", docs=session.scalars(query).all(), kind=kind, state=state, q=q)
 
     @app.get("/documents/{doc_id}", response_class=HTMLResponse)
-    def document_detail(request: Request, doc_id: int, session: Session = Depends(get_session)):
+    def document_detail(request: Request, doc_id: int, msg: str = "", session: Session = Depends(get_session)):
         doc = session.get(Document, doc_id)
         if doc is None:
             raise HTTPException(404, "Dokument nicht gefunden")
@@ -151,6 +151,8 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             request, "document.html", doc=doc, values=values, from_record=from_record,
             sugg=doc.suggestions or {}, deadline=deadline,
             doc_cases=cases.cases_for_document(session, doc_id), open_cases=open_cases,
+            related=[(i, session.get(Document, i)) for i in sorted(pipeline.related_ids(session, doc_id))],
+            pf=doc.paperless_fields or {}, settings=settings, msg=msg,
         )
 
     @app.post("/documents/{doc_id}/confirm")
@@ -162,12 +164,8 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         pipeline.apply_values(session, doc, doc.kind, pipeline.parse_values(doc.kind, form))
         doc.review_state = "confirmed"
         doc.auto_confirmed = False
-        if settings.writeback_enabled:
-            paperless = make_paperless(settings)
-            try:
-                pipeline.writeback(paperless, doc, settings, today())
-            finally:
-                paperless.close()
+        doc.writeback_pending = True
+        request_worker(app)
         target = form.get("next") or "/inbox"
         return RedirectResponse(target if target.startswith("/") else "/inbox", status_code=303)
 
@@ -190,6 +188,53 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         doc.extraction_state = "queued"
         request_worker(app)
         return RedirectResponse(f"/documents/{doc_id}", status_code=303)
+
+    @app.post("/documents/{doc_id}/comment")
+    def document_comment(doc_id: int, comment: str = Form(""), session: Session = Depends(get_session)):
+        doc = session.get(Document, doc_id)
+        if doc is None:
+            raise HTTPException(404)
+        paperless = make_paperless(settings, timeout=15)
+        try:
+            missing = pipeline.write_fields(paperless, doc, settings, {"comment": comment.strip() or None})
+            msg = f"Feld „{settings.field_comment}“ gibt es in Paperless nicht" if missing else "Kommentar gespeichert"
+        except PaperlessError as exc:
+            msg = f"Kommentar konnte nicht gespeichert werden: {exc}"
+        finally:
+            paperless.close()
+        return RedirectResponse(f"/documents/{doc_id}?msg={quote(msg)}", status_code=303)
+
+    @app.post("/documents/{doc_id}/summary")
+    def document_summary(doc_id: int, session: Session = Depends(get_session)):
+        doc = session.get(Document, doc_id)
+        if doc is None:
+            raise HTTPException(404)
+        doc.summary_state = "queued"
+        request_worker(app)
+        return RedirectResponse(f"/documents/{doc_id}", status_code=303)
+
+    @app.post("/documents/{doc_id}/case-from-links")
+    def document_case_from_links(doc_id: int, session: Session = Depends(get_session)):
+        doc = session.get(Document, doc_id)
+        if doc is None:
+            raise HTTPException(404)
+        case = Case(title=doc.title or f"Vorgang zu #{doc_id}")
+        session.add(case)
+        session.flush()
+        for other_id in [doc_id, *sorted(pipeline.related_ids(session, doc_id))]:
+            if session.get(Document, other_id) is not None:
+                cases.add_document(session, case, session.get(Document, other_id))
+        return RedirectResponse(f"/cases/{case.id}", status_code=303)
+
+    @app.post("/system/summaries")
+    def system_summaries(session: Session = Depends(get_session)):
+        count = 0
+        for doc in session.scalars(select(Document).where(Document.summary_state.is_(None), Document.summary.is_(None))):
+            if not (doc.paperless_fields or {}).get("summary"):
+                doc.summary_state = "queued"
+                count += 1
+        request_worker(app)
+        return RedirectResponse(f"/system?msg={quote(f'{count} Dokumente für die Zusammenfassung eingereiht')}", status_code=303)
 
     @app.post("/documents/{doc_id}/ignore")
     def document_ignore(doc_id: int, session: Session = Depends(get_session)):
@@ -216,6 +261,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             raise HTTPException(404)
         c.status = "cancelled"
         c.cancelled_on = pipeline.coerce("date", cancelled_on) or today()
+        c.document.writeback_pending = True
         return RedirectResponse("/contracts", status_code=303)
 
     @app.get("/invoices", response_class=HTMLResponse)
@@ -257,6 +303,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             raise HTTPException(404)
         if found is None:
             raise HTTPException(404)
+        request_worker(app)
         return RedirectResponse("/invoices", status_code=303)
 
     @app.post("/invoices/{invoice_id}/paid")
@@ -265,6 +312,8 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         if inv is None:
             raise HTTPException(404)
         inv.status, inv.paid_on = "paid", today()
+        inv.document.writeback_pending = True
+        request_worker(app)
         return RedirectResponse("/invoices", status_code=303)
 
     @app.post("/invoices/{invoice_id}/open")
@@ -273,6 +322,8 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         if inv is None:
             raise HTTPException(404)
         inv.status, inv.paid_on = "open", None
+        inv.document.writeback_pending = True
+        request_worker(app)
         return RedirectResponse("/invoices?status=paid", status_code=303)
 
     @app.get("/warranties", response_class=HTMLResponse)
@@ -322,7 +373,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     def system_import(doc_id: int = Form(...), session: Session = Depends(get_session)):
         paperless = make_paperless(settings)
         try:
-            pipeline.import_single(session, paperless, doc_id)
+            pipeline.import_single(session, paperless, doc_id, settings)
         except PaperlessError as exc:
             return RedirectResponse(f"/system?msg={quote(f'Import fehlgeschlagen: {exc}')}", status_code=303)
         finally:
@@ -388,7 +439,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     def retention_index(session: Session = Depends(get_session)):
         paperless = make_paperless(settings, timeout=60)
         try:
-            total, removed = pipeline.index_sync(session, paperless)
+            total, removed = pipeline.index_sync(session, paperless, settings)
             msg = f"Archiv-Index aktualisiert: {total} Dokumente, {removed} entfernt"
         except PaperlessError as exc:
             msg = f"Fehler: {exc}"
@@ -481,7 +532,10 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             raise HTTPException(404, "Vorgang nicht gefunden")
         linked = {link.document_id for link in case.links}
         results = [d for d in cases.search_documents(session, q) if d.id not in linked] if q.strip() else []
-        return render(request, "case.html", case=case, timeline=cases.timeline(case), q=q, results=results, msg=msg)
+        return render(
+            request, "case.html", case=case, timeline=cases.timeline(case), q=q, results=results, msg=msg,
+            link_suggestions=cases.link_suggestions(session, case), settings=settings,
+        )
 
     @app.post("/cases/{case_id}/update")
     def case_update(
@@ -553,12 +607,22 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     def add_to_case(session: Session, case: Case, doc_id: int) -> str:
         paperless = make_paperless(settings, timeout=15)
         try:
-            doc = cases.ensure_document(session, paperless, doc_id)
-        except PaperlessError as exc:
-            return f"Dokument {doc_id} nicht gefunden: {exc}"
+            try:
+                doc = cases.ensure_document(session, paperless, doc_id, settings)
+            except PaperlessError as exc:
+                return f"Dokument {doc_id} nicht gefunden: {exc}"
+            if not cases.add_document(session, case, doc):
+                return "Dokument ist bereits im Vorgang"
+            if settings.cases_write_links:
+                session.flush()
+                session.refresh(case)
+                try:
+                    cases.write_links(session, paperless, settings, case, doc)
+                except PaperlessError as exc:
+                    return f"Hinzugefügt, aber „{settings.field_related}“ konnte nicht gesetzt werden: {exc}"
+            return ""
         finally:
             paperless.close()
-        return "" if cases.add_document(session, case, doc) else "Dokument ist bereits im Vorgang"
 
     # ------------------------------------------------------------------ Steuer
 
@@ -621,7 +685,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             return {"status": "sync_requested"}
         paperless = make_paperless(settings)
         try:
-            pipeline.import_single(session, paperless, doc_id)
+            pipeline.import_single(session, paperless, doc_id, settings)
         except PaperlessError as exc:
             raise HTTPException(502, str(exc)) from exc
         finally:

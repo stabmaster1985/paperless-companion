@@ -2,20 +2,9 @@
 
 import re
 from collections.abc import Iterator
-from datetime import date
 from urllib.parse import unquote
 
 import httpx
-
-# Custom Fields, die beim Rückschreiben gepflegt werden: Name -> Paperless-Datentyp
-WRITEBACK_FIELDS = {
-    "Betrag": "monetary",
-    "Fällig am": "date",
-    "Kündigung bis": "date",
-    "Vertragsende": "date",
-    "Garantie bis": "date",
-}
-
 
 class PaperlessError(RuntimeError):
     pass
@@ -75,7 +64,7 @@ class PaperlessClient:
             "ordering": "id",
             "truncate_content": "true",
             "fields": "id,title,correspondent,document_type,created,created_date,modified,tags,"
-                      "page_count,original_file_name",
+                      "page_count,original_file_name,custom_fields",
         }
         count = self._get("/api/documents/", page_size=1).get("count", 0)
         return count, self._paginate("/api/documents/", **params)
@@ -124,35 +113,25 @@ class PaperlessClient:
 
     # ------------------------------------------------------------------ Custom Fields
 
-    def ensure_custom_fields(self) -> dict[str, int]:
-        if self._custom_field_ids:
-            return self._custom_field_ids
-        existing = {item["name"]: item["id"] for item in self._paginate("/api/custom_fields/", page_size=500)}
-        for name, data_type in WRITEBACK_FIELDS.items():
-            if name not in existing:
-                try:
-                    response = self._client.post("/api/custom_fields/", json={"name": name, "data_type": data_type})
-                    response.raise_for_status()
-                except httpx.HTTPError as exc:
-                    raise PaperlessError(f"Custom Field {name!r} anlegen: {exc}") from exc
-                existing[name] = response.json()["id"]
-        self._custom_field_ids = {name: existing[name] for name in WRITEBACK_FIELDS}
-        return self._custom_field_ids
+    def custom_field_definitions(self) -> list[dict]:
+        return list(self._paginate("/api/custom_fields/", page_size=500))
 
-    def set_custom_fields(self, doc_id: int, values: dict[str, object]) -> None:
-        """Setzt die angegebenen Felder, andere Custom Fields des Dokuments bleiben erhalten."""
-        ids = self.ensure_custom_fields()
+    def create_custom_field(self, name: str, data_type: str) -> dict:
+        try:
+            response = self._client.post("/api/custom_fields/", json={"name": name, "data_type": data_type})
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise PaperlessError(f"Custom Field {name!r} anlegen: {exc}") from exc
+        return response.json()
+
+    def set_custom_fields(self, doc_id: int, values: dict[int, object]) -> None:
+        """Setzt Felder (Feld-ID -> bereits kodierter Wert, None = leeren).
+
+        Andere Custom Fields des Dokuments bleiben unverändert erhalten.
+        """
         doc = self.get_document(doc_id)
-        managed = {ids[name] for name in values}
-        merged = [cf for cf in doc.get("custom_fields", []) if cf["field"] not in managed]
-        for name, value in values.items():
-            if value is None:
-                continue
-            if isinstance(value, date):
-                value = value.isoformat()
-            elif WRITEBACK_FIELDS[name] == "monetary":
-                value = f"EUR{float(value):.2f}"
-            merged.append({"field": ids[name], "value": value})
+        merged = [cf for cf in doc.get("custom_fields", []) if cf["field"] not in values]
+        merged += [{"field": field_id, "value": value} for field_id, value in values.items()]
         try:
             response = self._client.patch(f"/api/documents/{doc_id}/", json={"custom_fields": merged})
             response.raise_for_status()

@@ -30,6 +30,9 @@
           <div class="when">{{ item.date|d }} · Dokument</div>
           <a href="/documents/{{ item.document.id }}">{{ item.document.title or ('#' ~ item.document.id) }}</a> {{ doclink(item.document.id) }}
           <br><small>{{ item.document.correspondent or '' }} {{ item.document.document_type or '' }}</small>
+          {% set ipf = item.document.paperless_fields or {} %}
+          {% if ipf.get('summary') or item.document.summary %}<div class="note-text"><small>{{ ipf.get('summary') or item.document.summary }}</small></div>{% endif %}
+          {% if ipf.get('comment') %}<div class="note-text"><small>💬 {{ ipf.get('comment') }}</small></div>{% endif %}
           <form method="post" action="/cases/{{ case.id }}/documents/{{ item.document.id }}/remove" class="inline"><button class="small link" title="Aus Vorgang entfernen">entfernen</button></form>
         </li>
         {% else %}
@@ -47,6 +50,22 @@
   </div>
 
   <div class="stack">
+    {% if link_suggestions %}
+    <div class="card">
+      <h2>Über „{{ settings.field_related }}“ verknüpft</h2>
+      <ul class="plain">
+        {% for d in link_suggestions %}
+        <li>
+          <form method="post" action="/cases/{{ case.id }}/documents" class="inline">
+            <input type="hidden" name="document_id" value="{{ d.id }}"><button class="small link">+ hinzufügen</button>
+          </form>
+          {{ d.title }} <small>{{ d.correspondent or '' }} {{ d.created|d }}</small>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+
     <div class="card">
       <h2>Dokument hinzufügen</h2>
       <form method="get" class="row">
