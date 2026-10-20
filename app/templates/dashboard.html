@@ -19,7 +19,7 @@
     <tr class="ev-{{ e.type }}">
       <td class="nowrap">{{ e.date|d }}<br><small>{% if days < 0 %}vor {{ -days }} T.{% elif days == 0 %}heute{% else %}in {{ days }} T.{% endif %}</small></td>
       <td><span class="tag tag-{{ e.type }}">{{ e.label }}</span></td>
-      <td><a href="/documents/{{ e.document_id }}">{{ e.title }}</a> {{ doclink(e.document_id) }}</td>
+      <td><a href="{{ e.url }}">{{ e.title }}</a> {% if e.document_id %}{{ doclink(e.document_id) }}{% endif %}</td>
       <td class="hide-sm">{{ e.detail }}</td>
     </tr>
   {% endfor %}

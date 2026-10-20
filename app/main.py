@@ -17,15 +17,16 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import deadlines, events, ics, notify, payments, pipeline, reminders, retention, tax
+from app import cases, deadlines, events, ics, notify, payments, pipeline, reminders, retention, tax
 from app.config import Settings, get_settings
 from app.db import get_session, init_db, session_scope
-from app.models import Contract, Document, Invoice, RetentionLog, RetentionRule, Warranty
+from app.models import Case, CaseDocument, CaseEntry, Contract, Document, Invoice, RetentionLog, RetentionRule, Warranty
 from app.paperless import PaperlessError
 from app.firefly import FireflyError
 from app.worker import Worker, make_firefly, make_ollama, make_paperless
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logging.getLogger("httpx").setLevel(logging.WARNING)
 log = logging.getLogger(__name__)
 BASE = Path(__file__).parent
 PUBLIC_PATHS = ("/login", "/static", "/api/webhook", "/calendar.ics", "/health")
@@ -125,13 +126,16 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         return render(request, "inbox.html", docs=docs)
 
     @app.get("/documents", response_class=HTMLResponse)
-    def documents(request: Request, kind: str = "", state: str = "", session: Session = Depends(get_session)):
+    def documents(request: Request, kind: str = "", state: str = "", q: str = "", session: Session = Depends(get_session)):
         query = select(Document).order_by(Document.created.desc().nulls_last(), Document.id.desc()).limit(500)
+        if q.strip():
+            pattern = f"%{q.strip()}%"
+            query = query.where(Document.title.ilike(pattern) | Document.correspondent.ilike(pattern))
         if kind:
             query = query.where(Document.kind == kind)
         if state:
             query = query.where(Document.extraction_state == state)
-        return render(request, "documents.html", docs=session.scalars(query).all(), kind=kind, state=state)
+        return render(request, "documents.html", docs=session.scalars(query).all(), kind=kind, state=state, q=q)
 
     @app.get("/documents/{doc_id}", response_class=HTMLResponse)
     def document_detail(request: Request, doc_id: int, session: Session = Depends(get_session)):
@@ -142,9 +146,11 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         deadline = None
         if doc.contract:
             deadline = deadlines.compute(deadlines.terms_from_contract(doc.contract), today())
+        open_cases = session.scalars(select(Case).where(Case.status == "open").order_by(Case.title)).all()
         return render(
             request, "document.html", doc=doc, values=values, from_record=from_record,
             sugg=doc.suggestions or {}, deadline=deadline,
+            doc_cases=cases.cases_for_document(session, doc_id), open_cases=open_cases,
         )
 
     @app.post("/documents/{doc_id}/confirm")
@@ -446,6 +452,113 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             raise HTTPException(404)
         doc.retention_hold = hold == "1"
         return RedirectResponse(f"/documents/{doc_id}", status_code=303)
+
+    # ------------------------------------------------------------------ Vorgänge
+
+    @app.get("/cases", response_class=HTMLResponse)
+    def cases_page(request: Request, status: str = "open", session: Session = Depends(get_session)):
+        query = select(Case).order_by(Case.follow_up.asc().nulls_last(), Case.created_at.desc())
+        if status in ("open", "closed"):
+            query = query.where(Case.status == status)
+        return render(request, "cases.html", cases=session.scalars(query).all(), status=status)
+
+    @app.post("/cases")
+    def case_create(
+        title: str = Form(...), document_id: str = Form(""), follow_up: str = Form(""),
+        session: Session = Depends(get_session),
+    ):
+        case = Case(title=title.strip() or "Neuer Vorgang", follow_up=pipeline.coerce("date", follow_up))
+        session.add(case)
+        session.flush()
+        if document_id.strip().isdigit():
+            add_to_case(session, case, int(document_id))
+        return RedirectResponse(f"/cases/{case.id}", status_code=303)
+
+    @app.get("/cases/{case_id}", response_class=HTMLResponse)
+    def case_detail(request: Request, case_id: int, q: str = "", msg: str = "", session: Session = Depends(get_session)):
+        case = session.get(Case, case_id)
+        if case is None:
+            raise HTTPException(404, "Vorgang nicht gefunden")
+        linked = {link.document_id for link in case.links}
+        results = [d for d in cases.search_documents(session, q) if d.id not in linked] if q.strip() else []
+        return render(request, "case.html", case=case, timeline=cases.timeline(case), q=q, results=results, msg=msg)
+
+    @app.post("/cases/{case_id}/update")
+    def case_update(
+        case_id: int, title: str = Form(...), follow_up: str = Form(""), follow_up_note: str = Form(""),
+        session: Session = Depends(get_session),
+    ):
+        case = session.get(Case, case_id)
+        if case is None:
+            raise HTTPException(404)
+        case.title = title.strip() or case.title
+        case.follow_up = pipeline.coerce("date", follow_up)
+        case.follow_up_note = follow_up_note.strip() or None
+        return RedirectResponse(f"/cases/{case_id}", status_code=303)
+
+    @app.post("/cases/{case_id}/status")
+    def case_status(case_id: int, status: str = Form(...), session: Session = Depends(get_session)):
+        case = session.get(Case, case_id)
+        if case is None or status not in ("open", "closed"):
+            raise HTTPException(404)
+        case.status = status
+        case.closed_at = datetime.now() if status == "closed" else None
+        return RedirectResponse(f"/cases/{case_id}", status_code=303)
+
+    @app.post("/cases/{case_id}/delete")
+    def case_delete(case_id: int, session: Session = Depends(get_session)):
+        if case := session.get(Case, case_id):
+            session.delete(case)
+        return RedirectResponse("/cases", status_code=303)
+
+    @app.post("/cases/{case_id}/documents")
+    def case_add_document(case_id: int, document_id: int = Form(...), back: str = Form(""), session: Session = Depends(get_session)):
+        case = session.get(Case, case_id)
+        if case is None:
+            raise HTTPException(404)
+        msg = add_to_case(session, case, document_id)
+        target = back if back.startswith("/") else f"/cases/{case_id}"
+        return RedirectResponse(f"{target}{'&' if '?' in target else '?'}msg={quote(msg)}" if msg else target, status_code=303)
+
+    @app.post("/documents/{doc_id}/add-to-case")
+    def document_add_to_case(doc_id: int, case_id: int = Form(...), session: Session = Depends(get_session)):
+        case = session.get(Case, case_id)
+        if case is None:
+            raise HTTPException(404)
+        add_to_case(session, case, doc_id)
+        return RedirectResponse(f"/documents/{doc_id}", status_code=303)
+
+    @app.post("/cases/{case_id}/documents/{doc_id}/remove")
+    def case_remove_document(case_id: int, doc_id: int, session: Session = Depends(get_session)):
+        if link := session.get(CaseDocument, (case_id, doc_id)):
+            session.delete(link)
+        return RedirectResponse(f"/cases/{case_id}", status_code=303)
+
+    @app.post("/cases/{case_id}/entries")
+    def case_add_entry(case_id: int, text: str = Form(...), entry_date: str = Form(""), session: Session = Depends(get_session)):
+        case = session.get(Case, case_id)
+        if case is None:
+            raise HTTPException(404)
+        if text.strip():
+            session.add(CaseEntry(case_id=case_id, text=text.strip(), date=pipeline.coerce("date", entry_date) or today()))
+        return RedirectResponse(f"/cases/{case_id}", status_code=303)
+
+    @app.post("/cases/{case_id}/entries/{entry_id}/delete")
+    def case_delete_entry(case_id: int, entry_id: int, session: Session = Depends(get_session)):
+        entry = session.get(CaseEntry, entry_id)
+        if entry is not None and entry.case_id == case_id:
+            session.delete(entry)
+        return RedirectResponse(f"/cases/{case_id}", status_code=303)
+
+    def add_to_case(session: Session, case: Case, doc_id: int) -> str:
+        paperless = make_paperless(settings, timeout=15)
+        try:
+            doc = cases.ensure_document(session, paperless, doc_id)
+        except PaperlessError as exc:
+            return f"Dokument {doc_id} nicht gefunden: {exc}"
+        finally:
+            paperless.close()
+        return "" if cases.add_document(session, case, doc) else "Dokument ist bereits im Vorgang"
 
     # ------------------------------------------------------------------ Steuer
 

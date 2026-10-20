@@ -3,10 +3,10 @@
 {% block content %}
 <h1>Aufbewahrung</h1>
 {% if msg %}<div class="notice">{{ msg }}</div>{% endif %}
-<p class="muted">
+<div class="muted">
   Archiv-Index: {{ indexed }} Dokumente · zuletzt abgeglichen {{ last_index[:16].replace('T', ' ') ~ ' (UTC)' if last_index else 'noch nie' }}
   <form method="post" action="/retention/index" class="inline"><button class="small link">jetzt abgleichen</button></form>
-</p>
+</div>
 
 <h2>Löschbar ({{ overview.due|length }})</h2>
 {% if overview.due %}

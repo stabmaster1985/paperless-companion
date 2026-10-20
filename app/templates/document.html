@@ -100,6 +100,30 @@
 </form>
 {% endif %}
 
+<section class="card">
+  <h2>Vorgänge</h2>
+  {% if doc_cases %}
+  <p>{% for c in doc_cases %}<a href="/cases/{{ c.id }}">{{ c.title }}</a>{% if c.status == 'closed' %} <small>(abgeschlossen)</small>{% endif %}{{ ', ' if not loop.last }}{% endfor %}</p>
+  {% endif %}
+  <div class="row">
+    {% if open_cases %}
+    <form method="post" action="/documents/{{ doc.id }}/add-to-case" class="row">
+      <label class="field"><span>Zu Vorgang hinzufügen</span>
+        <select name="case_id" required>
+          {% for c in open_cases %}<option value="{{ c.id }}">{{ c.title }}</option>{% endfor %}
+        </select>
+      </label>
+      <button class="small">Hinzufügen</button>
+    </form>
+    {% endif %}
+    <form method="post" action="/cases" class="row">
+      <label class="field"><span>Neuer Vorgang mit diesem Dokument</span><input name="title" value="{{ doc.title }}" required></label>
+      <input type="hidden" name="document_id" value="{{ doc.id }}">
+      <button class="small">Anlegen</button>
+    </form>
+  </div>
+</section>
+
 <div class="actions secondary">
   <form method="post" action="/documents/{{ doc.id }}/reanalyze" class="inline"><button class="small">Neu analysieren</button></form>
   {% if doc.kind != 'other' %}

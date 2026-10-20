@@ -185,3 +185,44 @@ class PaymentMatch(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     invoice: Mapped[Invoice] = relationship()
+
+
+class Case(Base):
+    """Vorgang: mehrere Dokumente und Notizen zu einem Fall (z.B. Schadensfall, Widerspruch)."""
+
+    __tablename__ = "cases"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str] = mapped_column(String)
+    # open | closed
+    status: Mapped[str] = mapped_column(String, default="open")
+    follow_up: Mapped[date | None] = mapped_column(Date)
+    follow_up_note: Mapped[str | None] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+    links: Mapped[list["CaseDocument"]] = relationship(back_populates="case", cascade="all, delete-orphan")
+    entries: Mapped[list["CaseEntry"]] = relationship(back_populates="case", cascade="all, delete-orphan")
+
+
+class CaseDocument(Base):
+    __tablename__ = "case_documents"
+
+    case_id: Mapped[int] = mapped_column(ForeignKey("cases.id", ondelete="CASCADE"), primary_key=True)
+    document_id: Mapped[int] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"), primary_key=True)
+    added_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    case: Mapped[Case] = relationship(back_populates="links")
+    document: Mapped[Document] = relationship()
+
+
+class CaseEntry(Base):
+    __tablename__ = "case_entries"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    case_id: Mapped[int] = mapped_column(ForeignKey("cases.id", ondelete="CASCADE"))
+    date: Mapped[date] = mapped_column(Date)
+    text: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    case: Mapped[Case] = relationship(back_populates="entries")

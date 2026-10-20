@@ -71,3 +71,8 @@ def test_login_required(settings, mock_api):
         assert c.post("/login", data={"password": "geheim"}, follow_redirects=False).status_code == 303
         assert c.get("/").status_code == 200
         assert c.get("/health").status_code == 200
+
+
+def test_document_search(client):
+    page = client.get("/documents?q=strom").text
+    assert "Stromrechnung Oktober" in page and "Handyvertrag" not in page

@@ -3,6 +3,7 @@
 {% block content %}
 <h1>Dokumente</h1>
 <form method="get" class="filters">
+  <input type="search" name="q" value="{{ q }}" placeholder="Titel oder Korrespondent" aria-label="Suche" style="max-width:240px">
   <select name="kind" onchange="this.form.submit()">
     <option value="">Alle Arten</option>
     {% for key, text in KINDS.items() %}<option value="{{ key }}" {{ 'selected' if kind == key }}>{{ text }}</option>{% endfor %}

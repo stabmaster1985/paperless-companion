@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Vorgänge</h1>
+<p class="muted">Bündle zusammengehörige Dokumente – z.B. Schadensfall, Widerspruch, Hausbau – mit Notizen und Wiedervorlage.</p>
+<nav class="tabs">
+  <a href="/cases?status=open" class="{{ 'active' if status == 'open' }}">Offen</a>
+  <a href="/cases?status=closed" class="{{ 'active' if status == 'closed' }}">Abgeschlossen</a>
+  <a href="/cases?status=all" class="{{ 'active' if status not in ('open', 'closed') }}">Alle</a>
+</nav>
+{% if cases %}
+<div class="table-wrap"><table class="list">
+  <thead><tr><th>Vorgang</th><th>Dokumente</th><th>Wiedervorlage</th></tr></thead>
+  <tbody>
+  {% for c in cases %}
+    <tr class="{{ 'inactive' if c.status == 'closed' }}">
+      <td><a href="/cases/{{ c.id }}">{{ c.title }}</a>{% if c.status == 'closed' %} <span class="tag">abgeschlossen</span>{% endif %}</td>
+      <td>{{ c.links|length }}{% if c.entries %} · {{ c.entries|length }} Notizen{% endif %}</td>
+      <td class="nowrap">{% if c.follow_up %}<span class="{{ 'soon' if c.status == 'open' and c.follow_up <= today }}">{{ c.follow_up|d }}</span>{% else %}–{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% else %}
+<p class="empty">Keine Vorgänge in dieser Ansicht.</p>
+{% endif %}
+
+<details class="card" {{ 'open' if not cases }}>
+  <summary>Neuer Vorgang</summary>
+  <form method="post" action="/cases" class="stack" style="margin-top:.75rem">
+    <div class="row">
+      <label class="field"><span>Titel</span><input name="title" required placeholder="z.B. Wasserschaden Keller 2026"></label>
+      <label class="field"><span>Erstes Dokument (Paperless-ID, optional)</span><input name="document_id" inputmode="numeric"></label>
+      <label class="field"><span>Wiedervorlage (optional)</span><input type="date" name="follow_up"></label>
+    </div>
+    <div><button class="primary">Anlegen</button></div>
+  </form>
+</details>
+{% endblock %}

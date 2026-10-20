@@ -128,7 +128,7 @@ button, .button {
   border-radius: 6px; padding: .45rem .9rem; display: inline-block;
 }
 button:hover, .button:hover { border-color: var(--accent); text-decoration: none; }
-button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+button.primary, .button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
 button.small, .button.small { padding: .2rem .6rem; font-size: .85rem; }
 button.link { border: 0; background: none; color: var(--accent); padding: .2rem .4rem; }
 .actions { margin-top: 1rem; display: flex; gap: .5rem; flex-wrap: wrap; }
@@ -165,3 +165,13 @@ details.edit[open] { margin-bottom: .5rem; }
 .rule-form { margin-top: .75rem; display: flex; flex-direction: column; gap: .75rem; align-items: flex-start; }
 .rule-form .grid { width: 100%; }
 .tags { display: inline-flex; flex-wrap: wrap; gap: .25rem; }
+.tag-follow_up { background: var(--info-bg); border-color: var(--accent); }
+.timeline { list-style: none; padding: 0; margin: 0; border-left: 2px solid var(--border); }
+.timeline li { position: relative; padding: .3rem 0 .9rem 1.1rem; }
+.timeline li::before { content: ""; position: absolute; left: -6px; top: .65rem; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); }
+.timeline li.note::before { background: var(--warn); }
+.timeline .when { font-size: .8rem; color: var(--muted); }
+.timeline .note-text { white-space: pre-wrap; }
+.stack { display: flex; flex-direction: column; gap: .75rem; }
+.row { display: flex; gap: .5rem; flex-wrap: wrap; align-items: flex-end; }
+.row .field { flex: 1 1 160px; }

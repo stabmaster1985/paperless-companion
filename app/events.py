@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app import deadlines
-from app.models import Contract, Invoice, Warranty
+from app.models import Case, Contract, Invoice, Warranty
 
 LABELS = {
     "cancel": "Kündigungsfrist",
@@ -15,6 +15,7 @@ LABELS = {
     "due": "Rechnung fällig",
     "overdue": "Rechnung überfällig",
     "warranty": "Garantie endet",
+    "follow_up": "Wiedervorlage",
 }
 
 
@@ -24,9 +25,14 @@ class Event:
     type: str
     title: str
     detail: str
-    document_id: int
+    document_id: int | None
     key: str
     amount: float | None = None
+    case_id: int | None = None
+
+    @property
+    def url(self) -> str:
+        return f"/cases/{self.case_id}" if self.case_id else f"/documents/{self.document_id}"
 
     @property
     def label(self) -> str:
@@ -83,6 +89,13 @@ def collect(session: Session, today: date) -> list[Event]:
                 detail=f"{kind} ({w.months} Monate) endet am {fmt_date(expires)}.",
                 document_id=w.document_id, key=f"warranty:{w.id}",
             ))
+
+    for case in session.scalars(select(Case).where(Case.status == "open", Case.follow_up.is_not(None))):
+        events.append(Event(
+            date=case.follow_up, type="follow_up", title=case.title,
+            detail=case.follow_up_note or "Vorgang wieder vorlegen.",
+            document_id=None, key=f"case:{case.id}:follow_up", case_id=case.id,
+        ))
 
     events.sort(key=lambda e: e.date)
     return events

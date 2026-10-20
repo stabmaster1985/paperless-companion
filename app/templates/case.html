@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% from "macros.html" import doclink %}
+{% block title %}{{ case.title }} – Paperless Companion{% endblock %}
+{% block content %}
+<div class="head">
+  <div>
+    <h1>{{ case.title }}</h1>
+    <p class="muted">{{ 'Offen' if case.status == 'open' else 'Abgeschlossen' }} · {{ case.links|length }} Dokumente · angelegt {{ case.created_at.strftime('%d.%m.%Y') }}</p>
+  </div>
+  <div class="actions secondary">
+    <form method="post" action="/cases/{{ case.id }}/status" class="inline">
+      <input type="hidden" name="status" value="{{ 'closed' if case.status == 'open' else 'open' }}">
+      <button class="small">{{ 'Abschließen' if case.status == 'open' else 'Wieder öffnen' }}</button>
+    </form>
+  </div>
+</div>
+{% if msg %}<div class="notice warn">{{ msg }}</div>{% endif %}
+{% if case.status == 'open' and case.follow_up and case.follow_up <= today %}
+  <div class="notice warn">Wiedervorlage fällig{% if case.follow_up_note %}: {{ case.follow_up_note }}{% endif %}</div>
+{% endif %}
+
+<section class="cards">
+  <div class="card">
+    <h2>Zeitstrahl</h2>
+    {% if timeline %}
+    <ul class="timeline">
+      {% for item in timeline %}
+        {% if item.kind == 'document' %}
+        <li>
+          <div class="when">{{ item.date|d }} · Dokument</div>
+          <a href="/documents/{{ item.document.id }}">{{ item.document.title or ('#' ~ item.document.id) }}</a> {{ doclink(item.document.id) }}
+          <br><small>{{ item.document.correspondent or '' }} {{ item.document.document_type or '' }}</small>
+          <form method="post" action="/cases/{{ case.id }}/documents/{{ item.document.id }}/remove" class="inline"><button class="small link" title="Aus Vorgang entfernen">entfernen</button></form>
+        </li>
+        {% else %}
+        <li class="note">
+          <div class="when">{{ item.date|d }} · Notiz</div>
+          <div class="note-text">{{ item.entry.text }}</div>
+          <form method="post" action="/cases/{{ case.id }}/entries/{{ item.entry.id }}/delete" class="inline"><button class="small link">löschen</button></form>
+        </li>
+        {% endif %}
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="muted">Noch keine Dokumente oder Notizen.</p>
+    {% endif %}
+  </div>
+
+  <div class="stack">
+    <div class="card">
+      <h2>Dokument hinzufügen</h2>
+      <form method="get" class="row">
+        <label class="field"><span>Suche nach Titel oder Korrespondent</span><input name="q" value="{{ q }}"></label>
+        <button class="small">Suchen</button>
+      </form>
+      {% if q %}
+        {% if results %}
+        <ul class="plain">
+          {% for d in results %}
+          <li>
+            <form method="post" action="/cases/{{ case.id }}/documents" class="inline">
+              <input type="hidden" name="document_id" value="{{ d.id }}"><button class="small link">+ hinzufügen</button>
+            </form>
+            {{ d.title }} <small>{{ d.correspondent or '' }} {{ d.created|d }}</small>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}<p class="muted">Keine Treffer im lokalen Index.</p>{% endif %}
+      {% endif %}
+      <form method="post" action="/cases/{{ case.id }}/documents" class="row" style="margin-top:.5rem">
+        <label class="field"><span>oder Paperless-ID</span><input name="document_id" inputmode="numeric" required></label>
+        <button class="small">Hinzufügen</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>Notiz</h2>
+      <form method="post" action="/cases/{{ case.id }}/entries" class="stack">
+        <textarea name="text" rows="3" required placeholder="z.B. Telefonat mit Sachbearbeiterin, Rückruf zugesagt"></textarea>
+        <div class="row">
+          <label class="field"><span>Datum</span><input type="date" name="entry_date" value="{{ today.isoformat() }}"></label>
+          <button class="small">Notiz speichern</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>Vorgang</h2>
+      <form method="post" action="/cases/{{ case.id }}/update" class="stack">
+        <label class="field"><span>Titel</span><input name="title" value="{{ case.title }}" required></label>
+        <div class="row">
+          <label class="field"><span>Wiedervorlage</span><input type="date" name="follow_up" value="{{ case.follow_up.isoformat() if case.follow_up else '' }}"></label>
+          <label class="field"><span>Hinweis zur Wiedervorlage</span><input name="follow_up_note" value="{{ case.follow_up_note or '' }}" placeholder="z.B. Antwort der Versicherung da?"></label>
+        </div>
+        <div><button class="small primary">Speichern</button></div>
+      </form>
+      <form method="post" action="/cases/{{ case.id }}/delete" class="inline" onsubmit="return confirm('Vorgang löschen? Die Dokumente bleiben erhalten.')">
+        <button class="small link">Vorgang löschen</button>
+      </form>
+    </div>
+  </div>
+</section>
+{% endblock %}

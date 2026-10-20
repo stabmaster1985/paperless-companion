@@ -36,7 +36,7 @@ def render(events: list[Event], link_base: str) -> str:
     for e in events:
         start: date = e.date
         description = e.detail
-        if link_base:
+        if link_base and e.document_id:
             description += f"\n{link_base}/documents/{e.document_id}/details"
         lines += [
             "BEGIN:VEVENT",

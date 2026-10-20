@@ -21,6 +21,11 @@ def due_reminders(session: Session, today: date, lead_days: list[int]) -> list[t
         days_left = (event.date - today).days
         if event.type == "overdue":
             keys = [f"{event.key}:{event.date}:overdue"]
+        elif event.type == "follow_up":
+            # Wiedervorlagen am Tag selbst (bzw. nachgeholt, falls verpasst)
+            if days_left > 0:
+                continue
+            keys = [f"{event.key}:{event.date}:due"]
         else:
             reached = [d for d in lead_days if days_left <= d]
             if not reached or days_left < 0:
@@ -38,7 +43,7 @@ def format_digest(items: list[tuple[Event, list[str]]], today: date, link_base: 
         when = "heute" if days_left == 0 else (f"seit {-days_left} Tagen" if days_left < 0 else f"in {days_left} Tagen")
         lines.append(f"• {event.label}: {event.title} – {fmt_date(event.date)} ({when})")
         lines.append(f"  {event.detail}")
-        if link_base:
+        if link_base and event.document_id:
             lines.append(f"  {link_base}/documents/{event.document_id}/details")
     return "\n".join(lines)
 

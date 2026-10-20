@@ -10,6 +10,14 @@ Paperless archiviert Dokumente und macht sie durchsuchbar. Der Companion leitet 
 - **Rechnungen:** Betrag, Fälligkeit, IBAN und Lastschrift werden erkannt. Status offen,
   bezahlt oder überfällig.
 - **Garantie und Gewährleistung:** Ablaufdatum je Kauf.
+- **Zahlungsabgleich mit Firefly III:** Abbuchungen werden offenen Rechnungen zugeordnet
+  (Betrag, Rechnungsnummer im Verwendungszweck, IBAN, Empfänger).
+- **Vorgänge:** Dokumente und Notizen zu einem Fall bündeln (z.B. Schadensfall, Widerspruch),
+  mit Zeitstrahl und Wiedervorlage.
+- **Steuer-Export:** alle Belege eines Jahres als ZIP mit Ordnern je Kategorie und
+  CSV-Übersicht.
+- **Aufbewahrungsfristen:** Regeln je Dokumenttyp oder Tag, Löschvorschläge für das gesamte
+  Archiv mit Protokoll.
 - **Dashboard:** anstehende Fristen, offene Beträge, monatliche Fixkosten.
 - **Erinnerungen** per ntfy oder E-Mail sowie ein **Kalender-Feed (ICS)** für Handy und Outlook.
 - Optional **Rückschreiben** der Ergebnisse in Paperless-Custom-Fields.
@@ -92,6 +100,63 @@ Sammelnachricht für Fristen, die in `REMINDER_DAYS` (Standard 30, 7 und 1 Tag) 
 sowie für überfällige Rechnungen. Unter **System** lassen sich ein Test und eine
 Sofortprüfung auslösen.
 
+### Zahlungsabgleich mit Firefly III
+
+`FIREFLY_URL` und `FIREFLY_TOKEN` setzen. Das Token ist ein persönliches Zugangstoken aus
+*Optionen → Profil → OAuth*. Der Companion liest stündlich die Abbuchungen und vergleicht sie
+mit offenen Rechnungen:
+
+| Indiz | Punkte |
+|---|---|
+| Betrag stimmt (Pflicht) | 50 |
+| Rechnungsnummer im Verwendungszweck oder in den Notizen | +40 |
+| Empfänger-IBAN stimmt | +30 |
+| Empfängername passt zum Aussteller | +20 |
+| Zahlung vor Fälligkeit | +5 |
+
+- Ab 60 Punkten erscheint ein Vorschlag unter **Rechnungen** („Bezahlt“ oder „passt nicht“).
+- Passt nur der Betrag, wird nur vorgeschlagen, wenn genau eine Buchung infrage kommt.
+- Mit `FIREFLY_AUTO_ACCEPT=true` werden Treffer ab 90 Punkten (Betrag plus Rechnungsnummer
+  oder IBAN) direkt als bezahlt markiert.
+- Jede Buchung wird höchstens einer Rechnung zugeordnet. Lastschriften werden ebenfalls erkannt.
+
+### Vorgänge
+
+Unter **Vorgänge** oder direkt auf einer Dokumentseite einen Vorgang anlegen und weitere
+Dokumente hinzufügen, per Suche im Archiv-Index oder per Paperless-ID. Notizen mit Datum
+ergänzen den Zeitstrahl, z.B. „Telefonat mit Versicherung“. Eine **Wiedervorlage** erscheint
+im Dashboard und im Kalender-Feed und wird am Fälligkeitstag als Erinnerung gesendet.
+
+### Steuer-Export
+
+In Paperless den Tag `Steuer` vergeben. Kategorien entstehen über Tags wie
+`Steuer: Werbungskosten` oder `Steuer/Spenden`, sonst gilt der Dokumenttyp als Kategorie.
+Unter **Steuer** stehen die Belege pro Jahr mit Summen aus den erfassten Rechnungsbeträgen.
+Belege, die zu einem anderen Jahr gehören (z.B. die Nebenkostenabrechnung 2025, erstellt im
+Jahr 2026), lassen sich pro Dokument umstellen oder ausschließen. Das ZIP enthält einen
+Ordner je Kategorie, Dateinamen wie `2025-03-01_Firma_Titel_123.pdf` und eine CSV-Übersicht,
+die sich direkt in Excel öffnen lässt.
+
+### Aufbewahrungsfristen
+
+Der Companion gleicht einmal täglich die Metadaten des **gesamten Archivs** ab. Dabei wird
+nichts analysiert, er übernimmt nur Titel, Typ, Datum und Tags. Unter **Aufbewahrung** legst
+du Regeln fest:
+
+- **Trifft zu bei:** Dokumenttyp, Tag oder Art (Rechnung, Vertrag, Garantie)
+- **Frist:** z.B. 3 oder 10 Jahre, oder 0 = dauerhaft
+- **Fristbeginn:** Ende des Kalenderjahres, Dokumentdatum oder Vertragsende
+
+Treffen mehrere Regeln zu, gilt die längste Frist. Offene Rechnungen, laufende Verträge und
+Garantien sowie manuell gesperrte Dokumente werden nie vorgeschlagen.
+
+Fällige Dokumente lassen sich in Paperless mit dem Tag `Löschkandidat` markieren (Standard)
+oder dauerhaft behalten. Direktes Löschen ist nur mit `RETENTION_DELETE_ENABLED=true` und
+nach Eintippen von „LÖSCHEN“ möglich. Gelöschte Dokumente landen im Papierkorb von
+Paperless. Jede Aktion wird protokolliert.
+
+Die mitgelieferten Regeln sind Beispiele für Privathaushalte und keine Rechtsberatung.
+
 ## Zuordnung der Dokumente
 
 1. Dokumenttyp in Paperless: siehe `DOCTYPES_INVOICE`, `DOCTYPES_CONTRACT` und
@@ -130,7 +195,11 @@ Aufbau:
 | `app/extraction/llm.py` | Gezielte LLM-Abfragen und Prüfung der Antworten |
 | `app/deadlines.py` | Fristenberechnung für Verträge |
 | `app/pipeline.py` | Abgleich, Klassifizierung, Übernahme, Rückschreiben |
-| `app/worker.py` | Hintergrund-Thread (Abgleich, Warteschlange, Erinnerungen) |
+| `app/payments.py` | Zahlungsabgleich mit Firefly III |
+| `app/cases.py` | Vorgänge und Zeitstrahl |
+| `app/tax.py` | Steuer-Export |
+| `app/retention.py` | Aufbewahrungsregeln |
+| `app/worker.py` | Hintergrund-Thread (Abgleich, Warteschlange, Index, Zahlungen, Erinnerungen) |
 | `app/main.py` | Weboberfläche und API |
 
 Die Daten liegen in einer SQLite-Datei unter `DATA_DIR`. Zum Sichern genügt dieses
@@ -138,8 +207,6 @@ Verzeichnis.
 
 ## Ideen für später
 
-- Vorgänge: mehrere Dokumente zu einem Fall bündeln (z.B. Schadensfall) mit Zeitstrahl
-- Aufbewahrungsfristen (6 bzw. 10 Jahre) mit Löschvorschlägen
-- Steuer-Export: Belege pro Jahr als ZIP
-- Abgleich offener Rechnungen mit Kontoauszügen (CSV, Firefly III)
+- Abgleich mit Kontoauszügen als CSV (ohne Firefly III)
 - Optionale Cloud-API, pro Dokumenttyp freischaltbar
+- Haushaltsnahe Dienstleistungen (§ 35a EStG): Arbeitskosten aus Handwerkerrechnungen erkennen

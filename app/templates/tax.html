@@ -16,10 +16,10 @@
 
 {% if groups %}
 <div class="actions">
-  <a class="button primary" href="/tax/export?year={{ year }}">ZIP herunterladen ({{ count }} Dokumente)</a>
+  <a class="button primary" href="/tax/export?year={{ year }}">ZIP herunterladen ({{ count }} {{ 'Dokument' if count == 1 else 'Dokumente' }})</a>
 </div>
 {% for category, group in groups|dictsort %}
-<h2>{{ category }} <small>· {{ group['items']|length }} Dokumente{% if group.with_amount %} · {{ group.sum|eur }}{% endif %}</small></h2>
+<h2>{{ category }} <small>· {{ group['items']|length }} {{ 'Dokument' if group['items']|length == 1 else 'Dokumente' }}{% if group.with_amount %} · {{ group.sum|eur }}{% endif %}</small></h2>
 <div class="table-wrap"><table class="list">
   <thead><tr><th>Dokument</th><th>Datum</th><th>Betrag</th><th class="hide-sm">Steuerjahr</th></tr></thead>
   <tbody>
