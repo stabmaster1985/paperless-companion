@@ -76,3 +76,15 @@ def test_login_required(settings, mock_api):
 def test_document_search(client):
     page = client.get("/documents?q=strom").text
     assert "Stromrechnung Oktober" in page and "Handyvertrag" not in page
+
+
+def test_unwritable_data_dir_gives_clear_error(tmp_path):
+    import pytest
+
+    from app.main import ensure_writable
+
+    blocker = tmp_path / "data"
+    blocker.write_text("keine Ordner")  # mkdir schlägt fehl wie bei fehlenden Rechten
+    with pytest.raises(RuntimeError, match="chown -R 1000:1000"):
+        ensure_writable(blocker)
+    ensure_writable(tmp_path / "ok")

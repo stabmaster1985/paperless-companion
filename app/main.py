@@ -1,5 +1,6 @@
 import hmac
 import logging
+import os
 import re
 import tempfile
 from contextlib import asynccontextmanager
@@ -39,7 +40,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        settings.data_dir.mkdir(parents=True, exist_ok=True)
+        ensure_writable(settings.data_dir)
         init_db(settings.database_url)
         with session_scope() as s:
             retention.seed_defaults(s)
@@ -779,6 +780,21 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         return PlainTextResponse(str(exc.detail), status_code=exc.status_code)
 
     return app
+
+
+def ensure_writable(data_dir: Path) -> None:
+    """Bricht mit einer verständlichen Meldung ab, wenn der Datenordner nicht beschreibbar ist."""
+    try:
+        data_dir.mkdir(parents=True, exist_ok=True)
+        probe = data_dir / ".schreibtest"
+        probe.write_text("ok")
+        probe.unlink()
+    except OSError as exc:
+        raise RuntimeError(
+            f"Datenordner {data_dir} ist nicht beschreibbar ({exc.strerror}). "
+            f"Der Companion läuft als UID {os.getuid()}. Auf dem Docker-Host z.B. "
+            "`sudo chown -R 1000:1000 ./data` ausführen und den Container neu starten."
+        ) from exc
 
 
 def request_worker(app: FastAPI) -> None:
