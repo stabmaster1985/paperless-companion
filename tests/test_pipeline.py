@@ -140,3 +140,15 @@ def test_reminders_marked_and_not_repeated(db, settings, mock_api, monkeypatch):
         assert s.query(SentReminder).count() >= 1
         assert reminders.run(s, settings, today) == 0
     assert len(sent) == 1
+
+
+def test_paperless_client_sends_no_fixed_api_version():
+    import respx
+
+    with respx.mock as router:
+        route = router.get(f"{PAPERLESS}/api/documents/").respond(
+            json={"count": 0, "results": []}, headers={"X-Version": "2.20.1", "X-Api-Version": "10"})
+        client = PaperlessClient(PAPERLESS, "x")
+        assert client.ping() == {"version": "2.20.1", "api_version": "10"}
+        # Eine fest angefragte alte Version beantwortet neueres Paperless mit 406
+        assert route.calls.last.request.headers["accept"] == "application/json"

@@ -338,8 +338,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     def system(request: Request, msg: str = "", session: Session = Depends(get_session)):
         paperless = make_paperless(settings, timeout=5)
         try:
-            paperless.ping()
-            paperless_status = {"ok": True, "error": None}
+            paperless_status = {"ok": True, "error": None, **paperless.ping()}
         except PaperlessError as exc:
             paperless_status = {"ok": False, "error": str(exc)}
         finally:

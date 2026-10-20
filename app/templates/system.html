@@ -72,7 +72,7 @@ document.getElementById('update-btn').addEventListener('click', async (e) => {
   <div class="card">
     <h2>Paperless</h2>
     <p>{{ settings.paperless_url }}</p>
-    {% if paperless_status.ok %}<p class="ok">✔ verbunden</p>{% else %}<p class="bad">✘ {{ paperless_status.error }}</p>{% endif %}
+    {% if paperless_status.ok %}<p class="ok">✔ verbunden{% if paperless_status.version %} · Paperless {{ paperless_status.version }}{% endif %}{% if paperless_status.api_version %} · API v{{ paperless_status.api_version }}{% endif %}</p>{% else %}<p class="bad">✘ {{ paperless_status.error }}</p>{% endif %}
     <p class="muted">Letzte Synchronisation: {{ last_sync[:19].replace('T', ' ') if last_sync else 'noch nie' }} (UTC)</p>
     <form method="post" action="/system/sync" class="inline"><button class="small">Jetzt synchronisieren</button></form>
   </div>

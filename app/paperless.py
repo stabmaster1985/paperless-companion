@@ -15,11 +15,14 @@ class PaperlessClient:
         self.base_url = base_url.rstrip("/")
         self._client = httpx.Client(
             base_url=self.base_url,
-            headers={"Authorization": f"Token {token}", "Accept": "application/json; version=5"},
+            # Bewusst ohne feste API-Version: Paperless nutzt dann seine aktuelle Standardversion.
+            # Eine fest angefragte, nicht mehr unterstützte Version beantwortet Paperless mit 406.
+            headers={"Authorization": f"Token {token}", "Accept": "application/json"},
             timeout=timeout,
             transport=transport,
         )
-        self._custom_field_ids: dict[str, int] = {}
+        self.server_version: str | None = None
+        self.api_version: str | None = None
 
     def close(self) -> None:
         self._client.close()
@@ -30,6 +33,9 @@ class PaperlessClient:
             response.raise_for_status()
         except httpx.HTTPError as exc:
             raise PaperlessError(f"GET {path}: {exc}") from exc
+        # Paperless meldet bei authentifizierten Anfragen Server- und API-Version
+        self.server_version = response.headers.get("x-version", self.server_version)
+        self.api_version = response.headers.get("x-api-version", self.api_version)
         return response.json()
 
     def _paginate(self, path: str, **params) -> Iterator[dict]:
@@ -41,9 +47,9 @@ class PaperlessClient:
                 return
             page += 1
 
-    def ping(self) -> bool:
+    def ping(self) -> dict:
         self._get("/api/documents/", page_size=1)
-        return True
+        return {"version": self.server_version, "api_version": self.api_version}
 
     def names(self, endpoint: str) -> dict[int, str]:
         return {item["id"]: item["name"] for item in self._paginate(f"/api/{endpoint}/", page_size=500)}
