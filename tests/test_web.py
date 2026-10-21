@@ -264,3 +264,15 @@ def test_icons(client):
     assert response.status_code == 200 and response.headers["content-type"] == "image/x-icon"
     assert client.get("/static/icons/icon-180.png").status_code == 200
     assert client.get("/static/manifest.webmanifest").status_code == 200
+
+
+def test_help_tooltips_and_collapsible(client):
+    page = client.get("/invoices").text
+    assert 'class="page-help"' in page and "So funktioniert „Rechnungen“" in page and "/static/collapse.js" in page
+    assert "So funktioniert „Dokument prüfen“" in client.get("/documents/1").text
+    assert "So funktioniert „Dokumente“" in client.get("/documents").text
+    help_page = client.get("/help").text
+    assert "In fünf Schritten" in help_page and "Vormerken" in help_page and "page-help" not in help_page
+    changes = client.get("/paperless-changes").text
+    assert 'class="help"' in changes and 'data-tip="Werte für deine Paperless-Custom-Fields' in changes
+    assert client.get("/static/collapse.js").status_code == 200

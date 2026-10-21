@@ -43,3 +43,8 @@
 {% macro txlinks(group_id, day) -%}
   {%- for label, url in tx_links(group_id, day) %} <a class="tx-link" href="{{ url }}" target="_blank" rel="noopener" title="Buchung {{ 'in Firefly' if label == 'Firefly' else 'im Dashboard (Buchungstag)' }} öffnen">{{ label }} ↗</a>{% endfor -%}
 {%- endmacro %}
+
+{# Kleines ?-Symbol mit Tooltip (Maus: darüberfahren, Handy/Tastatur: antippen bzw. fokussieren) #}
+{% macro help(text) -%}
+  <span class="help" tabindex="0" role="note" aria-label="{{ text }}" data-tip="{{ text }}">?</span>
+{%- endmacro %}

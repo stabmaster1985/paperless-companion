@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import input, select, doclink, txlinks %}
+{% from "macros.html" import input, select, doclink, txlinks, help %}
 {% block title %}{{ doc.title }} – Paperless Companion{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
@@ -171,7 +171,7 @@ document.querySelectorAll('#viewer .tab[data-tab]').forEach((tab) => tab.addEven
 {% endif %}
 
 <section class="card" id="metadata">
-  <h2>Paperless-Metadaten</h2>
+  <h2>Paperless-Metadaten {{ help("Vorschläge für Titel, Tags, Korrespondent und Dokumenttyp. Vormerken speichert nur im Companion, Übertragen schreibt nach Paperless.") }}</h2>
   {% set ms = doc.meta_suggestion or {} %}
   {% if doc.meta_state in ('queued', 'running') %}
     <p><span class="tag">{{ 'Vorschlag wird erstellt' if doc.meta_state == 'running' else 'Vorschlag in Warteschlange' }}</span></p>
@@ -186,24 +186,24 @@ document.querySelectorAll('#viewer .tab[data-tab]').forEach((tab) => tab.addEven
       {% for it in meta_items %}
         <tr class="{{ 'accepted' if it.state == 'accepted' }}">
           <td><input type="checkbox" name="item" value="{{ it.key }}" aria-label="{{ it.label }} auswählen" {{ 'checked' if it.useful }}></td>
-          <td>{{ it.label }}{% if it.new_tag %} <small class="soon">neuer Tag</small>{% endif %}</td>
+          <td>{{ it.label }}{% if it.new_tag %} <small class="soon" title="{{ TIPS.neuer_tag }}">neuer Tag</small>{% endif %}</td>
           <td>{% if it.current %}{{ it.current }}{% elif it.key.startswith('tag:') %}<span class="muted">fehlt</span>{% else %}<span class="muted">leer</span>{% endif %}</td>
           <td>
             {% if it.key == 'title' %}<input name="title" value="{{ it.new }}" maxlength="128" aria-label="Neuer Titel">
             {% else %}<strong>{{ it.new }}</strong>{% endif %}
             <span class="badge src-{{ it.source }}">{{ META_SOURCES.get(it.source, it.source) }}</span>
-            {% if it.state == 'accepted' %}<span class="tag tag-ok">vorgemerkt</span>{% endif %}
+            {% if it.state == 'accepted' %}<span class="tag tag-ok" title="{{ TIPS.vorgemerkt }}">vorgemerkt</span>{% endif %}
           </td>
         </tr>
       {% endfor %}
       </tbody>
     </table></div>
     <div class="actions">
-      <button name="action" value="accept" class="primary small">Ausgewählte vormerken</button>
-      <button name="action" value="dismiss" class="small">Verwerfen</button>
+      <button name="action" value="accept" class="primary small" title="{{ TIPS.vormerken }}">Ausgewählte vormerken</button>
+      <button name="action" value="dismiss" class="small" title="{{ TIPS.verwerfen }}">Verwerfen</button>
       {% if meta_items|selectattr('state', 'equalto', 'accepted')|list %}
-      <button name="action" value="withdraw" class="small">Vormerkung zurücknehmen</button>
-      <button name="action" value="transfer" class="small" onclick="return confirm('Ausgewählte vorgemerkte Werte jetzt in Paperless schreiben?')">Vorgemerkte nach Paperless übertragen</button>
+      <button name="action" value="withdraw" class="small" title="{{ TIPS.zuruecknehmen }}">Vormerkung zurücknehmen</button>
+      <button name="action" value="transfer" class="small" title="{{ TIPS.uebertragen }}" onclick="return confirm('Ausgewählte vorgemerkte Werte jetzt in Paperless schreiben?')">Vorgemerkte nach Paperless übertragen</button>
       {% endif %}
     </div>
     <p class="hint">Vormerken speichert nur im Companion (die App lernt daraus), übertragen wird erst auf Knopfdruck – hier oder gesammelt unter „Für Paperless“.
@@ -294,13 +294,13 @@ document.querySelectorAll('#viewer .tab[data-tab]').forEach((tab) => tab.addEven
 </section>
 
 <div class="actions secondary">
-  <form method="post" action="/documents/{{ doc.id }}/reanalyze" class="inline"><button class="small">Neu analysieren</button></form>
+  <form method="post" action="/documents/{{ doc.id }}/reanalyze" class="inline"><button class="small" title="{{ TIPS.analysieren }}">Neu analysieren</button></form>
   {% if doc.kind != 'other' %}
-  <form method="post" action="/documents/{{ doc.id }}/ignore" class="inline"><button class="small">Ignorieren</button></form>
+  <form method="post" action="/documents/{{ doc.id }}/ignore" class="inline"><button class="small" title="{{ TIPS.ignorieren }}">Ignorieren</button></form>
   {% endif %}
   <form method="post" action="/documents/{{ doc.id }}/hold" class="inline">
     <input type="hidden" name="hold" value="{{ '0' if doc.retention_hold else '1' }}">
-    <button class="small">{{ 'Aufbewahrungssperre aufheben' if doc.retention_hold else 'Dauerhaft aufbewahren' }}</button>
+    <button class="small" title="{{ TIPS.behalten }}">{{ 'Aufbewahrungssperre aufheben' if doc.retention_hold else 'Dauerhaft aufbewahren' }}</button>
   </form>
 </div>
 </div>

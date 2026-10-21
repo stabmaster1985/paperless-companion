@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import doclink %}
+{% from "macros.html" import doclink, help %}
 {% block content %}
 <h1>Dokumente</h1>
 {% if msg %}<div class="notice">{{ msg }}</div>{% endif %}
@@ -27,7 +27,7 @@
         {% for t in facets.correspondents %}<option {{ 'selected' if flt.correspondent == t }}>{{ t }}</option>{% endfor %}</select></label>
     <label class="field"><span>Datum von</span><input type="date" name="date_from" value="{{ flt.date_from }}"></label>
     <label class="field"><span>Datum bis</span><input type="date" name="date_to" value="{{ flt.date_to }}"></label>
-    <label class="field"><span>Paperless-IDs</span><input name="ids" value="{{ flt.ids }}" placeholder="z.B. 12, 15-20"></label>
+    <label class="field"><span>Paperless-IDs {{ help("Einzelne IDs und Bereiche, z.B. 12, 15-20. Die ID steht in Paperless in der Adresse des Dokuments.") }}</span><input name="ids" value="{{ flt.ids }}" placeholder="z.B. 12, 15-20"></label>
     <label class="field"><span>Art</span>
       <select name="kind"><option value="">alle</option>
         {% for key, text in KINDS.items() %}<option value="{{ key }}" {{ 'selected' if flt.kind == key }}>{{ text }}</option>{% endfor %}</select></label>
@@ -35,10 +35,10 @@
       <select name="state"><option value="">alle</option>
         {% for key, text in [('skipped', 'nur Index (nicht analysiert)'), ('queued', 'in Warteschlange'), ('running', 'läuft'), ('done', 'analysiert'), ('error', 'Fehler')] %}
         <option value="{{ key }}" {{ 'selected' if flt.state == key }}>{{ text }}</option>{% endfor %}</select></label>
-    <label class="field"><span>Hinweis</span>
+    <label class="field"><span>Hinweis {{ help("Dokumente ohne Tags, mit nichtssagendem Titel, ohne Korrespondent oder mit offenem Metadaten-Vorschlag.") }}</span>
       <select name="hint"><option value="">alle</option>
         {% for key, text in HINTS.items() %}<option value="{{ key }}" {{ 'selected' if flt.hint == key }}>{{ text }}</option>{% endfor %}</select></label>
-    <label class="field"><span>Methode</span>
+    <label class="field"><span>Methode {{ help("Womit die Werte ermittelt wurden: nur Regeln, Regeln + AI, aus deinen Paperless-Feldern …") }}</span>
       <select name="method"><option value="">alle</option>
         {% for key, text in METHODS.items() %}<option value="{{ key }}" {{ 'selected' if flt.method == key }}>{{ text }}</option>{% endfor %}</select></label>
   </div>
@@ -86,7 +86,7 @@
           <div class="state-line">
             <span class="kind">{{ KINDS[doc.kind] }}</span>
             {% if doc.extraction_state in ('queued', 'running') %}<span class="tag">{{ 'läuft' if doc.extraction_state == 'running' else 'wartet' }}</span>
-            {% elif doc.extraction_state == 'skipped' and doc.kind_source != 'fields' %}<span class="tag">nur Index</span>
+            {% elif doc.extraction_state == 'skipped' and doc.kind_source != 'fields' %}<span class="tag" title="{{ TIPS.nur_index }}">nur Index</span>
             {% elif doc.extraction_state == 'error' %}<span class="tag tag-overdue">Fehler</span>
             {% elif doc.review_state == 'pending' %}<span class="tag tag-warn">prüfen</span>
             {% elif doc.review_state == 'confirmed' %}<span class="tag tag-ok">{{ 'automatisch erfasst' if doc.auto_confirmed else 'bestätigt' }}</span>{% endif %}

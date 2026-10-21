@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "macros.html" import help %}
 {% block content %}
 <h1>System</h1>
 {% if msg %}<div class="notice">{{ msg }}</div>{% endif %}
@@ -69,7 +70,7 @@ document.getElementById('update-btn').addEventListener('click', async (e) => {
 {% endif %}
 
 <section class="card">
-  <h2>Analyse-Übersicht</h2>
+  <h2>Analyse-Übersicht {{ help("Wie viele Dokumente analysiert wurden und wie viele nur im Index liegen. Ältere Dokumente werden nur auf Anforderung analysiert.") }}</h2>
   <p><strong>{{ overview.processed }}</strong> bearbeitet
     {%- for key, label in KINDS.items() if overview.by_kind.get(key) %}{{ ':' if loop.first }} {{ overview.by_kind[key] }} {{ label }}{{ ',' if not loop.last }}{% endfor %}
     · <strong>{{ overview.index_only }}</strong> nur im Index (nicht analysiert)</p>
@@ -107,7 +108,7 @@ setInterval(async () => {
   </div>
 
   <div class="card">
-    <h2>AI (Ollama)</h2>
+    <h2>AI (Ollama) {{ help("Das lokale Modell füllt nur Felder, die die Regeln nicht gefunden haben, und erstellt Zusammenfassungen und Metadaten-Vorschläge.") }}</h2>
     {% if ollama_status is none %}
       <p class="muted">Deaktiviert – es werden nur Regeln verwendet.</p>
     {% else %}
@@ -159,7 +160,7 @@ setInterval(async () => {
   </div>
 
   <div class="card">
-    <h2>Warteschlange</h2>
+    <h2>Warteschlange {{ help("Analysen, Zusammenfassungen und Metadaten-Vorschläge laufen nacheinander. „Anhalten“ pausiert alles, nichts geht verloren.") }}</h2>
     {% if queue_paused %}<p class="notice warn">Angehalten – es werden keine Dokumente analysiert.</p>{% endif %}
     <p>Analysen wartend: <strong>{{ counts.get('queued', 0) }}</strong> · läuft: {{ counts.get('running', 0) }} · Zusammenfassungen wartend: {{ summaries_queued }}</p>
     <p class="muted">Analysiert: {{ counts.get('done', 0) }} · nur im Index: {{ counts.get('skipped', 0) }} · Fehler: {{ counts.get('error', 0) }}</p>
@@ -194,7 +195,7 @@ setInterval(async () => {
   </div>
 
   <div class="card">
-    <h2>Kalender-Feed</h2>
+    <h2>Kalender-Feed {{ help("Diesen Link im Kalender (z.B. Google, Apple, Thunderbird) abonnieren – Fristen erscheinen dort automatisch.") }}</h2>
     {% if settings.ics_token %}
       <p>In Kalender-App abonnieren:</p>
       <code class="block">{{ request.base_url }}calendar.ics?token={{ settings.ics_token }}</code>
@@ -204,7 +205,7 @@ setInterval(async () => {
   </div>
 
   <div class="card">
-    <h2>Webhook für Paperless-Workflow</h2>
+    <h2>Webhook für Paperless-Workflow {{ help("Optional: Paperless meldet neue Dokumente sofort, statt dass der Companion auf den nächsten Abgleich wartet.") }}</h2>
     {% if settings.webhook_token %}
       <code class="block">{{ request.base_url }}api/webhook/paperless?token={{ settings.webhook_token }}</code>
       <p class="muted">Body: <code>{"doc_url": "{doc_url}"}</code></p>

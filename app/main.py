@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import appsettings, cases, deadlines, events, fields, highlight, ics, metadata, notify, payments, pipeline, reminders, retention, selection, tax
+from app import appsettings, cases, help as helptexts, deadlines, events, fields, highlight, ics, metadata, notify, payments, pipeline, reminders, retention, selection, tax
 from app.config import Settings, get_settings
 from app.db import get_session, init_db, session_scope
 from app.models import Case, CaseDocument, CaseEntry, Contract, Document, Invoice, KeyValue, RetentionLog, RetentionRule, Warranty
@@ -79,6 +79,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         return stamp.astimezone(ZoneInfo(settings.timezone)).strftime("%d.%m.%Y %H:%M")
 
     templates.env.filters["ts"] = fmt_ts
+    templates.env.globals.update(page_help=helptexts.page_help, TIPS=helptexts.TIPS)
     templates.env.globals["tx_links"] = lambda group_id, day: payments.links(settings, group_id, day)
 
     def payment_of(doc: Document) -> dict | None:
@@ -123,6 +124,10 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             raise HTTPException(status_code=403, detail="Ungültiges Token")
 
     # ------------------------------------------------------------------ Login
+
+    @app.get("/help", response_class=HTMLResponse)
+    def help_page(request: Request):
+        return render(request, "help.html", PAGES=helptexts.PAGES, GLOSSARY=helptexts.GLOSSARY, STEPS=helptexts.STEPS)
 
     @app.get("/favicon.ico", include_in_schema=False)
     def favicon():

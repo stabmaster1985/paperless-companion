@@ -28,11 +28,28 @@
     <a href="/paperless-changes" class="{{ 'active' if path.startswith('/paperless-changes') }}">Für Paperless{% if outgoing_count %} <span class="pill">{{ outgoing_count }}</span>{% endif %}</a>
     <a href="/settings" class="{{ 'active' if path.startswith('/settings') }}">Einstellungen</a>
     <a href="/system" class="{{ 'active' if path.startswith('/system') }}">System{% if update_available %} <span class="pill" title="Update verfügbar">Update</span>{% endif %}</a>
+    <a href="/help" class="help-link {{ 'active' if path.startswith('/help') }}" title="Hilfe: Ablauf, Begriffe und Erklärungen zu allen Seiten">Hilfe</a>
     {% if auth %}<form method="post" action="/logout" class="inline"><button class="link">Abmelden</button></form>{% endif %}
   </nav>
 </header>
 <main class="{% block main_class %}{% endblock %}">
+{% set ph = page_help(request.url.path) %}
+{% if ph %}
+<details class="page-help" id="page-help">
+  <summary title="Kurze Erklärung zu dieser Seite ein- und ausblenden">ⓘ So funktioniert „{{ ph[0] }}“</summary>
+  <div>{% for para in ph[1] %}<p>{{ para|safe }}</p>{% endfor %}
+    <p><a href="/help">Alle Hilfethemen</a> · Kästen lassen sich per Klick auf ihre Überschrift auf- und zuklappen:
+      <button type="button" class="link small" data-collapse-all="1">alle zuklappen</button> /
+      <button type="button" class="link small" data-collapse-all="0">alle aufklappen</button></p></div>
+</details>
+<script>
+// Aufgeklappt/zugeklappt je Seite merken (nur in diesem Browser)
+(() => { const d = document.getElementById('page-help'), k = 'help:' + location.pathname.split('/')[1];
+  try { d.open = localStorage.getItem(k) === '1'; d.addEventListener('toggle', () => localStorage.setItem(k, d.open ? '1' : '0')); } catch (e) {} })();
+</script>
+{% endif %}
 {% block content %}{% endblock %}
 </main>
+<script src="/static/collapse.js" defer></script>
 </body>
 </html>

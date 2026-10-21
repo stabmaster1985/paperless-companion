@@ -199,6 +199,14 @@ FIELD_SUMMARY=Zusammenfassung KI
   *Text* fassen in Paperless nur 128 Zeichen, die Zusammenfassung wird passend gekürzt.
   Sie wird im Companion gespeichert und unter „Für Paperless“ zur Übernahme angeboten.
 
+### Hilfe in der App
+
+Oben auf jeder Seite klappt „ⓘ So funktioniert …“ eine kurze Erklärung auf; **Hilfe** im Menü
+erklärt Ablauf, Begriffe und alle Seiten. Kleine **?**-Symbole und Tooltips an Knöpfen und
+Kennzeichen erklären einzelne Elemente. Kästen lassen sich per Klick auf ihre Überschrift auf-
+und zuklappen; der Zustand wird je Seite im Browser gemerkt. Die Texte stehen zentral in
+`app/help.py`.
+
 ### Einstellungen in der App
 
 Fast alle Werte der `.env` lassen sich unter **Einstellungen → Weitere Einstellungen** ändern

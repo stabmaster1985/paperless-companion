@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Hilfe</h1>
+<p class="muted">Der Companion ergänzt Paperless um Fristen, Rechnungen, Garantien, Vorgänge, Steuer-Export und Vorschläge für deine Ablage.
+  Er liest Paperless nur – geschrieben wird ausschließlich, was du unter „Für Paperless“ ausdrücklich übernimmst bzw. überträgst.</p>
+
+<section class="card">
+  <h2>In fünf Schritten</h2>
+  <ol class="steps">
+    {% for title, text in STEPS %}<li><strong>{{ title }}</strong> – {{ text|safe }}</li>{% endfor %}
+  </ol>
+</section>
+
+<section class="card">
+  <h2>Begriffe</h2>
+  <dl class="glossary">
+    {% for term, text in GLOSSARY %}<dt>{{ term }}</dt><dd>{{ text }}</dd>{% endfor %}
+  </dl>
+</section>
+
+<section class="card">
+  <h2>Herkunft der Werte</h2>
+  <p>
+    <span class="badge src-rule">Regel</span> aus dem Dokumenttext erkannt ·
+    <span class="badge src-llm">AI</span> vom lokalen Modell ·
+    <span class="badge src-paperless">Paperless</span> aus deinen Custom Fields ·
+    <span class="badge src-firefly">Firefly</span> aus der Bankbuchung ·
+    <span class="badge src-history">Verlauf</span> wie andere Dokumente desselben Absenders ·
+    <span class="badge src-default">Standard</span> Standardwert ·
+    <span class="badge src-manual">manuell</span> von dir eingegeben</p>
+  <p class="muted">„✓“ = von dir bestätigt. Eine Prozentzahl gibt an, wie sicher die Erkennung ist; gestrichelte Kennzeichen unter 80 % solltest du prüfen.</p>
+</section>
+
+<section class="card">
+  <h2>Die Seiten</h2>
+  {% for path, (title, paras) in PAGES.items() if paras %}
+  <h3><a href="{{ path if path != '/documents/' else '/documents' }}">{{ title }}</a></h3>
+  {% for para in paras %}<p>{{ para|safe }}</p>{% endfor %}
+  {% endfor %}
+</section>
+{% endblock %}

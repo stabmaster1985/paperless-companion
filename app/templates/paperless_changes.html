@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import doclink, txlinks %}
+{% from "macros.html" import doclink, txlinks, help %}
 {% macro show(role, value) -%}
   {%- if value is none -%}<span class="muted">leer</span>
   {%- elif role == 'related' -%}{% for i in value %}<a href="/documents/{{ i }}">#{{ i }}</a>{{ ', ' if not loop.last }}{% endfor %}
@@ -14,7 +14,8 @@
   Nichts davon wird geschrieben, bevor du es auswählst und übernimmst. Verworfene Vorschläge erscheinen erst wieder, wenn sich der Wert ändert.</p>
 {% if msg %}<div class="notice">{{ msg }}</div>{% endif %}
 
-<h2>Custom Fields</h2>
+<section class="card">
+<h2>Custom Fields {{ help("Werte für deine Paperless-Custom-Fields (Betrag, Fällig am …) aus bestätigten Dokumenten und deinen Eingaben. Erst „übernehmen“ schreibt sie nach Paperless.") }}</h2>
 <p class="muted">{% if last.fields %}Jüngster offener Vorschlag: <strong>{{ last.fields|ts }}</strong> · {% endif %}letzte Analyse eines Dokuments: {{ last.analysis|ts }}</p>
 {% if rows %}
 <form method="post" action="/paperless-changes" id="changes-form">
@@ -22,7 +23,7 @@
     <colgroup><col class="col-check"><col class="col-doc"><col class="col-what"><col class="col-current"><col class="col-new"><col class="col-stand"></colgroup>
     <thead><tr>
       <th><input type="checkbox" aria-label="Alle auswählen" onclick="document.querySelectorAll('#changes-form input[name=change]').forEach(c => c.checked = this.checked)"></th>
-      <th>Dokument</th><th>Feld</th><th>Paperless jetzt</th><th>Vorschlag</th><th class="hide-sm">Stand</th>
+      <th>Dokument</th><th>Feld</th><th>Paperless jetzt</th><th>Vorschlag</th><th class="hide-sm" title="{{ TIPS.stand }}">Stand</th>
     </tr></thead>
     <tbody>
     {% for doc, changes in rows %}
@@ -43,21 +44,22 @@
     </tbody>
   </table></div>
   <div class="actions">
-    <button name="action" value="approve" class="primary" onclick="return confirm('Ausgewählte Änderungen jetzt in Paperless schreiben?')">Ausgewählte in Paperless übernehmen</button>
-    <button name="action" value="dismiss">Ausgewählte verwerfen</button>
+    <button name="action" value="approve" class="primary" title="{{ TIPS.uebernehmen }}" onclick="return confirm('Ausgewählte Änderungen jetzt in Paperless schreiben?')">Ausgewählte in Paperless übernehmen</button>
+    <button name="action" value="dismiss" title="{{ TIPS.verwerfen }}">Ausgewählte verwerfen</button>
   </div>
   <p class="hint">{% if create_fields %}Fehlende Felder (z.B. „{{ names.get('amount', 'Betrag') }}“) werden beim Übernehmen in Paperless angelegt. {% endif %}Andere Custom Fields des Dokuments bleiben unverändert.</p>
 </form>
 {% else %}
 <p class="empty">Keine Vorschläge für Custom Fields.</p>
 {% endif %}
+</section>
 
 {% macro meta_table(form_id, rows) %}
   <div class="table-wrap"><table class="list changes-list">
     <colgroup><col class="col-check"><col class="col-doc"><col class="col-what"><col class="col-current"><col class="col-new"><col class="col-stand"></colgroup>
     <thead><tr>
       <th><input type="checkbox" aria-label="Alle auswählen" onclick="document.querySelectorAll('#{{ form_id }} input[name=item]').forEach(c => c.checked = this.checked)"></th>
-      <th>Dokument</th><th>Was</th><th>Paperless jetzt</th><th>{{ 'Vorgemerkt' if form_id == 'meta-accepted' else 'Vorschlag' }}</th><th class="hide-sm">Stand</th>
+      <th>Dokument</th><th>Was</th><th>Paperless jetzt</th><th>{{ 'Vorgemerkt' if form_id == 'meta-accepted' else 'Vorschlag' }}</th><th class="hide-sm" title="{{ TIPS.stand }}">Stand</th>
     </tr></thead>
     <tbody>
     {% for doc, items in rows %}
@@ -65,9 +67,9 @@
       <tr>
         <td><input type="checkbox" name="item" value="{{ doc.id }}:{{ it.key }}"></td>
         <td>{% if loop.first %}<a href="/documents/{{ doc.id }}#metadata">{{ doc.title or ('#' ~ doc.id) }}</a> {{ doclink(doc.id) }}<br><small>{{ doc.correspondent or '' }}</small>{% endif %}</td>
-        <td>{{ it.label }}{% if it.new_tag %} <small class="soon">neuer Tag</small>{% endif %}</td>
+        <td>{{ it.label }}{% if it.new_tag %} <small class="soon" title="{{ TIPS.neuer_tag }}">neuer Tag</small>{% endif %}</td>
         <td>{{ it.current or '' }}{% if not it.current %}<span class="muted">{{ 'fehlt' if it.key.startswith('tag:') else 'leer' }}</span>{% endif %}</td>
-        <td><strong>{{ it.new }}</strong> <span class="badge src-{{ it.source }}">{{ META_SOURCES.get(it.source, it.source) }}</span></td>
+        <td><strong>{{ it.new }}</strong> <span class="badge src-{{ it.source }}" title="{{ TIPS.get(it.source, '') }}">{{ META_SOURCES.get(it.source, it.source) }}</span></td>
         <td class="hide-sm"><small>{% if it.state == 'accepted' %}vorgemerkt <span class="nowrap">{{ it.at|ts }}</span>{% if it.suggested_at %}<br><span class="muted">Vorschlag <span class="nowrap">{{ it.suggested_at|ts }}</span></span>{% endif %}
           {%- else %}Vorschlag <span class="nowrap">{{ it.at|ts }}</span>{% endif %}</small></td>
       </tr>
@@ -128,24 +130,27 @@
   {% if mf_active %}<a class="button small" href="/paperless-changes#metadata">Filter zurücksetzen</a>{% endif %}
 </form>
 
-<h3>Vorgemerkt – wartet auf Übertragung ({{ meta_accepted_count }}{{ ', gefiltert' if mf_active }})</h3>
+<section class="card">
+<h3>Vorgemerkt – wartet auf Übertragung ({{ meta_accepted_count }}{{ ', gefiltert' if mf_active }}) {{ help("Von dir vorgemerkt. Die App lernt bereits daraus, Paperless bleibt unverändert, bis du überträgst.") }}</h3>
 {% if meta_accepted %}
 <form method="post" action="/paperless-changes/meta" id="meta-accepted">
   {{ mf_hidden(mf) }}
   {{ meta_table('meta-accepted', meta_accepted) }}
   <div class="actions">
-    <button name="action" value="transfer" class="primary" onclick="return confirm('Ausgewählte vorgemerkte Werte jetzt in Paperless schreiben?')">Ausgewählte nach Paperless übertragen</button>
-    <button name="action" value="transfer_all" onclick="return confirm('Alle {{ meta_accepted_count }} {{ 'angezeigten ' if mf_active }}vorgemerkten Werte jetzt in Paperless schreiben?')">Alle {{ meta_accepted_count }} {{ 'angezeigten ' if mf_active }}übertragen</button>
-    <button name="action" value="withdraw">Vormerkung zurücknehmen</button>
-    <button name="action" value="dismiss">Verwerfen</button>
+    <button name="action" value="transfer" class="primary" title="{{ TIPS.uebertragen }}" onclick="return confirm('Ausgewählte vorgemerkte Werte jetzt in Paperless schreiben?')">Ausgewählte nach Paperless übertragen</button>
+    <button name="action" value="transfer_all" title="{{ TIPS.uebertragen }}" onclick="return confirm('Alle {{ meta_accepted_count }} {{ 'angezeigten ' if mf_active }}vorgemerkten Werte jetzt in Paperless schreiben?')">Alle {{ meta_accepted_count }} {{ 'angezeigten ' if mf_active }}übertragen</button>
+    <button name="action" value="withdraw" title="{{ TIPS.zuruecknehmen }}">Vormerkung zurücknehmen</button>
+    <button name="action" value="dismiss" title="{{ TIPS.verwerfen }}">Verwerfen</button>
   </div>
   <p class="hint">Beim Übertragen werden Tags nur ergänzt (vorhandene bleiben), vorgemerkte neue Tags werden dabei in Paperless angelegt.</p>
 </form>
 {% else %}
 <p class="empty">Nichts vorgemerkt.</p>
 {% endif %}
+</section>
 
-<h3>Offene Vorschläge ({{ meta_open_count }}{{ ', gefiltert' if mf_active }})</h3>
+<section class="card">
+<h3>Offene Vorschläge ({{ meta_open_count }}{{ ', gefiltert' if mf_active }}) {{ help("Noch nicht entschieden. Vormerken oder verwerfen – beides bleibt im Companion.") }}</h3>
 <p class="muted">Hier stehen fehlende Tags, Titel nur, wenn der jetzige nichtssagend ist (z.B. „Scan_0012“), und Korrespondent/Dokumenttyp nur,
   wenn sie in Paperless fehlen. Abweichungen bei gepflegten Werten siehst du auf der Dokumentseite.</p>
 {% if meta_open %}
@@ -153,12 +158,12 @@
   {{ mf_hidden(mf) }}
   {{ meta_table('meta-open', meta_open) }}
   <div class="actions">
-    <button name="action" value="accept" class="primary">Ausgewählte vormerken</button>
-    <button name="action" value="dismiss">Ausgewählte verwerfen</button>
+    <button name="action" value="accept" class="primary" title="{{ TIPS.vormerken }}">Ausgewählte vormerken</button>
+    <button name="action" value="dismiss" title="{{ TIPS.verwerfen }}">Ausgewählte verwerfen</button>
     {% if mf_active %}
     <span class="sep" aria-hidden="true">|</span>
-    <button name="action" value="accept_all" onclick="return confirm('Alle {{ meta_open_count }} angezeigten Vorschläge vormerken? (Nur im Companion, nichts geht nach Paperless.)')">Alle {{ meta_open_count }} angezeigten vormerken</button>
-    <button name="action" value="dismiss_all" onclick="return confirm('Alle {{ meta_open_count }} angezeigten Vorschläge verwerfen?')">Alle {{ meta_open_count }} angezeigten verwerfen</button>
+    <button name="action" value="accept_all" title="{{ TIPS.vormerken }}" onclick="return confirm('Alle {{ meta_open_count }} angezeigten Vorschläge vormerken? (Nur im Companion, nichts geht nach Paperless.)')">Alle {{ meta_open_count }} angezeigten vormerken</button>
+    <button name="action" value="dismiss_all" title="{{ TIPS.verwerfen }}" onclick="return confirm('Alle {{ meta_open_count }} angezeigten Vorschläge verwerfen?')">Alle {{ meta_open_count }} angezeigten verwerfen</button>
     {% endif %}
   </div>
   <p class="hint">Verworfene Tags schlägt die App für denselben Absender nicht mehr vor.</p>
@@ -166,12 +171,13 @@
 {% else %}
 <p class="empty">Keine offenen Metadaten-Vorschläge{{ ' für diesen Filter' if mf_active }}.</p>
 {% endif %}
+</section>
 
 <section class="card">
-  <h2>Wie gut sind die Vorschläge?</h2>
+  <h2>Wie gut sind die Vorschläge? {{ help("Je Quelle und Art: wie oft du übernommen, geändert oder verworfen hast. Hilft zu entscheiden, wann sich das Übertragen lohnt.") }}</h2>
   {% if quality.rows %}
   <div class="table-wrap"><table class="list">
-    <thead><tr><th>Quelle</th><th>Was</th><th>übernommen</th><th>geändert</th><th>verworfen</th><th>Trefferquote</th></tr></thead>
+    <thead><tr><th>Quelle</th><th>Was</th><th>übernommen</th><th>geändert</th><th>verworfen</th><th title="{{ TIPS.trefferquote }}">Trefferquote</th></tr></thead>
     <tbody>
     {% for r in quality.rows %}
       <tr>
@@ -190,7 +196,7 @@
 </section>
 
 <section class="card">
-  <h2>Archiv-Check</h2>
+  <h2>Archiv-Check {{ help("Zählt Dokumente, bei denen ein Vorschlag besonders lohnt. Vorgemerktes zählt dabei schon als erledigt.") }}</h2>
   <p class="muted">Wo sich ein Vorschlag lohnt. Vorschläge erzeugst du in der Dokumentliste für ausgewählte oder gefilterte Dokumente
     {%- if settings.meta_mode == 'new' %}; neu analysierte Dokumente bekommen automatisch einen{% endif %}.</p>
   <ul class="plain">
