@@ -199,6 +199,23 @@ FIELD_SUMMARY=Zusammenfassung KI
   *Text* fassen in Paperless nur 128 Zeichen, die Zusammenfassung wird passend gekürzt.
   Sie wird im Companion gespeichert und unter „Für Paperless“ zur Übernahme angeboten.
 
+### Leserechte für den Companion-Benutzer
+
+Gehören Dokumenttypen, Korrespondenten oder Tags einem anderen Paperless-Benutzer (z.B. admin),
+sieht der Companion sie nicht (Hinweis unter **Einstellungen**). Freigeben ohne alles
+einzeln anzuklicken: Companion-Benutzer in eine Gruppe (z.B. `ReadOnly`) aufnehmen, der Gruppe
+unter *Benutzer & Gruppen* „Anzeigen“ für Dokument, Dokumenttyp, Korrespondent, Tag geben und
+dann einmal mit einem **Admin-Token**:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/stabmaster1985/paperless-companion/main/scripts/paperless_grant_view.py
+python3 paperless_grant_view.py --url http://PAPERLESS:8000 --token ADMIN_TOKEN --group ReadOnly --dry-run
+python3 paperless_grant_view.py --url http://PAPERLESS:8000 --token ADMIN_TOKEN --group ReadOnly
+```
+
+Bestehende Rechte bleiben erhalten (merge). `--documents` gibt zusätzlich alle Dokumente frei.
+Danach in der App unter **Einstellungen** „Archiv-Index neu einlesen“.
+
 ### Metadaten-Vorschläge: Titel, Tags, Korrespondent, Dokumenttyp
 
 Wenn ein Dokument ohnehin analysiert wird, schlägt die App auch Paperless-Metadaten vor.
