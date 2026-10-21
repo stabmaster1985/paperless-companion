@@ -79,6 +79,23 @@
   (<span class="badge src-history">Verlauf</span>). <strong>Vormerken</strong> speichert deine Entscheidung nur im Companion – die App lernt sofort daraus
   (vorgemerkte Tags und Titel fließen in die nächsten Vorschläge ein). Nach Paperless geht erst etwas, wenn du <strong>Übertragen</strong> wählst.
   {% if meta_queued %}<br><span class="tag">{{ meta_queued }} Vorschläge in Arbeit</span>{% endif %}</p>
+{% set ms = meta_status %}
+<div class="card meta-status">
+  <p><strong>Stand:</strong> {{ ms.done }} Dokumente mit Vorschlag
+    {%- if ms.nothing_open %} (davon {{ ms.nothing_open }} ohne offenen Punkt – Paperless passt schon oder alles entschieden){% endif %}
+    · {{ ms.queued }} in Warteschlange · {{ ms.error }} fehlgeschlagen
+    · {{ ms.analyzed_without }} analysierte Dokumente noch ohne Vorschlag</p>
+  {% if settings.meta_mode == 'off' %}<p class="notice warn">Metadaten-Vorschläge sind abgeschaltet (<code>META_MODE=off</code>).</p>
+  {% elif queue_paused and ms.queued %}<p class="notice warn">Die Warteschlange ist angehalten (System → Fortsetzen).</p>
+  {% elif settings.llm_enabled and not llm_now and ms.queued %}<p class="notice">Vorschläge mit AI laufen nur im AI-Zeitfenster ({{ settings.llm_active_hours }} Uhr).</p>
+  {% elif ms.queued and ms.analyses_waiting %}<p class="muted">Vorschläge laufen abwechselnd mit den {{ ms.analyses_waiting }} wartenden Analysen.</p>{% endif %}
+  {% if ms.last_error %}<p class="bad"><small>Letzter Fehler: {{ ms.last_error }}</small></p>{% endif %}
+  {% if ms.analyzed_without or ms.error %}
+  <form method="post" action="/paperless-changes/meta-backfill" class="inline" onsubmit="return confirm('{{ ms.analyzed_without + ms.error }} Dokumente für Vorschläge einreihen? Mit AI etwa eine Minute je Dokument auf der CPU – die Warteschlange lässt sich jederzeit anhalten.')">
+    <button class="small">Für {{ ms.analyzed_without + ms.error }} analysierte Dokumente Vorschläge erstellen</button>
+  </form>
+  {% endif %}
+</div>
 <p class="muted">Zuletzt erstellter Metadaten-Vorschlag: <strong>{{ last.meta_any|ts }}</strong>
   {%- if last.meta_open %} · jüngster mit offenen Punkten: <strong>{{ last.meta_open|ts }}</strong>{% endif %}</p>
 

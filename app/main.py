@@ -997,8 +997,17 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             meta_open=meta_open, meta_accepted=meta_accepted, meta_accepted_count=sum(len(i) for _, i in meta_accepted), quality=metadata.quality(session), META_ITEMS=metadata.ITEMS,
             META_SOURCES=metadata.SOURCES, hints=metadata.archive_hints(session), HINTS=metadata.HINTS,
             meta_queued=session.scalar(select(func.count()).select_from(Document).where(Document.meta_state.in_(("queued", "running")))),
+            meta_status=pipeline.meta_overview(session), queue_paused=pipeline.kv_get(session, "queue_paused") == "1",
+            llm_now=settings.llm_allowed_at(datetime.now(ZoneInfo(settings.timezone)).hour),
             settings=settings,
         )
+
+    @app.post("/paperless-changes/meta-backfill")
+    def paperless_changes_meta_backfill(session: Session = Depends(get_session)):
+        count = pipeline.queue_meta_for_analyzed(session)
+        request_worker(app)
+        msg = f"{count} bereits analysierte Dokumente für Metadaten-Vorschläge eingereiht"
+        return RedirectResponse(f"/paperless-changes?msg={quote(msg)}#metadata", status_code=303)
 
     @app.post("/paperless-changes/meta")
     async def paperless_changes_meta(request: Request, session: Session = Depends(get_session)):

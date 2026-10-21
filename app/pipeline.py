@@ -857,6 +857,36 @@ def next_queued(session: Session) -> Document | None:
     ).first()
 
 
+def meta_overview(session: Session) -> dict:
+    """Stand der Metadaten-Vorschläge für „Für Paperless“."""
+    from sqlalchemy import func
+
+    states = dict(session.execute(select(Document.meta_state, func.count()).group_by(Document.meta_state)).all())
+    without = session.scalar(select(func.count()).select_from(Document).where(
+        Document.extraction_state == "done", Document.meta_state.is_(None)))
+    nothing_open = session.scalar(select(func.count()).select_from(Document).where(
+        Document.meta_state == "done", Document.meta_pending.is_(False)))
+    last_error = session.scalar(select(Document.extraction_error).where(Document.meta_state == "error")
+                                .order_by(Document.updated_at.desc()).limit(1))
+    analyses_waiting = session.scalar(select(func.count()).select_from(Document).where(Document.extraction_state == "queued"))
+    return {"done": states.get("done", 0), "queued": states.get("queued", 0) + states.get("running", 0),
+            "error": states.get("error", 0), "analyzed_without": without, "nothing_open": nothing_open,
+            "last_error": last_error, "analyses_waiting": analyses_waiting}
+
+
+def queue_meta_for_analyzed(session: Session, include_errors: bool = True) -> int:
+    """Bereits analysierte Dokumente ohne Vorschlag (und fehlgeschlagene) für Vorschläge einreihen."""
+    states = [None, "error"] if include_errors else [None]
+    count = 0
+    for doc in session.scalars(select(Document).where(
+        Document.extraction_state == "done",
+        Document.meta_state.is_(None) | Document.meta_state.in_([s for s in states if s]),
+    )):
+        doc.meta_state = "queued"
+        count += 1
+    return count
+
+
 def next_meta(session: Session) -> Document | None:
     return session.scalars(
         select(Document).where(Document.meta_state == "queued").order_by(Document.updated_at).limit(1)

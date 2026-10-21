@@ -227,3 +227,34 @@ def test_changes_page_shows_dates(client):
     page = client.get("/paperless-changes").text
     assert "Zuletzt erstellter Metadaten-Vorschlag: <strong>20.10.2026 10:15</strong>" in page  # Europe/Berlin
     assert "Vorschlag 20.10.2026 10:15" in page and "Jüngster offener Vorschlag" in page and ">Stand<" in page
+
+
+def test_meta_status_and_backfill(client):
+    with session_scope() as s:
+        for doc in s.query(Document):
+            if doc.id != 3:
+                doc.meta_state = None  # vor dem Update analysiert
+    page = client.get("/paperless-changes").text
+    assert "2 analysierte Dokumente noch ohne Vorschlag" in page and "Für 2 analysierte Dokumente Vorschläge erstellen" in page
+    client.post("/paperless-changes/meta-backfill")
+    with session_scope() as s:
+        assert s.get(Document, 1).meta_state == "queued" and s.get(Document, 3).meta_state == "done"
+
+
+def test_worker_alternates_analysis_and_suggestions(db, settings, mock_api):
+    from app.worker import Worker
+
+    run_all(db, settings)
+    with db() as s:
+        for doc in s.query(Document):
+            doc.extraction_state, doc.meta_state = "queued", None
+        s.get(Document, 1).meta_state = "queued"
+    worker = Worker(settings)
+    paperless = PaperlessClient(PAPERLESS, "secret")
+    order = []
+    worker._process_next = lambda p, o: order.append("analyse") or True
+    real_meta = worker._suggest_meta_next
+    worker._suggest_meta_next = lambda p, o: (order.append("meta") or True) if real_meta(p, None) else False
+    for _ in range(4):
+        worker._next_job(paperless, None)
+    assert order[:3] == ["analyse", "meta", "analyse"]

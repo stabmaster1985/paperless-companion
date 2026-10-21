@@ -63,6 +63,7 @@ class Worker:
         self.activity: deque[dict] = deque(maxlen=40)
         self.stats = {"day": None, "analyses": 0, "ai_calls": 0, "ai_seconds": 0.0, "summaries": 0}
         self._noted_idle_reason: str | None = None
+        self._meta_turn = False
         self.last_error: str | None = None
 
     def note(self, text: str, level: str = "info", document_id: int | None = None) -> None:
@@ -120,8 +121,7 @@ class Worker:
                 if self.version is not None:
                     self.version.refresh()  # höchstens stündlich bei GitHub
                 self._reminders()
-                worked = (self._process_next(paperless, ollama) or self._summarize_next(paperless, ollama)
-                          or self._suggest_meta_next(paperless, ollama))
+                worked = self._next_job(paperless, ollama)
             except Exception as exc:  # noqa: BLE001 - Thread darf nicht sterben
                 log.exception("Fehler im Hintergrundprozess")
                 self.last_error = str(exc)
@@ -282,6 +282,18 @@ class Worker:
         finally:
             self.current_document = self.current_task = self.current_since = None
         return True
+
+    def _next_job(self, paperless: PaperlessClient, ollama: OllamaClient | None) -> bool:
+        """Analysen und Metadaten-Vorschläge abwechselnd, damit Vorschläge nicht hinter einer langen
+        Analyse-Warteschlange verhungern (das Modell ist dann ohnehin noch geladen)."""
+        if self._meta_turn:
+            self._meta_turn = False
+            if self._suggest_meta_next(paperless, ollama):
+                return True
+        if self._process_next(paperless, ollama):
+            self._meta_turn = True
+            return True
+        return self._summarize_next(paperless, ollama) or self._suggest_meta_next(paperless, ollama)
 
     def llm_allowed_now(self) -> bool:
         return self.settings.llm_allowed_at(datetime.now(self.tz).hour)
