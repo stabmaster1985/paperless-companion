@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Einstellungen</h1>
+{% if msg %}<div class="notice">{{ msg }}</div>{% endif %}
+
+<section class="card">
+  <h2>Dokumenttypen</h2>
+  <p class="muted">Lege fest, welche deiner Paperless-Dokumenttypen die App als Rechnung, Vertrag oder Garantie auswertet und welche steuerrelevant sind.
+    Dokumente anderer Typen erkennt die App nur über Schlüsselwörter.
+    Die Auswahl wird nur in der App gespeichert, in Paperless ändert sich nichts.
+    {% if stored %}Sie hat Vorrang vor den Werten in der <code>.env</code>.{% else %}Vorausgewählt sind die Werte aus der <code>.env</code>.{% endif %}</p>
+  {% if error %}
+  <div class="notice error">Dokumenttypen konnten nicht aus Paperless gelesen werden: {{ error }}</div>
+  {% elif not rows %}
+  <p class="empty">In Paperless sind keine Dokumenttypen angelegt.</p>
+  {% else %}
+  <form method="post" action="/settings/doctypes">
+    <div class="table-wrap"><table class="list">
+      <thead><tr><th>Dokumenttyp</th><th class="hide-sm">Dokumente</th><th>Auswerten als</th><th>Steuer</th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <td>{{ r.name }}<input type="hidden" name="name" value="{{ r.key }}">
+            {% if r.missing %}<br><small class="muted">nicht mehr in Paperless</small>{% endif %}</td>
+          <td class="hide-sm nowrap">{{ r.count[0] }}{% if r.count[0] %} <small class="muted">({{ r.count[1] }} analysiert)</small>{% endif %}</td>
+          <td>
+            <select name="kind:{{ r.key }}" aria-label="Art für {{ r.name }}">
+              <option value="" {{ 'selected' if not r.kind }}>nicht auswerten</option>
+              <option value="invoice" {{ 'selected' if r.kind == 'invoice' }}>Rechnung</option>
+              <option value="contract" {{ 'selected' if r.kind == 'contract' }}>Vertrag</option>
+              <option value="warranty" {{ 'selected' if r.kind == 'warranty' }}>Garantie</option>
+            </select>
+          </td>
+          <td><input type="checkbox" name="tax:{{ r.key }}" value="1" aria-label="{{ r.name }} steuerrelevant" {{ 'checked' if r.tax }}></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+    <div class="actions">
+      <button class="primary">Speichern</button>
+    </div>
+  </form>
+  <p class="hint">Bereits analysierte, noch nicht bestätigte Dokumente eines geänderten Typs werden automatisch neu analysiert.
+    Bestätigte Dokumente und Dokumente, deren Art du von Hand gesetzt hast, bleiben unverändert.</p>
+  {% if stored %}
+  <form method="post" action="/settings/doctypes/reset" class="inline" onsubmit="return confirm('Gespeicherte Zuordnung verwerfen und wieder die Werte aus der .env verwenden?')">
+    <button class="small link">Auf Werte aus der .env zurücksetzen</button>
+  </form>
+  {% endif %}
+  {% endif %}
+  {% if index_known_type %}
+  <div class="actions">
+    <form method="post" action="/system/analyze-known-types" class="inline" onsubmit="return confirm('{{ index_known_type }} Dokumente analysieren? Mit AI kann das auf der CPU einige Zeit dauern – die Warteschlange lässt sich jederzeit anhalten.')">
+      <button class="small">{{ index_known_type }} ältere Dokumente dieser Typen aus dem Index analysieren</button>
+    </form>
+  </div>
+  {% endif %}
+</section>
+{% endblock %}

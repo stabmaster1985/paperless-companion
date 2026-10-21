@@ -21,6 +21,7 @@
     <a href="/retention" class="{{ 'active' if path.startswith('/retention') }}">Aufbewahrung</a>
     <a href="/documents" class="{{ 'active' if path.startswith('/documents') }}">Dokumente</a>
     <a href="/paperless-changes" class="{{ 'active' if path.startswith('/paperless-changes') }}">Für Paperless{% if outgoing_count %} <span class="pill">{{ outgoing_count }}</span>{% endif %}</a>
+    <a href="/settings" class="{{ 'active' if path.startswith('/settings') }}">Einstellungen</a>
     <a href="/system" class="{{ 'active' if path.startswith('/system') }}">System{% if update_available %} <span class="pill" title="Update verfügbar">Update</span>{% endif %}</a>
     {% if auth %}<form method="post" action="/logout" class="inline"><button class="link">Abmelden</button></form>{% endif %}
   </nav>

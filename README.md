@@ -264,8 +264,12 @@ Die mitgelieferten Regeln sind Beispiele für Privathaushalte und keine Rechtsbe
 
 ## Zuordnung der Dokumente
 
-1. Dokumenttyp in Paperless: siehe `DOCTYPES_INVOICE`, `DOCTYPES_CONTRACT` und
-   `DOCTYPES_WARRANTY` (Groß-/Kleinschreibung egal).
+1. Dokumenttyp in Paperless. Am einfachsten legst du das unter **Einstellungen** fest:
+   Die Seite liest alle Dokumenttypen aus Paperless, und du wählst je Typ Rechnung,
+   Vertrag, Garantie oder „nicht auswerten“ (und ob er steuerrelevant ist). Die
+   Auswahl wird in der App gespeichert und hat Vorrang vor `DOCTYPES_INVOICE`,
+   `DOCTYPES_CONTRACT`, `DOCTYPES_WARRANTY` und `TAX_DOCTYPES` aus der `.env`, die nur
+   noch als Startwerte dienen.
 2. Sonst Schlüsselwörter in Titel und Text („Rechnungsnummer“, „Vertrag“ + „Laufzeit“ …).
 3. In der Oberfläche kann die Art jederzeit manuell geändert werden. Das Dokument wird dann
    neu analysiert.

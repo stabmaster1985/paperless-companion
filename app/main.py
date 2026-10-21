@@ -15,7 +15,7 @@ from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import func, select
+from sqlalchemy import case as case_, func, select
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 from starlette.middleware.sessions import SessionMiddleware
@@ -23,7 +23,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from app import cases, deadlines, events, fields, highlight, ics, notify, payments, pipeline, reminders, retention, selection, tax
 from app.config import Settings, get_settings
 from app.db import get_session, init_db, session_scope
-from app.models import Case, CaseDocument, CaseEntry, Contract, Document, Invoice, RetentionLog, RetentionRule, Warranty
+from app.models import Case, CaseDocument, CaseEntry, Contract, Document, Invoice, KeyValue, RetentionLog, RetentionRule, Warranty
 from app.firefly import FireflyError
 from app.paperless import PaperlessError
 from app.version import Version
@@ -38,6 +38,8 @@ PUBLIC_PATHS = ("/login", "/static", "/api/webhook", "/calendar.ics", "/health")
 
 def create_app(settings: Settings | None = None, start_worker: bool = True) -> FastAPI:
     settings = settings or get_settings()
+    # Werte aus der .env, falls die in der App gespeicherte Zuordnung zurückgesetzt wird
+    env_doctypes = {k: getattr(settings, k) for k in ("doctypes_invoice", "doctypes_contract", "doctypes_warranty", "tax_doctypes")}
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -45,6 +47,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         init_db(settings.database_url)
         with session_scope() as s:
             retention.seed_defaults(s)
+            pipeline.apply_doctype_settings(s, settings)
         worker = Worker(settings, version)
         app.state.worker = worker
         if start_worker:
@@ -453,6 +456,56 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     def warranties(request: Request, session: Session = Depends(get_session)):
         rows = sorted(session.scalars(select(Warranty)).all(), key=lambda w: w.expires_on or date.max)
         return render(request, "warranties.html", rows=rows)
+
+    @app.get("/settings", response_class=HTMLResponse)
+    def settings_page(request: Request, msg: str = "", session: Session = Depends(get_session)):
+        paperless = make_paperless(settings, timeout=10)
+        error = None
+        try:
+            names = sorted(paperless.names("document_types").values(), key=str.lower)
+        except PaperlessError as exc:
+            names, error = [], str(exc)
+        finally:
+            paperless.close()
+        counts = {(name or "").lower(): (total, analyzed) for name, total, analyzed in session.execute(
+            select(Document.document_type, func.count(),
+                   func.sum(case_((Document.extraction_state != "skipped", 1), else_=0))).group_by(Document.document_type)
+        )}
+        choices = pipeline.doctype_choices(settings)
+        # Zugeordnete Typen, die es in Paperless nicht mehr gibt, nur zeigen, solange noch Dokumente sie tragen
+        known = {n.lower() for n in names}
+        missing = sorted(n for n in set(choices["kinds"]) | set(choices["tax"])
+                         if n not in known and counts.get(n, (0, 0))[0]) if not error else []
+        rows = [{"name": n, "key": n.lower(), "kind": choices["kinds"].get(n.lower(), ""),
+                 "tax": n.lower() in choices["tax"], "count": counts.get(n.lower(), (0, 0)), "missing": n in missing}
+                for n in [*names, *missing]]
+        return render(request, "settings.html", rows=rows, error=error, msg=msg,
+                      stored=pipeline.kv_get(session, "doctype_settings") is not None,
+                      index_known_type=len(pipeline.index_documents_with_known_type(session, settings)))
+
+    @app.post("/settings/doctypes")
+    async def settings_doctypes(request: Request, session: Session = Depends(get_session)):
+        form = await request.form()
+        names = form.getlist("name")
+        kinds = {n: form.get(f"kind:{n}", "") for n in names}
+        tax_types = [n for n in names if form.get(f"tax:{n}")]
+        changed = pipeline.save_doctype_settings(session, settings, kinds, tax_types)
+        requeued = pipeline.requeue_doctypes(session, changed)
+        if requeued:
+            request_worker(app)
+        msg = "Zuordnung gespeichert"
+        if requeued:
+            msg += f" – {requeued} bereits analysierte Dokumente werden mit der neuen Art neu analysiert"
+        return RedirectResponse(f"/settings?msg={quote(msg)}", status_code=303)
+
+    @app.post("/settings/doctypes/reset")
+    def settings_doctypes_reset(session: Session = Depends(get_session)):
+        item = session.get(KeyValue, "doctype_settings")
+        if item:
+            session.delete(item)
+        for key, value in env_doctypes.items():
+            setattr(settings, key, value)
+        return RedirectResponse(f"/settings?msg={quote('Zuordnung aus der .env wiederhergestellt')}", status_code=303)
 
     @app.get("/system", response_class=HTMLResponse)
     def system(request: Request, msg: str = "", session: Session = Depends(get_session)):

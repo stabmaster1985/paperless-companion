@@ -169,3 +169,37 @@ def test_field_provenance(client):
     # Als bezahlt markiert -> manuell, in der Rechnungsliste sichtbar
     client.post("/invoices/1/paid")
     assert "manuell</span>" in client.get("/invoices?status=paid").text
+
+
+def test_doctype_settings_page(client):
+    from app.db import session_scope as scope
+
+    page = client.get("/settings").text
+    assert "Rechnung" in page and "Vertrag" in page and 'name="kind:rechnung"' in page
+    # Vertrag soll künftig nicht ausgewertet werden, Rechnung wird steuerrelevant
+    response = client.post("/settings/doctypes", data={"name": ["rechnung", "vertrag"], "kind:rechnung": "invoice",
+                                                       "kind:vertrag": "", "tax:rechnung": "1"}, follow_redirects=False)
+    assert response.status_code == 303
+    settings = client.app.state.settings
+    assert settings.doctype_map() == {"rechnung": "invoice"} and settings.tax_doctype_list == ["rechnung"]
+    with scope() as s:
+        doc = s.get(Document, 2)
+        assert doc.document_type == "Vertrag" and doc.extraction_state == "queued"
+        assert s.get(Document, 1).extraction_state == "done"
+    page = client.get("/settings").text
+    assert '<option value="" selected>nicht auswerten</option>' in page and "Auf Werte aus der .env zurücksetzen" in page
+    client.post("/settings/doctypes/reset")
+    assert settings.doctype_map()["vertrag"] == "contract"
+
+
+def test_doctype_settings_survive_restart(settings, mock_api):
+    from app.db import session_scope as scope
+    from app import pipeline
+
+    app = create_app(settings, start_worker=False)
+    with TestClient(app):
+        with scope() as s:
+            pipeline.save_doctype_settings(s, settings, {"Beleg": "invoice"}, [])
+    settings.doctypes_invoice = "Rechnung"
+    with TestClient(create_app(settings, start_worker=False)):
+        assert settings.doctype_map() == {"beleg": "invoice"}

@@ -75,7 +75,7 @@ document.getElementById('update-btn').addEventListener('click', async (e) => {
     · <strong>{{ overview.index_only }}</strong> nur im Index (nicht analysiert)</p>
   <p class="muted">Automatisch analysiert werden neue Dokumente und solche, die in den letzten {{ settings.initial_sync_days }} Tagen in Paperless geändert wurden.
     Ältere Dokumente bleiben im Index, bis du sie auswählst – so wird die CPU nicht mit dem ganzen Archiv belastet.
-    Ob ein Dokument eine Rechnung, ein Vertrag oder eine Garantie ist, erkennt die App am Paperless-Dokumenttyp ({{ overview.doctypes }}) oder an Schlüsselwörtern – alles andere bleibt „Sonstiges“ ohne Felder.</p>
+    Ob ein Dokument eine Rechnung, ein Vertrag oder eine Garantie ist, erkennt die App am Paperless-Dokumenttyp ({{ overview.doctypes or "keine zugeordnet" }}, <a href="/settings">in den Einstellungen festlegen</a>) oder an Schlüsselwörtern – alles andere bleibt „Sonstiges“ ohne Felder.</p>
   <div class="actions">
     {% if overview.index_known_type %}
     <form method="post" action="/system/analyze-known-types" class="inline" onsubmit="return confirm('{{ overview.index_known_type }} Dokumente analysieren? Mit AI kann das auf der CPU einige Zeit dauern – die Warteschlange lässt sich jederzeit anhalten.')">

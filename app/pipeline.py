@@ -1,6 +1,7 @@
 """Verarbeitung: Klassifizieren -> Regeln -> (optional) LLM -> Übernehmen oder Inbox."""
 
 import hashlib
+import json
 import logging
 import re
 import time
@@ -156,6 +157,49 @@ def kv_set(session: Session, key: str, value: str) -> None:
         item.value = value
     else:
         session.add(KeyValue(key=key, value=value))
+
+
+DOCTYPE_KINDS = ("invoice", "contract", "warranty")
+
+
+def doctype_choices(settings: Settings) -> dict:
+    """Aktuelle Zuordnung Dokumenttyp -> Art und Steuer-Typen (kleingeschrieben)."""
+    return {"kinds": settings.doctype_map(), "tax": settings.tax_doctype_list}
+
+
+def apply_doctype_settings(session: Session, settings: Settings) -> bool:
+    """In der App gespeicherte Dokumenttyp-Zuordnung übernehmen; sie hat Vorrang vor der .env."""
+    raw = kv_get(session, "doctype_settings")
+    if not raw:
+        return False
+    stored = json.loads(raw)
+    kinds: dict = stored.get("kinds", {})
+    settings.doctypes_invoice, settings.doctypes_contract, settings.doctypes_warranty = (
+        ",".join(name for name, kind in kinds.items() if kind == k) for k in DOCTYPE_KINDS
+    )
+    settings.tax_doctypes = ",".join(stored.get("tax", []))
+    return True
+
+
+def save_doctype_settings(session: Session, settings: Settings, kinds: dict[str, str], tax: list[str]) -> list[str]:
+    """Zuordnung speichern und übernehmen. Gibt die Typen zurück, deren Art sich geändert hat."""
+    before = settings.doctype_map()
+    kinds = {name.lower(): kind for name, kind in kinds.items() if kind in DOCTYPE_KINDS}
+    kv_set(session, "doctype_settings", json.dumps({"kinds": kinds, "tax": sorted({t.lower() for t in tax})}))
+    apply_doctype_settings(session, settings)
+    return sorted(n for n in set(before) | set(kinds) if before.get(n) != kinds.get(n))
+
+
+def requeue_doctypes(session: Session, names: list[str]) -> int:
+    """Analysierte, unbestätigte Dokumente dieser Typen neu einreihen (manuell gesetzte Art bleibt)."""
+    if not names:
+        return 0
+    count = 0
+    for doc in session.scalars(select(Document).where(Document.extraction_state == "done", Document.review_state != "confirmed")):
+        if (doc.document_type or "").lower() in names and doc.kind_source not in ("manual", "fields"):
+            doc.extraction_state = "queued"
+            count += 1
+    return count
 
 
 # --------------------------------------------------------------------------- Synchronisation
