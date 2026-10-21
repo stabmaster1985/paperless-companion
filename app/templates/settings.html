@@ -72,6 +72,13 @@
   {% endif %}
 </section>
 
+<section class="card">
+  <h2>Abgleich mit Paperless</h2>
+  <p class="muted">Liest Titel, Tags, Korrespondenten und Dokumenttypen aller Dokumente neu aus Paperless – z.B. nachdem du dem
+    Companion-Benutzer in Paperless Leserechte gegeben hast. Es wird nichts neu analysiert und nichts in Paperless geändert.</p>
+  <form method="post" action="/settings/reindex" class="inline" title="Metadaten (Titel, Tags, Korrespondent, Typ) aller Dokumente neu aus Paperless lesen – z.B. nach geänderten Leserechten. Analysiert nichts neu."><input type="hidden" name="back" value="{{ request.url.path }}"><button class="small">Archiv-Index neu einlesen</button></form>
+</section>
+
 <section class="card" id="app-settings">
   <h2>Weitere Einstellungen</h2>
   <p class="muted">Vorbelegt mit den Werten aus deiner <code>.env</code> – du musst nichts neu eintragen.

@@ -104,7 +104,8 @@ setInterval(async () => {
     <p>{{ settings.paperless_url }}</p>
     {% if paperless_status.ok %}<p class="ok">✔ verbunden{% if paperless_status.version %} · Paperless {{ paperless_status.version }}{% endif %}{% if paperless_status.api_version %} · API v{{ paperless_status.api_version }}{% endif %}</p>{% else %}<p class="bad">✘ {{ paperless_status.error }}</p>{% endif %}
     <p class="muted">Letzte Synchronisation: {{ last_sync[:19].replace('T', ' ') if last_sync else 'noch nie' }} (UTC)</p>
-    <form method="post" action="/system/sync" class="inline"><button class="small">Jetzt synchronisieren</button></form>
+    <form method="post" action="/system/sync" class="inline" title="Neue und geänderte Dokumente aus Paperless holen"><button class="small">Jetzt synchronisieren</button></form>
+    <form method="post" action="/settings/reindex" class="inline" title="Metadaten (Titel, Tags, Korrespondent, Typ) aller Dokumente neu aus Paperless lesen – z.B. nach geänderten Leserechten. Analysiert nichts neu."><input type="hidden" name="back" value="{{ request.url.path }}"><button class="small">Archiv-Index neu einlesen</button></form>
   </div>
 
   <div class="card">

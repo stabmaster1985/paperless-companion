@@ -650,7 +650,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             msg = f"Fehler: {exc}"
         finally:
             paperless.close()
-        back = back if back in ("/settings", "/paperless-changes") else "/settings"
+        back = back if back in ("/settings", "/paperless-changes", "/system") else "/settings"
         return RedirectResponse(f"{back}?msg={quote(msg)}", status_code=303)
 
     @app.post("/settings/doctypes")
