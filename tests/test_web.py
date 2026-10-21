@@ -215,3 +215,43 @@ def test_doctype_settings_without_paperless_types(client, mock_api):
     assert "Dem Paperless-Benutzer „companion“ fehlt das Recht „Anzeigen“ für: Dokumenttyp, Korrespondent" in page
     assert 'name="kind:rechnung"' in page and "Archiv-Index neu einlesen" in page
     assert client.post("/settings/reindex", follow_redirects=False).status_code == 303
+
+
+def test_app_settings_prefilled_saved_and_reset(client):
+    from app.db import session_scope as scope
+    from app import appsettings
+
+    settings = client.app.state.settings
+    page = client.get("/settings").text
+    # Vorbelegt mit den Werten aus der .env, Geheimnisse nicht im Klartext
+    assert 'name="ollama_model" value="qwen2.5:3b"' in page and 'value="secret"' not in page
+    form = {"ollama_model": "llama3.2:3b", "llm_active_hours": "22-6", "present:llm_auto_accept": "1",
+            "paperless_token": "", "sync_interval_minutes": "abc", "meta_mode": "manual"}
+    response = client.post("/settings/app", data=form, follow_redirects=False)
+    assert "Nicht%20%C3%BCbernommen" in response.headers["location"]  # ungültige Zahl gemeldet
+    assert settings.ollama_model == "llama3.2:3b" and settings.llm_active_hours == "22-6" and settings.meta_mode == "manual"
+    assert settings.paperless_token == "secret" and settings.sync_interval_minutes == 15
+    with scope() as s:
+        assert appsettings.stored(s) == {"ollama_model": "llama3.2:3b", "llm_active_hours": "22-6", "meta_mode": "manual"}
+    assert "zurücksetzen" in client.get("/settings").text
+    # Zurück auf den .env-Wert -> Eintrag entfällt
+    client.post("/settings/app", data={"ollama_model": "qwen2.5:3b"})
+    client.post("/settings/app/reset", data={"name": "meta_mode"})
+    assert settings.ollama_model == "qwen2.5:3b" and settings.meta_mode == "new"
+    with scope() as s:
+        assert appsettings.stored(s) == {"llm_active_hours": "22-6"}
+    client.post("/settings/app", data={"timezone": "Mars/Olympus"})
+    assert settings.timezone == "Europe/Berlin"
+
+
+def test_app_settings_survive_restart(settings, mock_api):
+    from app.db import session_scope as scope
+    from app import appsettings
+
+    with TestClient(create_app(settings, start_worker=False)):
+        with scope() as s:
+            appsettings.save(s, settings, {"firefly_dashboard_url": ""}, {"firefly_dashboard_url": "http://dash"})
+    settings.firefly_dashboard_url = ""
+    with TestClient(create_app(settings, start_worker=False)) as c:
+        assert settings.firefly_dashboard_url == "http://dash"
+        assert "http://dash" in c.get("/settings").text

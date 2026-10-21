@@ -199,6 +199,15 @@ FIELD_SUMMARY=Zusammenfassung KI
   *Text* fassen in Paperless nur 128 Zeichen, die Zusammenfassung wird passend gekürzt.
   Sie wird im Companion gespeichert und unter „Für Paperless“ zur Übernahme angeboten.
 
+### Einstellungen in der App
+
+Fast alle Werte der `.env` lassen sich unter **Einstellungen → Weitere Einstellungen** ändern
+(Verbindungen zu Paperless, Ollama und Firefly, AI-Zeitfenster, Feldnamen, Erinnerungen, Updates …).
+Die Seite ist mit den Werten aus der `.env` vorbelegt; gespeichert werden nur Abweichungen. Sie
+haben Vorrang, gelten sofort (Verbindungen werden neu aufgebaut) und sind mit „App“ markiert –
+„zurücksetzen“ nimmt wieder den Wert aus der `.env`. Tokens und Passwörter werden nie angezeigt;
+leer lassen heißt unverändert. Nur `DATA_DIR`, `SECRET_KEY` und `APP_PASSWORD` bleiben in der `.env`.
+
 ### Leserechte für den Companion-Benutzer
 
 Gehören Dokumenttypen, Korrespondenten oder Tags einem anderen Paperless-Benutzer (z.B. admin),

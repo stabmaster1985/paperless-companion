@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import cases, deadlines, events, fields, highlight, ics, metadata, notify, payments, pipeline, reminders, retention, selection, tax
+from app import appsettings, cases, deadlines, events, fields, highlight, ics, metadata, notify, payments, pipeline, reminders, retention, selection, tax
 from app.config import Settings, get_settings
 from app.db import get_session, init_db, session_scope
 from app.models import Case, CaseDocument, CaseEntry, Contract, Document, Invoice, KeyValue, RetentionLog, RetentionRule, Warranty
@@ -40,6 +40,8 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     settings = settings or get_settings()
     # Werte aus der .env, falls die in der App gespeicherte Zuordnung zurückgesetzt wird
     env_doctypes = {k: getattr(settings, k) for k in ("doctypes_invoice", "doctypes_contract", "doctypes_warranty", "tax_doctypes")}
+    # Werte aus der .env für die übrigen in der App änderbaren Einstellungen
+    env_settings = {name: getattr(settings, name) for name in appsettings.FIELDS}
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -48,6 +50,8 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         with session_scope() as s:
             retention.seed_defaults(s)
             pipeline.apply_doctype_settings(s, settings)
+            appsettings.apply(s, settings)
+        settings_changed()
         worker = Worker(settings, version)
         app.state.worker = worker
         if start_worker:
@@ -106,6 +110,12 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             "inbox_count": inbox_count, "outgoing_count": outgoing, "today": today(),
             "update_available": app.state.version.update_available, **ctx,
         })
+
+    def settings_changed() -> None:
+        """Nach Änderungen in der App: abhängige Objekte nachziehen (der Worker verbindet sich selbst neu)."""
+        templates.env.globals["link_base"] = settings.paperless_link_base
+        version.repo, version.token = settings.update_repo, settings.update_github_token
+        version.enabled = settings.update_check and bool(settings.update_repo)
 
     def check_token(expected: str, given: str | None) -> None:
         if not expected or not given or not hmac.compare_digest(expected, given):
@@ -566,7 +576,10 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         rows = [{"name": n, "key": n.lower(), "kind": choices["kinds"].get(n.lower(), ""),
                  "tax": n.lower() in choices["tax"], "count": counts.get(n.lower(), (0, 0)), "missing": n in missing}
                 for n in [*names, *missing]]
+        overrides = appsettings.stored(session)
         return render(request, "settings.html", rows=rows, error=error, msg=msg, diagnosis=diagnosis,
+                      SECTIONS=appsettings.SECTIONS, CHOICES=appsettings.CHOICES, field_kind=appsettings.kind,
+                      settings=settings, overrides=overrides, env_settings=env_settings,
                       stored=pipeline.kv_get(session, "doctype_settings") is not None,
                       index_known_type=len(pipeline.index_documents_with_known_type(session, settings)))
 
@@ -584,6 +597,26 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                 "oder sie gehören einem anderen Benutzer und sind nicht für diesen freigegeben – in Paperless unter "
                 "Dokumenttypen beim jeweiligen Typ „Berechtigungen“ den Benutzer bei „Anzeigen“ eintragen "
                 "oder den Typ ohne Eigentümer anlegen.")
+
+    @app.post("/settings/app")
+    async def settings_app(request: Request, session: Session = Depends(get_session)):
+        form = await request.form()
+        changed, errors = appsettings.save(session, settings, env_settings, form)
+        settings_changed()
+        labels = [appsettings.FIELDS[n][0] for n in changed]
+        msg = f"Gespeichert: {', '.join(labels)}" if labels else "Keine Änderungen"
+        if errors:
+            msg += ". Nicht übernommen: " + "; ".join(errors)
+        if changed:
+            app.state.worker.wake.set()
+        return RedirectResponse(f"/settings?msg={quote(msg)}#app-settings", status_code=303)
+
+    @app.post("/settings/app/reset")
+    def settings_app_reset(name: str = Form(""), session: Session = Depends(get_session)):
+        names = appsettings.reset(session, settings, env_settings, [name] if name else None)
+        settings_changed()
+        msg = f"{len(names)} Einstellungen wieder aus der .env übernommen"
+        return RedirectResponse(f"/settings?msg={quote(msg)}#app-settings", status_code=303)
 
     @app.post("/settings/reindex")
     def settings_reindex(session: Session = Depends(get_session)):

@@ -105,10 +105,26 @@ class Worker:
         self.sync_requested = True
         self.wake.set()
 
+    def _connection_key(self) -> tuple:
+        s = self.settings
+        return (s.paperless_url, s.paperless_token, s.llm_provider, s.ollama_url, s.ollama_model, s.ollama_keep_alive,
+                s.ollama_num_ctx, s.ollama_timeout_seconds, s.ollama_num_thread, s.timezone)
+
     def _run(self) -> None:
         paperless = make_paperless(self.settings)
         ollama = make_ollama(self.settings)
+        key = self._connection_key()
         while not self._stop.is_set():
+            if self._connection_key() != key:
+                # Einstellungen in der App geändert -> neu verbinden
+                paperless.close()
+                if ollama is not None:
+                    ollama.close()
+                paperless, ollama = make_paperless(self.settings), make_ollama(self.settings)
+                self.tz = ZoneInfo(self.settings.timezone)
+                key = self._connection_key()
+                self.note("Einstellungen geändert – Verbindungen neu aufgebaut")
+                self.request_sync()
             try:
                 if self.sync_requested or time.monotonic() - self._last_sync > self.settings.sync_interval_minutes * 60:
                     self.sync_requested = False

@@ -63,4 +63,54 @@
   </div>
   {% endif %}
 </section>
+
+<section class="card" id="app-settings">
+  <h2>Weitere Einstellungen</h2>
+  <p class="muted">Vorbelegt mit den Werten aus deiner <code>.env</code> – du musst nichts neu eintragen.
+    Was du hier änderst, speichert die App und verwendet es statt der <code>.env</code> (Kennzeichen <span class="badge src-llm">App</span>);
+    es gilt sofort, Verbindungen werden automatisch neu aufgebaut. Datenverzeichnis, Sitzungsschlüssel und App-Passwort bleiben in der <code>.env</code>.</p>
+  <form method="post" action="/settings/app" class="settings-form">
+    {% for title, items in SECTIONS %}
+    <fieldset>
+      <legend>{{ title }}</legend>
+      <div class="grid">
+      {% for name, label, hint in items %}
+        {% set k = field_kind(name) %}
+        {% set value = settings[name] %}
+        <div class="field">
+          <span>{{ label }}
+            {% if name in overrides %}<span class="badge src-llm" title="in der App geändert, .env: {{ '••••' if k == 'secret' else (env_settings[name] if env_settings[name] != '' else 'leer') }}">App</span>
+              <button class="link small" form="reset-{{ name }}" title="Wert aus der .env verwenden">zurücksetzen</button>{% endif %}</span>
+          {% if k == 'bool' %}
+            <input type="hidden" name="present:{{ name }}" value="1">
+            <label class="check"><input type="checkbox" name="{{ name }}" value="1" {{ 'checked' if value }}> aktiv</label>
+          {% elif k == 'choice' %}
+            <select name="{{ name }}">{% for v, text in CHOICES.get(name, []) %}<option value="{{ v }}" {{ 'selected' if value == v }}>{{ text }}</option>{% endfor %}</select>
+          {% elif k == 'secret' %}
+            <input type="password" name="{{ name }}" value="" autocomplete="new-password" placeholder="{{ 'gesetzt – leer lassen = unverändert' if value else 'nicht gesetzt' }}">
+            {% if value %}<label class="check small-check"><input type="checkbox" name="clear:{{ name }}" value="1"> leeren</label>{% endif %}
+          {% elif k == 'int' %}
+            <input type="number" name="{{ name }}" value="{{ value }}">
+          {% else %}
+            <input name="{{ name }}" value="{{ value }}">
+          {% endif %}
+          {% if hint %}<small class="muted">{{ hint }}</small>{% endif %}
+        </div>
+      {% endfor %}
+      </div>
+    </fieldset>
+    {% endfor %}
+    <div class="actions">
+      <button class="primary">Einstellungen speichern</button>
+    </div>
+  </form>
+  {% for name in overrides %}
+  <form method="post" action="/settings/app/reset" id="reset-{{ name }}" hidden><input type="hidden" name="name" value="{{ name }}"></form>
+  {% endfor %}
+  {% if overrides %}
+  <form method="post" action="/settings/app/reset" class="inline" onsubmit="return confirm('Alle in der App geänderten Einstellungen verwerfen und wieder die .env verwenden?')">
+    <button class="small link">Alle {{ overrides|length }} App-Einstellungen verwerfen (wieder .env)</button>
+  </form>
+  {% endif %}
+</section>
 {% endblock %}
