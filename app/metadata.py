@@ -337,6 +337,28 @@ def pending(doc: Document, everything: bool = False) -> list[dict]:
     return items
 
 
+def item_type(key: str) -> str:
+    return "tag" if key.startswith("tag:") else key
+
+
+def filter_items(items: list[dict], what: str = "", source: str = "", value: str = "") -> list[dict]:
+    """Vorschläge nach Art (tag/title/…), Quelle (llm/history) und Wert (z.B. ein bestimmter Tag) filtern."""
+    return [i for i in items
+            if (not what or item_type(i["key"]) == what)
+            and (not source or i["source"] == source)
+            and (not value or i["new"].lower() == value.lower())]
+
+
+def pending_rows(session: Session, state: str, what: str = "", source: str = "", value: str = "") -> list[tuple]:
+    """(Dokument, Vorschläge) aller Dokumente mit offenen bzw. vorgemerkten Vorschlägen, gefiltert."""
+    rows = []
+    for doc in session.scalars(select(Document).where(Document.meta_pending.is_(True)).order_by(Document.id)):
+        items = filter_items([i for i in pending(doc) if i["state"] == state], what, source, value)
+        if items:
+            rows.append((doc, items))
+    return rows
+
+
 def refresh_pending(doc: Document) -> bool:
     doc.meta_pending = bool(pending(doc))
     return doc.meta_pending

@@ -1,4 +1,5 @@
 import hmac
+from collections import Counter
 import logging
 import os
 import re
@@ -1001,18 +1002,29 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     # ------------------------------------------------------------------ Für Paperless (nur mit Zustimmung)
 
     @app.get("/paperless-changes", response_class=HTMLResponse)
-    def paperless_changes(request: Request, msg: str = "", session: Session = Depends(get_session)):
+    def paperless_changes(request: Request, msg: str = "", what: str = "", source: str = "", value: str = "",
+                          session: Session = Depends(get_session)):
         rows = pipeline.documents_with_changes(session, settings, today())
         names = fields.role_names(settings)
         meta_open, meta_accepted = [], []
+        # Zähler für den Filter (über alle offenen Vorschläge, unabhängig vom gewählten Filter)
+        counts = {"what": Counter(), "source": Counter(), "tags": Counter()}
         for doc in session.scalars(select(Document).where(Document.meta_pending.is_(True)).order_by(Document.id)):
             items = metadata.pending(doc)
             if not items:
                 doc.meta_pending = False
+            for i in items:
+                if i["state"] == "open":
+                    counts["what"][metadata.item_type(i["key"])] += 1
+                    counts["source"][i["source"]] += 1
+                    if i["key"].startswith("tag:") and (not source or i["source"] == source):
+                        counts["tags"][i["new"]] += 1
+            items = metadata.filter_items(items, what, source, value)
             if accepted := [i for i in items if i["state"] == "accepted"]:
                 meta_accepted.append((doc, accepted))
             if opened := [i for i in items if i["state"] == "open"]:
                 meta_open.append((doc, opened))
+        meta_filter = {"what": what, "source": source, "value": value}
         def newest(values):
             values = [v for v in values if v]
             return max(values) if values else None
@@ -1029,7 +1041,8 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         return render(
             request, "paperless_changes.html", rows=rows, last=last, change_info=pipeline.change_info,
             SOURCE_LABELS=pipeline.SOURCE_LABELS, names=names, msg=msg, create_fields=settings.writeback_create_fields,
-            meta_open=meta_open, meta_accepted=meta_accepted, meta_accepted_count=sum(len(i) for _, i in meta_accepted), quality=metadata.quality(session), META_ITEMS=metadata.ITEMS,
+            meta_open=meta_open, meta_accepted=meta_accepted, meta_filter=meta_filter, meta_counts=counts,
+            meta_open_count=sum(len(i) for _, i in meta_open), meta_query=meta_query(meta_filter), meta_accepted_count=sum(len(i) for _, i in meta_accepted), quality=metadata.quality(session), META_ITEMS=metadata.ITEMS,
             META_SOURCES=metadata.SOURCES, hints=metadata.archive_hints(session), HINTS=metadata.HINTS,
             meta_queued=session.scalar(select(func.count()).select_from(Document).where(Document.meta_state.in_(("queued", "running")))),
             meta_status=pipeline.meta_overview(session), queue_paused=pipeline.kv_get(session, "queue_paused") == "1",
@@ -1052,16 +1065,24 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             doc_id, _, key = str(item).partition(":")
             if doc_id.isdigit() and key:
                 selected.setdefault(int(doc_id), []).append(key)
-        action = form.get("action")
-        if action == "transfer_all":
-            selected = {d.id: [i["key"] for i in metadata.pending(d) if i["state"] == "accepted"]
-                        for d in session.scalars(select(Document).where(Document.meta_accepted.is_not(None)))}
-            action = "transfer"
+        action = str(form.get("action") or "")
+        flt = {k: str(form.get(k) or "") for k in ("what", "source", "value")}
+        if action.endswith("_all"):
+            # alle mit dem aktuellen Filter angezeigten (vorgemerkte bzw. offene)
+            state = "accepted" if action == "transfer_all" else "open"
+            selected = {doc.id: [i["key"] for i in items] for doc, items in metadata.pending_rows(session, state, **flt)}
+            action = action.removesuffix("_all")
         if not any(selected.values()) or action not in ("accept", "dismiss", "withdraw", "transfer"):
             msg = "Nichts ausgewählt"
         else:
             msg = meta_action(session, action, selected)
-        return RedirectResponse(f"/paperless-changes?msg={quote(msg)}#metadata", status_code=303)
+        query = meta_query(flt)
+        return RedirectResponse(f"/paperless-changes?{query}{'&' if query else ''}msg={quote(msg)}#metadata", status_code=303)
+
+    def meta_query(flt: dict) -> str:
+        from urllib.parse import urlencode
+
+        return urlencode({k: v for k, v in flt.items() if v})
 
     @app.post("/paperless-changes")
     async def paperless_changes_apply(request: Request, session: Session = Depends(get_session)):

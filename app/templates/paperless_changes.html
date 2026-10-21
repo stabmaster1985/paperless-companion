@@ -100,13 +100,40 @@
 <p class="muted">Zuletzt erstellter Metadaten-Vorschlag: <strong>{{ last.meta_any|ts }}</strong>
   {%- if last.meta_open %} · jüngster mit offenen Punkten: <strong>{{ last.meta_open|ts }}</strong>{% endif %}</p>
 
-<h3>Vorgemerkt – wartet auf Übertragung ({{ meta_accepted_count }})</h3>
+{% set mf = meta_filter %}
+{% set mf_active = mf.what or mf.source or mf.value %}
+{% macro mf_hidden(mf) %}{% for k in ('what', 'source', 'value') if mf[k] %}<input type="hidden" name="{{ k }}" value="{{ mf[k] }}">{% endfor %}{% endmacro %}
+<form method="get" action="/paperless-changes#metadata" class="card filter-card meta-filter">
+  <nav class="tabs" aria-label="Art des Vorschlags">
+    {% set total_open = meta_counts.what.values()|sum %}
+    <a href="/paperless-changes?{{ 'source=' ~ mf.source if mf.source }}#metadata" class="{{ 'active' if not mf.what }}">Alle ({{ total_open }})</a>
+    {% for key, label in [('title', 'Titel'), ('tag', 'Tags'), ('correspondent', 'Korrespondent'), ('document_type', 'Dokumenttyp')] %}
+    <a href="/paperless-changes?what={{ key }}{{ '&source=' ~ mf.source if mf.source }}#metadata" class="{{ 'active' if mf.what == key }}">{{ label }} ({{ meta_counts.what.get(key, 0) }})</a>
+    {% endfor %}
+  </nav>
+  <div class="grid">
+    <input type="hidden" name="what" value="{{ mf.what }}">
+    <label class="field"><span>Quelle</span>
+      <select name="source" onchange="this.form.submit()"><option value="">alle</option>
+        {% for key, text in META_SOURCES.items() %}<option value="{{ key }}" {{ 'selected' if mf.source == key }}>{{ text }} ({{ meta_counts.source.get(key, 0) }})</option>{% endfor %}</select></label>
+    {% if mf.what in ('', 'tag') and meta_counts.tags %}
+    <label class="field"><span>Bestimmter Tag</span>
+      <select name="value" onchange="this.form.submit()"><option value="">alle</option>
+        {% for tag, n in meta_counts.tags.most_common() %}<option value="{{ tag }}" {{ 'selected' if mf.value|lower == tag|lower }}>{{ tag }} ({{ n }})</option>{% endfor %}</select></label>
+    {% endif %}
+  </div>
+  <noscript><button class="small">Filtern</button></noscript>
+  {% if mf_active %}<a class="button small" href="/paperless-changes#metadata">Filter zurücksetzen</a>{% endif %}
+</form>
+
+<h3>Vorgemerkt – wartet auf Übertragung ({{ meta_accepted_count }}{{ ', gefiltert' if mf_active }})</h3>
 {% if meta_accepted %}
 <form method="post" action="/paperless-changes/meta" id="meta-accepted">
+  {{ mf_hidden(mf) }}
   {{ meta_table('meta-accepted', meta_accepted) }}
   <div class="actions">
     <button name="action" value="transfer" class="primary" onclick="return confirm('Ausgewählte vorgemerkte Werte jetzt in Paperless schreiben?')">Ausgewählte nach Paperless übertragen</button>
-    <button name="action" value="transfer_all" onclick="return confirm('Alle vorgemerkten Werte jetzt in Paperless schreiben?')">Alle übertragen</button>
+    <button name="action" value="transfer_all" onclick="return confirm('Alle {{ meta_accepted_count }} {{ 'angezeigten ' if mf_active }}vorgemerkten Werte jetzt in Paperless schreiben?')">Alle {{ meta_accepted_count }} {{ 'angezeigten ' if mf_active }}übertragen</button>
     <button name="action" value="withdraw">Vormerkung zurücknehmen</button>
     <button name="action" value="dismiss">Verwerfen</button>
   </div>
@@ -116,20 +143,26 @@
 <p class="empty">Nichts vorgemerkt.</p>
 {% endif %}
 
-<h3>Offene Vorschläge</h3>
+<h3>Offene Vorschläge ({{ meta_open_count }}{{ ', gefiltert' if mf_active }})</h3>
 <p class="muted">Hier stehen fehlende Tags, Titel nur, wenn der jetzige nichtssagend ist (z.B. „Scan_0012“), und Korrespondent/Dokumenttyp nur,
   wenn sie in Paperless fehlen. Abweichungen bei gepflegten Werten siehst du auf der Dokumentseite.</p>
 {% if meta_open %}
 <form method="post" action="/paperless-changes/meta" id="meta-open">
+  {{ mf_hidden(mf) }}
   {{ meta_table('meta-open', meta_open) }}
   <div class="actions">
     <button name="action" value="accept" class="primary">Ausgewählte vormerken</button>
     <button name="action" value="dismiss">Ausgewählte verwerfen</button>
+    {% if mf_active %}
+    <span class="sep" aria-hidden="true">|</span>
+    <button name="action" value="accept_all" onclick="return confirm('Alle {{ meta_open_count }} angezeigten Vorschläge vormerken? (Nur im Companion, nichts geht nach Paperless.)')">Alle {{ meta_open_count }} angezeigten vormerken</button>
+    <button name="action" value="dismiss_all" onclick="return confirm('Alle {{ meta_open_count }} angezeigten Vorschläge verwerfen?')">Alle {{ meta_open_count }} angezeigten verwerfen</button>
+    {% endif %}
   </div>
   <p class="hint">Verworfene Tags schlägt die App für denselben Absender nicht mehr vor.</p>
 </form>
 {% else %}
-<p class="empty">Keine offenen Metadaten-Vorschläge.</p>
+<p class="empty">Keine offenen Metadaten-Vorschläge{{ ' für diesen Filter' if mf_active }}.</p>
 {% endif %}
 
 <section class="card">

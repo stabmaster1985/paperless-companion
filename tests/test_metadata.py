@@ -258,3 +258,19 @@ def test_worker_alternates_analysis_and_suggestions(db, settings, mock_api):
     for _ in range(4):
         worker._next_job(paperless, None)
     assert order[:3] == ["analyse", "meta", "analyse"]
+
+
+def test_filter_open_suggestions(client):
+    page = client.get("/paperless-changes").text
+    assert "Titel (1)" in page and "Tags (2)" in page and "Haus (1)" in page
+    page = client.get("/paperless-changes?what=tag").text
+    open_part = page.split("Offene Vorschläge")[1]
+    assert "Haus" in open_part and "Elektronik" in open_part and "Rechnung Waschmaschine" not in open_part
+    page = client.get("/paperless-changes?what=title").text.split("Offene Vorschläge")[1]
+    assert "Rechnung Waschmaschine September 2026" in page and "Elektronik" not in page.split("Wie gut")[0]
+    # Alle angezeigten (nur Tag „Haus“) vormerken; Filter bleibt erhalten
+    response = client.post("/paperless-changes/meta", data={"action": "accept_all", "what": "tag", "value": "Haus"},
+                           follow_redirects=False)
+    assert response.headers["location"].startswith("/paperless-changes?what=tag&value=Haus&msg=1%20Vorschl")
+    with session_scope() as s:
+        assert list(s.get(Document, 3).meta_accepted) == ["tag:Haus"]
