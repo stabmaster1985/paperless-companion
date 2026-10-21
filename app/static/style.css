@@ -139,8 +139,8 @@ form.inline { display: inline; }
 .kind-switch select { width: auto; }
 .filters { display: flex; gap: .5rem; margin-bottom: .75rem; flex-wrap: wrap; }
 .filters select { width: auto; }
-.tabs { display: flex; gap: .25rem; margin-bottom: .75rem; }
-.tabs a { padding: .3rem .8rem; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); }
+.tabs { display: flex; flex-wrap: wrap; gap: .25rem; margin-bottom: .75rem; }
+.tabs a { padding: .3rem .8rem; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--muted);  white-space: nowrap; }
 .tabs a.active { color: var(--text); border-color: var(--accent); }
 .ext { font-size: .85em; }
 
@@ -256,3 +256,19 @@ img.thumb { width: 56px; height: 72px; object-fit: cover; object-position: top; 
 .src-note { font-size: .75rem; color: var(--muted); }
 @media (prefers-color-scheme: dark) { .badge.src-firefly { background: #2f2445; color: #c9b3f5; } }
 .tx-link { white-space: nowrap; margin-left: .35rem; }
+/* Vorschlagstabellen auf „Für Paperless“: feste Spalten, langer Text bricht um statt seitlich zu scrollen */
+.changes-list { table-layout: fixed; }
+.changes-list td { overflow-wrap: anywhere; vertical-align: top; }
+.changes-list .col-check { width: 2.4rem; }
+.changes-list .col-what { width: 8.5rem; }
+.changes-list .col-stand { width: 10.5rem; }
+.changes-list .col-doc { width: 28%; }
+.changes-list .col-current { width: 20%; }
+.changes-list .badge, .changes-list .tag { white-space: normal; }
+.changes-list input[name=title] { width: 100%; }
+@media (max-width: 640px) {
+  .changes-list .col-stand { width: 0; }
+  .changes-list .col-what { width: 5.5rem; }
+  .changes-list .col-doc { width: 30%; }
+  .changes-list td, .changes-list th { padding: .45rem .35rem; }
+}
