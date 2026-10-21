@@ -105,3 +105,15 @@ def test_analysis_stamps_version(db, settings, mock_api):
         doc = s.get(Document, 1)
         assert doc.analysis_version == pipeline.ANALYSIS_VERSION and doc.analyzed_at is not None
         assert pipeline.analysis_method(doc) == "rules"
+
+
+def test_overview_and_analyze_known_types(client):
+    with session_scope() as s:
+        add(s, 30, document_type="Rechnung")
+        add(s, 31, document_type="rechnung")
+        add(s, 32, document_type="Arztbrief")
+    page = client.get("/system").text
+    assert "2 Dokumente mit passendem Dokumenttyp analysieren" in page and "nur im Index" in page
+    client.post("/system/analyze-known-types")
+    with session_scope() as s:
+        assert [s.get(Document, i).extraction_state for i in (30, 31, 32)] == ["queued", "queued", "skipped"]

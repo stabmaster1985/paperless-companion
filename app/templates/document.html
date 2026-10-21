@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% from "macros.html" import input, select, doclink %}
 {% block title %}{{ doc.title }} – Paperless Companion{% endblock %}
+{% block main_class %}wide{% endblock %}
 {% block content %}
 <div class="head">
   <div>
@@ -40,6 +41,35 @@
   <div class="notice ok">{{ 'Automatisch übernommen' if doc.auto_confirmed else 'Bestätigt' }}. Änderungen unten speichern.</div>
 {% endif %}
 
+<div class="review-layout">
+<aside class="viewer card" id="viewer">
+  <nav class="tabs viewer-tabs" role="tablist">
+    <button type="button" class="tab active" data-tab="pdf" role="tab">Dokument</button>
+    <button type="button" class="tab" data-tab="text" role="tab">Text{% if text_found %} ({{ text_found|length }} Treffer){% endif %}</button>
+    <a class="tab-link" href="/documents/{{ doc.id }}/preview" target="_blank" rel="noopener">in neuem Tab ↗</a>
+  </nav>
+  <div class="viewer-pane" data-pane="pdf">
+    <iframe src="/documents/{{ doc.id }}/preview#view=FitH" title="Vorschau von {{ doc.title }}" loading="lazy"></iframe>
+  </div>
+  <div class="viewer-pane" data-pane="text" hidden>
+    {% if text_error %}<p class="bad">Text konnte nicht geladen werden: {{ text_error }}</p>
+    {% elif text_html %}
+      {% if sugg %}
+      <p class="muted legend">Markiert: {% for name, label in HL_LABELS.items() if name in text_found %}<mark class="hl hl-{{ name }}">{{ label }}</mark> {% endfor %}
+        {% set missing = HL_LABELS.keys()|select('in', sugg)|reject('in', text_found)|list %}
+        {% if missing %}<br>Nicht im Text gefunden: {% for name in missing %}{{ HL_LABELS[name] }}{{ ', ' if not loop.last }}{% endfor %}{% endif %}</p>
+      {% endif %}
+      <pre class="ocr-text">{{ text_html }}</pre>
+    {% else %}<p class="muted">Kein Text vorhanden (OCR fehlt?).</p>{% endif %}
+  </div>
+</aside>
+<script>
+document.querySelectorAll('#viewer .tab[data-tab]').forEach((tab) => tab.addEventListener('click', () => {
+  document.querySelectorAll('#viewer .tab[data-tab]').forEach((t) => t.classList.toggle('active', t === tab));
+  document.querySelectorAll('#viewer .viewer-pane').forEach((p) => { p.hidden = p.dataset.pane !== tab.dataset.tab; });
+}));
+</script>
+<div class="review-main">
 {% if doc.kind == 'other' %}
   <p class="empty">Dieses Dokument wird nicht ausgewertet. Wähle oben eine Art, um es als Rechnung, Vertrag oder Garantie zu erfassen.</p>
 {% else %}
@@ -102,7 +132,16 @@
   {% endif %}
 
   <div class="actions">
-    <button type="submit" class="primary">{{ 'Bestätigen' if doc.review_state == 'pending' else 'Speichern' }}</button>
+    {% if doc.review_state == 'pending' %}
+      {% if pending_left %}
+      <button type="submit" name="after" value="next" class="primary">Bestätigen &amp; nächstes ({{ pending_left }})</button>
+      <button type="submit" name="after" value="inbox">Bestätigen</button>
+      {% else %}
+      <button type="submit" class="primary">Bestätigen</button>
+      {% endif %}
+    {% else %}
+      <button type="submit" class="primary">Speichern</button>
+    {% endif %}
   </div>
 </form>
 {% endif %}
@@ -187,5 +226,7 @@
     <input type="hidden" name="hold" value="{{ '0' if doc.retention_hold else '1' }}">
     <button class="small">{{ 'Aufbewahrungssperre aufheben' if doc.retention_hold else 'Dauerhaft aufbewahren' }}</button>
   </form>
+</div>
+</div>
 </div>
 {% endblock %}

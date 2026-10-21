@@ -2,13 +2,17 @@
 {% from "macros.html" import doclink %}
 {% block content %}
 <h1>Inbox</h1>
-<p class="muted">Diese Dokumente wurden analysiert, aber nicht alle Angaben waren sicher genug. Bitte prüfen und bestätigen.</p>
+<p class="muted">Diese Dokumente wurden analysiert, aber nicht alle Angaben waren sicher genug. Bitte prüfen und bestätigen –
+  auf der Prüfseite siehst du das Dokument direkt neben den Feldern.</p>
+{% if msg %}<div class="notice ok">{{ msg }}</div>{% endif %}
 {% if docs %}
+<div class="actions"><a class="button primary" href="/documents/{{ docs[0].id }}">Prüfung starten ({{ docs|length }})</a></div>
 <div class="table-wrap"><table class="list">
-  <thead><tr><th>Dokument</th><th>Art</th><th class="hide-sm">Korrespondent</th><th class="hide-sm">Datum</th><th></th></tr></thead>
+  <thead><tr><th class="thumb-col"></th><th>Dokument</th><th>Art</th><th class="hide-sm">Korrespondent</th><th class="hide-sm">Datum</th><th></th></tr></thead>
   <tbody>
   {% for doc in docs %}
     <tr>
+      <td class="thumb-col"><a href="/documents/{{ doc.id }}"><img class="thumb" src="/documents/{{ doc.id }}/preview?kind=thumb" alt="" loading="lazy"></a></td>
       <td><a href="/documents/{{ doc.id }}">{{ doc.title or ('#' ~ doc.id) }}</a> {{ doclink(doc.id) }}</td>
       <td><span class="tag">{{ KINDS[doc.kind] }}</span></td>
       <td class="hide-sm">{{ doc.correspondent or '–' }}</td>

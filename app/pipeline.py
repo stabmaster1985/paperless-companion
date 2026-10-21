@@ -636,6 +636,35 @@ def analysis_method(doc: Document) -> str:
     return "rules"
 
 
+def index_documents_with_known_type(session: Session, settings: Settings) -> list[Document]:
+    """Nur indexierte Dokumente, deren Paperless-Dokumenttyp einer Art zugeordnet ist (Rechnung, Vertrag …)."""
+    mapping = settings.doctype_map()
+    return [
+        d for d in session.scalars(select(Document).where(Document.extraction_state == "skipped"))
+        if d.kind_source != "fields" and (d.document_type or "").lower() in mapping
+    ]
+
+
+def analysis_overview(session: Session, settings: Settings) -> dict:
+    from sqlalchemy import func
+
+    by_kind = dict(session.execute(
+        select(Document.kind, func.count()).where(
+            (Document.extraction_state != "skipped") | (Document.kind_source == "fields")
+        ).group_by(Document.kind)
+    ).all())
+    index_only = session.scalar(
+        select(func.count()).select_from(Document).where(Document.extraction_state == "skipped", Document.kind_source != "fields")
+    )
+    return {
+        "by_kind": by_kind,
+        "processed": sum(by_kind.values()),
+        "index_only": index_only,
+        "index_known_type": len(index_documents_with_known_type(session, settings)),
+        "doctypes": ", ".join(sorted({name for name in settings.doctype_map()})),
+    }
+
+
 def outdated_documents(session: Session) -> list[Document]:
     """Analysierte, nicht bestätigte Dokumente mit älterem Erkennungsstand."""
     return list(session.scalars(

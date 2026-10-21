@@ -76,6 +76,10 @@ def mock_api():
         router.get(f"{PAPERLESS}/api/documents/").respond(json=page(list(DOCS.values())))
         for doc_id, doc in DOCS.items():
             router.get(f"{PAPERLESS}/api/documents/{doc_id}/").respond(json=doc)
+        # Sonstige Dokumente (z.B. nur im Index): leerer Text
+        router.get(url__regex=rf"{PAPERLESS}/api/documents/\d+/$").respond(json={"content": ""})
+        router.get(url__regex=rf"{PAPERLESS}/api/documents/\d+/(preview|thumb)/$").respond(
+            content=b"%PDF-1.4", headers={"content-type": "application/pdf"})
         router.get(f"{PAPERLESS}/api/custom_fields/").respond(json=page(CUSTOM_FIELDS))
         counter = iter(range(2, 100))
         router.post(f"{PAPERLESS}/api/custom_fields/").mock(

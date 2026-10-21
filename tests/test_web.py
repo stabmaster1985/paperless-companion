@@ -124,3 +124,24 @@ def test_activity_log(client, mock_api):
     assert "Regeln + AI (42.5 s, 1 von 2 fehlenden Feldern gefunden) → Inbox" in html
     assert "qwen2.5:3b</code> im Speicher (2.4 GB)" in html and "1 AI-Abfragen" in html
     assert 'id="activity"' in client.get("/system").text
+
+
+def test_review_page_with_preview_and_highlights(client):
+    page = client.get("/documents/1").text
+    assert 'src="/documents/1/preview#view=FitH"' in page
+    assert '<mark class="hl hl-amount" title="Betrag">78,00</mark>' in page and "Text (" in page
+    response = client.get("/documents/1/preview")
+    assert response.status_code == 200 and response.headers["content-type"] == "application/pdf"
+    assert client.get("/documents/1/preview?kind=evil").status_code == 404
+    assert "Prüfung starten" in client.get("/inbox").text
+
+
+def test_confirm_and_next(client):
+    from app.db import session_scope as scope
+
+    with scope() as s:
+        s.get(Document, 3).review_state = "pending"
+    response = client.post("/documents/2/confirm", data={"name": "Handyvertrag", "after": "next"}, follow_redirects=False)
+    assert response.headers["location"].startswith("/documents/3?msg=")
+    response = client.post("/documents/3/confirm", data={"amount": "249,90", "after": "next"}, follow_redirects=False)
+    assert response.headers["location"].startswith("/inbox?msg=")

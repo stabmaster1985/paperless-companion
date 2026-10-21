@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import cases, deadlines, events, fields, ics, notify, payments, pipeline, reminders, retention, selection, tax
+from app import cases, deadlines, events, fields, highlight, ics, notify, payments, pipeline, reminders, retention, selection, tax
 from app.config import Settings, get_settings
 from app.db import get_session, init_db, session_scope
 from app.models import Case, CaseDocument, CaseEntry, Contract, Document, Invoice, RetentionLog, RetentionRule, Warranty
@@ -129,11 +129,11 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         return render(request, "dashboard.html", events=upcoming, stats=stats)
 
     @app.get("/inbox", response_class=HTMLResponse)
-    def inbox(request: Request, session: Session = Depends(get_session)):
+    def inbox(request: Request, msg: str = "", session: Session = Depends(get_session)):
         docs = session.scalars(
             select(Document).where(Document.review_state == "pending").order_by(Document.created.desc())
         ).all()
-        return render(request, "inbox.html", docs=docs)
+        return render(request, "inbox.html", docs=docs, msg=msg)
 
     @app.get("/documents", response_class=HTMLResponse)
     def documents(request: Request, msg: str = "", session: Session = Depends(get_session)):
@@ -179,13 +179,42 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         if doc.contract:
             deadline = deadlines.compute(deadlines.terms_from_contract(doc.contract), today())
         open_cases = session.scalars(select(Case).where(Case.status == "open").order_by(Case.title)).all()
+        text_html, text_found, text_error = None, set(), None
+        paperless = make_paperless(settings, timeout=15)
+        try:
+            content = paperless.get_document(doc_id).get("content") or ""
+            text_html, text_found = highlight.highlight(content, doc.suggestions or {})
+        except PaperlessError as exc:
+            text_error = str(exc)
+        finally:
+            paperless.close()
         return render(
             request, "document.html", doc=doc, values=values, from_record=from_record,
             sugg=doc.suggestions or {}, deadline=deadline,
             doc_cases=cases.cases_for_document(session, doc_id), open_cases=open_cases,
             related=[(i, session.get(Document, i)) for i in sorted(pipeline.related_ids(session, doc_id))],
             pf=doc.paperless_fields or {}, settings=settings, msg=msg,
+            text_html=text_html, text_found=text_found, text_error=text_error, HL_LABELS=highlight.LABELS,
+            pending_left=session.scalar(
+                select(func.count()).select_from(Document).where(Document.review_state == "pending", Document.id != doc_id)
+            ),
         )
+
+    @app.get("/documents/{doc_id}/preview")
+    def document_preview(doc_id: int, kind: str = "preview"):
+        """Vorschau aus Paperless durchreichen – der Paperless-Token bleibt auf dem Server."""
+        if kind not in ("preview", "thumb"):
+            raise HTTPException(404)
+        paperless = make_paperless(settings, timeout=60)
+        try:
+            content, content_type = paperless.preview(doc_id, kind)
+        except PaperlessError as exc:
+            raise HTTPException(502, f"Vorschau nicht verfügbar: {exc}") from exc
+        finally:
+            paperless.close()
+        return Response(content, media_type=content_type, headers={
+            "Content-Disposition": "inline", "Cache-Control": "private, max-age=600",
+        })
 
     @app.post("/documents/{doc_id}/confirm")
     async def document_confirm(request: Request, doc_id: int, session: Session = Depends(get_session)):
@@ -198,6 +227,14 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         doc.auto_confirmed = False
         doc.writeback_pending = True
         request_worker(app)
+        if form.get("after") == "next":
+            following = session.scalars(
+                select(Document).where(Document.review_state == "pending", Document.id != doc_id)
+                .order_by(Document.created.desc()).limit(1)
+            ).first()
+            if following is not None:
+                return RedirectResponse(f"/documents/{following.id}?msg={quote('Bestätigt – nächstes Dokument')}", status_code=303)
+            return RedirectResponse(f"/inbox?msg={quote('Bestätigt – die Inbox ist leer')}", status_code=303)
         target = form.get("next") or "/inbox"
         return RedirectResponse(target if target.startswith("/") else "/inbox", status_code=303)
 
@@ -265,6 +302,15 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             msg = f"{pipeline.clear_queue(session)} wartende Aufträge zurückgenommen"
         else:
             raise HTTPException(404)
+        return RedirectResponse(f"/system?msg={quote(msg)}", status_code=303)
+
+    @app.post("/system/analyze-known-types")
+    def system_analyze_known_types(session: Session = Depends(get_session)):
+        docs = pipeline.index_documents_with_known_type(session, settings)
+        for doc in docs:
+            doc.extraction_state = "queued"
+        request_worker(app)
+        msg = f"{len(docs)} Dokumente mit bekanntem Dokumenttyp zur Analyse eingereiht"
         return RedirectResponse(f"/system?msg={quote(msg)}", status_code=303)
 
     @app.post("/system/reanalyze-outdated")
@@ -419,6 +465,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             version=app.state.version.get(), llm_error_count=len(pipeline.documents_with_llm_error(session, True)),
             outdated_count=len(pipeline.outdated_documents(session)), analysis_version=pipeline.ANALYSIS_VERSION,
             queue_paused=pipeline.kv_get(session, "queue_paused") == "1", **activity_context(),
+            overview=pipeline.analysis_overview(session, settings),
             summaries_queued=session.scalar(select(func.count()).select_from(Document).where(Document.summary_state == "queued")),
             llm_now=settings.llm_allowed_at(datetime.now(ZoneInfo(settings.timezone)).hour),
         )

@@ -212,3 +212,32 @@ details.edit[open] { margin-bottom: .5rem; }
 .pulse { display: inline-block; width: .6rem; height: .6rem; border-radius: 50%; background: var(--accent); animation: pulse 1.2s infinite; }
 @keyframes pulse { 50% { opacity: .3; } }
 @media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
+
+/* Prüfseite: Dokument links, Felder rechts */
+main.wide { max-width: 1600px; }
+.review-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; align-items: start; }
+.review-main > .card:first-child { margin-top: 0; }
+.viewer { margin: 0; padding: .5rem; }
+.viewer-tabs { margin-bottom: .5rem; flex-wrap: wrap; align-items: center; }
+.viewer-tabs .tab { font: inherit; font-size: .9rem; padding: .3rem .8rem; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--muted); }
+.viewer-tabs .tab.active { color: var(--text); border-color: var(--accent); }
+.viewer-tabs .tab-link { margin-left: auto; font-size: .85rem; }
+.viewer iframe { width: 100%; height: 70vh; border: 0; border-radius: 4px; background: var(--bg); }
+.ocr-text { white-space: pre-wrap; overflow-wrap: anywhere; font: .85rem/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; max-height: 70vh; overflow-y: auto; margin: 0; padding: .5rem; background: var(--bg); border-radius: 4px; }
+mark.hl { border-radius: 3px; padding: 0 .1em; background: #ffe58a; color: #1c2430; }
+mark.hl-amount, mark.hl-monthly_cost, mark.hl-price { background: #b9f0c9; }
+mark.hl-due_date, mark.hl-paid_on { background: #ffc9c2; }
+mark.hl-iban, mark.hl-invoice_number, mark.hl-contract_number { background: #cfe0ff; }
+.legend mark { font-size: .8rem; }
+.thumb-col { width: 64px; }
+img.thumb { width: 56px; height: 72px; object-fit: cover; object-position: top; border-radius: 4px; border: 1px solid var(--border); background: var(--bg); display: block; }
+@media (min-width: 1100px) {
+  .review-layout { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); }
+  .viewer { position: sticky; top: .75rem; }
+  .viewer iframe, .ocr-text { height: calc(100vh - 7rem); max-height: none; }
+}
+@media (max-width: 640px) {
+  .viewer iframe { height: 60vh; }
+  .thumb-col { width: 44px; }
+  img.thumb { width: 40px; height: 52px; }
+}

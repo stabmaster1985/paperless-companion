@@ -75,6 +75,15 @@ class PaperlessClient:
         count = self._get("/api/documents/", page_size=1).get("count", 0)
         return count, self._paginate("/api/documents/", **params)
 
+    def preview(self, doc_id: int, kind: str = "preview") -> tuple[bytes, str]:
+        """Vorschau (PDF, kind="preview") oder Vorschaubild (kind="thumb"). Gibt (Inhalt, Content-Type) zurück."""
+        try:
+            response = self._client.get(f"/api/documents/{doc_id}/{kind}/", timeout=60)
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise PaperlessError(f"Vorschau {doc_id}: {exc}") from exc
+        return response.content, response.headers.get("content-type", "application/octet-stream")
+
     def download(self, doc_id: int, original: bool = False) -> tuple[bytes, str]:
         """Lädt die (archivierte) Datei. Gibt (Inhalt, Dateiname) zurück."""
         try:

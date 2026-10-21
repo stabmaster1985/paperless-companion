@@ -68,6 +68,24 @@ document.getElementById('update-btn').addEventListener('click', async (e) => {
 </script>
 {% endif %}
 
+<section class="card">
+  <h2>Analyse-Übersicht</h2>
+  <p><strong>{{ overview.processed }}</strong> bearbeitet
+    {%- for key, label in KINDS.items() if overview.by_kind.get(key) %}{{ ':' if loop.first }} {{ overview.by_kind[key] }} {{ label }}{{ ',' if not loop.last }}{% endfor %}
+    · <strong>{{ overview.index_only }}</strong> nur im Index (nicht analysiert)</p>
+  <p class="muted">Automatisch analysiert werden neue Dokumente und solche, die in den letzten {{ settings.initial_sync_days }} Tagen in Paperless geändert wurden.
+    Ältere Dokumente bleiben im Index, bis du sie auswählst – so wird die CPU nicht mit dem ganzen Archiv belastet.
+    Ob ein Dokument eine Rechnung, ein Vertrag oder eine Garantie ist, erkennt die App am Paperless-Dokumenttyp ({{ overview.doctypes }}) oder an Schlüsselwörtern – alles andere bleibt „Sonstiges“ ohne Felder.</p>
+  <div class="actions">
+    {% if overview.index_known_type %}
+    <form method="post" action="/system/analyze-known-types" class="inline" onsubmit="return confirm('{{ overview.index_known_type }} Dokumente analysieren? Mit AI kann das auf der CPU einige Zeit dauern – die Warteschlange lässt sich jederzeit anhalten.')">
+      <button class="small primary">{{ overview.index_known_type }} Dokumente mit passendem Dokumenttyp analysieren</button>
+    </form>
+    {% endif %}
+    <a class="button small" href="/documents?view=index">Nur-Index-Dokumente gezielt auswählen</a>
+  </div>
+</section>
+
 <section class="card" id="activity">
   {% include "activity.html" %}
 </section>
