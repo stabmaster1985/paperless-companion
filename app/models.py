@@ -47,6 +47,9 @@ class Document(Base):
     extraction_state: Mapped[str] = mapped_column(String, default="queued")
     extraction_error: Mapped[str | None] = mapped_column(Text)
     suggestions: Mapped[dict] = mapped_column(JSON, default=dict)
+    # Herkunft der gespeicherten Werte je Feld: {"amount": {"source": "rule|llm|paperless|firefly|default|manual",
+    #  "confidence": 0.9, "confirmed": true, "at": "..."}}
+    field_sources: Mapped[dict | None] = mapped_column(JSON)
     analyzed_at: Mapped[datetime | None] = mapped_column(DateTime)
     # Stand der Erkennung bei der letzten Analyse (siehe pipeline.ANALYSIS_VERSION)
     analysis_version: Mapped[int | None] = mapped_column(Integer)

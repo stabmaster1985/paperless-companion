@@ -145,3 +145,27 @@ def test_confirm_and_next(client):
     assert response.headers["location"].startswith("/documents/3?msg=")
     response = client.post("/documents/3/confirm", data={"amount": "249,90", "after": "next"}, follow_redirects=False)
     assert response.headers["location"].startswith("/inbox?msg=")
+
+
+def test_field_provenance(client):
+    from app.db import session_scope as scope
+
+    # Automatisch übernommen: Herkunft aus den Vorschlägen
+    page = client.get("/documents/1").text
+    assert 'class="badge src-rule ' in page and "Regel 90 %" in page
+    # Bestätigen mit einer Änderung: geänderter Wert = manuell, unveränderter = bestätigt
+    with scope() as s:
+        doc = s.get(Document, 3)
+        sugg = doc.suggestions
+    form = {k: v["value"] for k, v in sugg.items() if not k.startswith("_") and v.get("value") is not None}
+    form["invoice_number"] = "XY-99"
+    client.post("/documents/3/confirm", data=form)
+    with scope() as s:
+        sources = s.get(Document, 3).field_sources
+        assert sources["invoice_number"]["source"] == "manual"
+        assert sources["amount"]["source"] == "rule" and sources["amount"]["confirmed"] is True
+    page = client.get("/documents/3").text
+    assert "manuell</span>" in page and "Regel ✓" in page
+    # Als bezahlt markiert -> manuell, in der Rechnungsliste sichtbar
+    client.post("/invoices/1/paid")
+    assert "manuell</span>" in client.get("/invoices?status=paid").text

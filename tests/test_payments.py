@@ -205,3 +205,14 @@ def test_review_page_and_confirm_records_match(review_client):
     with session_scope() as s:
         m = s.query(PaymentMatch).one()
         assert m.state == "accepted" and m.tx_id == "900" and s.get(Document, 1).invoice.status == "paid"
+
+
+def test_accepted_payment_marks_firefly_source(client):
+    client.post("/payments/run")
+    with session_scope() as s:
+        match_id = s.query(PaymentMatch).one().id
+    client.post(f"/payments/{match_id}/accept")
+    with session_scope() as s:
+        src = s.get(Document, 1).field_sources["paid_on"]
+        assert src["source"] == "firefly" and src["confirmed"] is True
+    assert "Firefly ✓" in client.get("/invoices?status=paid").text

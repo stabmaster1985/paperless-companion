@@ -83,6 +83,60 @@ def parse_values(kind: str, raw: dict) -> dict:
     return values
 
 
+SOURCE_LABELS = {
+    "rule": "Regel", "llm": "AI", "paperless": "Paperless", "firefly": "Firefly", "default": "Standard", "manual": "manuell",
+}
+
+
+def set_source(doc: Document, names, source: str, confidence: float | None = None, confirmed: bool = False) -> None:
+    """Herkunft für Felder festhalten (überschreibt frühere Angaben dieser Felder)."""
+    sources = dict(doc.field_sources or {})
+    stamp = datetime.now(timezone.utc).isoformat(timespec="minutes")
+    for name in ([names] if isinstance(names, str) else names):
+        sources[name] = {"source": source, "confidence": confidence, "confirmed": confirmed, "at": stamp}
+    doc.field_sources = sources
+
+
+def clear_source(doc: Document, *names: str) -> None:
+    sources = {k: v for k, v in (doc.field_sources or {}).items() if k not in names}
+    doc.field_sources = sources or None
+
+
+def sources_from_suggestions(doc: Document, kind: str, values: dict) -> None:
+    """Nach automatischer Übernahme: Herkunft aus den Vorschlägen übernehmen."""
+    sugg = doc.suggestions or {}
+    sources: dict = {}
+    stamp = datetime.now(timezone.utc).isoformat(timespec="minutes")
+    for name in FIELD_TYPES[kind]:
+        if values.get(name) is not None and isinstance(sugg.get(name), dict):
+            sources[name] = {"source": sugg[name].get("source"), "confidence": sugg[name].get("confidence"),
+                             "confirmed": False, "at": stamp}
+    doc.field_sources = sources or None
+
+
+def record_confirmation(doc: Document, kind: str, values: dict, before: dict, before_sources: dict) -> None:
+    """Beim Bestätigen: unveränderte Vorschläge als „bestätigt“, alles Geänderte als „manuell“ merken."""
+    sugg = doc.suggestions or {}
+    types = FIELD_TYPES[kind]
+    sources: dict = {}
+    stamp = datetime.now(timezone.utc).isoformat(timespec="minutes")
+    for name, value in values.items():
+        if value is None or value is False or name not in types:
+            continue
+        s = sugg.get(name) if isinstance(sugg.get(name), dict) else None
+        try:
+            suggested = coerce(types[name], s.get("value")) if s else None
+        except (TypeError, ValueError):
+            suggested = None
+        if s and suggested == value:
+            sources[name] = {"source": s.get("source"), "confidence": s.get("confidence"), "confirmed": True, "at": stamp}
+        elif name in before_sources and before.get(name) == value:
+            sources[name] = before_sources[name]  # unverändert gegenüber dem bisherigen Stand
+        else:
+            sources[name] = {"source": "manual", "confidence": None, "confirmed": True, "at": stamp}
+    doc.field_sources = sources or None
+
+
 def suggestion_values(doc: Document) -> dict:
     return {k: v.get("value") for k, v in (doc.suggestions or {}).items() if isinstance(v, dict)}
 
@@ -139,10 +193,13 @@ def apply_paperless_fields(doc: Document, open_max_age_days: int = 90, today: da
         inv = doc.invoice
         if paid and (inv.status != "paid" or inv.paid_on != paid):
             inv.status, inv.paid_on = "paid", paid
+            set_source(doc, ["status", "paid_on"], "paperless")
         if due and inv.due_date != due:
             inv.due_date = due
+            set_source(doc, "due_date", "paperless")
         if amount and inv.amount is None:
             inv.amount = amount
+            set_source(doc, "amount", "paperless")
         return
     if not (due or paid) or doc.contract is not None or doc.kind_source == "manual" or doc.kind not in ("other", "invoice"):
         return
@@ -153,6 +210,13 @@ def apply_paperless_fields(doc: Document, open_max_age_days: int = 90, today: da
         status="paid" if paid or stale else "open", paid_on=paid,
     )
     doc.kind, doc.kind_source, doc.review_state = "invoice", "fields", "confirmed"
+    set_source(doc, [n for n, v in (("due_date", due), ("paid_on", paid), ("amount", amount)) if v], "paperless")
+    set_source(doc, "issuer", "paperless")
+    set_source(doc, "invoice_date", "paperless")
+    if stale:
+        set_source(doc, "status", "default")  # angenommen erledigt (alt, ohne Bezahlt-Datum)
+    elif paid:
+        set_source(doc, "status", "paperless")
     if not paid and not stale and amount is None and doc.extraction_state == "skipped":
         doc.extraction_state = "queued"  # Betrag für offene Rechnung per Analyse ermitteln
 
@@ -378,7 +442,9 @@ def process_document(
     if kind == "other":
         doc.review_state = "none"
     elif can_auto_accept(kind, sugg, settings):
-        apply_values(session, doc, kind, parse_values(kind, suggestion_values(doc)))
+        values = parse_values(kind, suggestion_values(doc))
+        apply_values(session, doc, kind, values)
+        sources_from_suggestions(doc, kind, values)
         doc.review_state = "confirmed"
         doc.auto_confirmed = True
         mark_changed(doc)

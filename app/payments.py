@@ -103,6 +103,7 @@ def match(session: Session, transactions: list[Transaction], settings: Settings)
         if auto:
             inv.status, inv.paid_on = "paid", tx.date
             inv.document.writeback_pending = True
+            _mark_firefly(inv.document, points)
             counts["accepted"] += 1
         else:
             counts["suggested"] += 1
@@ -254,6 +255,12 @@ def record_confirmed_payment(session: Session, doc: Document) -> None:
     ))
 
 
+def _mark_firefly(doc: Document, points: int, confirmed: bool = False) -> None:
+    from app import pipeline
+
+    pipeline.set_source(doc, ["status", "paid_on"], "firefly", 0.9 if points >= AUTO_MIN else 0.75, confirmed)
+
+
 def run(session: Session, client: FireflyClient, settings: Settings, today: date) -> dict[str, int]:
     open_invoices = list(session.scalars(select(Invoice).where(Invoice.status == "open").options(selectinload(Invoice.document))))
     with_amount = [inv for inv in open_invoices if inv.amount is not None]
@@ -305,6 +312,7 @@ def accept(session: Session, match_id: int) -> PaymentMatch | None:
     m.state = "accepted"
     m.invoice.status, m.invoice.paid_on = "paid", m.tx_date
     m.invoice.document.writeback_pending = True
+    _mark_firefly(m.invoice.document, m.score, confirmed=True)
     return m
 
 

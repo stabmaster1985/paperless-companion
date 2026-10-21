@@ -47,7 +47,9 @@
       <td class="nowrap">
         {% if i.payment_method == 'debit' %}<span class="tag">Lastschrift</span>
         {% else %}{{ i.due_date|d }}{% if overdue %} <span class="tag tag-overdue">überfällig</span>{% endif %}{% endif %}
-        {% if i.status == 'paid' %}<br><small>bezahlt {{ i.paid_on|d }}</small>{% endif %}
+        {% if i.status == 'paid' %}<br><small>bezahlt {{ i.paid_on|d }}
+          {%- set ps = (i.document.field_sources or {}).get('paid_on') or (i.document.field_sources or {}).get('status') %}
+          {%- if ps %} · <span class="src-note" title="Herkunft">{{ SOURCE_LABELS.get(ps.source, ps.source) }}{{ ' ✓' if ps.confirmed and ps.source != 'manual' }}</span>{% endif %}</small>{% endif %}
       </td>
       <td class="hide-sm">{{ i.invoice_number or '–' }}</td>
       <td>

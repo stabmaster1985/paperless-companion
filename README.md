@@ -45,7 +45,10 @@ Paperless ──Webhook / Abgleich alle 15 min──▶ Companion
   Nummern, die nicht im Dokument stehen, werden verworfen.
 - **Verträge** müssen immer bestätigt werden. Rechnungen und Garantien mit eindeutigen
   Angaben werden automatisch übernommen.
-- Jedes Feld zeigt in der Oberfläche seine Quelle (Regel, AI, Paperless) und die Sicherheit.
+- Jedes Feld zeigt dauerhaft seine **Herkunft**: *Regel* (aus dem Text), *AI*, *Paperless* (deine
+  Felder), *Firefly* (Bankbuchung), *Standard* oder *manuell* (von dir eingegeben oder geändert).
+  ✓ heißt, dass du einen erkannten Wert unverändert bestätigt hast. Die Herkunft bleibt auch nach
+  dem Bestätigen erhalten. In der Rechnungsliste steht z.B. „bezahlt 10.10. · Firefly ✓“.
 
 ## Installation (Docker)
 

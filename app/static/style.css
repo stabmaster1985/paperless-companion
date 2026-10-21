@@ -241,3 +241,15 @@ img.thumb { width: 56px; height: 72px; object-fit: cover; object-position: top; 
   .thumb-col { width: 44px; }
   img.thumb { width: 40px; height: 52px; }
 }
+/* Herkunft der Werte */
+.badge.src-rule { background: var(--bg); color: var(--muted); border: 1px solid var(--border); }
+.badge.src-llm { background: var(--info-bg); color: var(--text); }
+.badge.src-paperless { background: var(--ok-bg); color: var(--ok); }
+.badge.src-firefly { background: #efe4ff; color: #5b3a9e; }
+.badge.src-manual { background: var(--warn-bg); color: var(--warn); }
+.badge.src-default { background: var(--bg); color: var(--muted); }
+.badge.low { outline: 1px dashed var(--warn); }
+.legend-sources { font-size: .8rem; margin-top: 0; }
+.legend-sources .badge { margin-left: 0; }
+.src-note { font-size: .75rem; color: var(--muted); }
+@media (prefers-color-scheme: dark) { .badge.src-firefly { background: #2f2445; color: #c9b3f5; } }

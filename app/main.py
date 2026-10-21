@@ -175,6 +175,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         if doc is None:
             raise HTTPException(404, "Dokument nicht gefunden")
         values, from_record = form_values(doc)
+        src = field_badges(doc, from_record)
         deadline = None
         if doc.contract:
             deadline = deadlines.compute(deadlines.terms_from_contract(doc.contract), today())
@@ -189,7 +190,8 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         finally:
             paperless.close()
         return render(
-            request, "document.html", doc=doc, values=values, from_record=from_record,
+            request, "document.html", doc=doc, values=values, from_record=from_record, src=src,
+            SOURCE_LABELS=pipeline.SOURCE_LABELS,
             sugg=doc.suggestions or {}, deadline=deadline,
             doc_cases=cases.cases_for_document(session, doc_id), open_cases=open_cases,
             related=[(i, session.get(Document, i)) for i in sorted(pipeline.related_ids(session, doc_id))],
@@ -223,7 +225,11 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         if doc is None or doc.kind not in pipeline.FIELD_TYPES:
             raise HTTPException(404)
         form = dict(await request.form())
-        pipeline.apply_values(session, doc, doc.kind, pipeline.parse_values(doc.kind, form))
+        before = form_values(doc)[0] if doc.review_state == "confirmed" else {}
+        before_sources = dict(doc.field_sources or {})
+        values = pipeline.parse_values(doc.kind, form)
+        pipeline.apply_values(session, doc, doc.kind, values)
+        pipeline.record_confirmation(doc, doc.kind, values, before, before_sources)
         doc.review_state = "confirmed"
         doc.auto_confirmed = False
         payments.record_confirmed_payment(session, doc)
@@ -365,6 +371,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         c.status = "cancelled"
         c.cancelled_on = pipeline.coerce("date", cancelled_on) or today()
         c.document.writeback_pending = True
+        pipeline.set_source(c.document, ["status", "cancelled_on"], "manual", confirmed=True)
         return RedirectResponse("/contracts", status_code=303)
 
     @app.get("/invoices", response_class=HTMLResponse)
@@ -378,7 +385,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             firefly.close()
         return render(
             request, "invoices.html", invoices=session.scalars(query).all(), status=status,
-            matches=payments.suggestions(session), firefly_link=firefly_link, msg=msg,
+            matches=payments.suggestions(session), firefly_link=firefly_link, msg=msg, SOURCE_LABELS=pipeline.SOURCE_LABELS,
             firefly_enabled=settings.firefly_enabled,
         )
 
@@ -426,6 +433,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             raise HTTPException(404)
         inv.status, inv.paid_on = "paid", today()
         inv.document.writeback_pending = True
+        pipeline.set_source(inv.document, ["status", "paid_on"], "manual", confirmed=True)
         request_worker(app)
         return RedirectResponse("/invoices", status_code=303)
 
@@ -436,6 +444,8 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             raise HTTPException(404)
         inv.status, inv.paid_on = "open", None
         inv.document.writeback_pending = True
+        pipeline.set_source(inv.document, "status", "manual", confirmed=True)
+        pipeline.clear_source(inv.document, "paid_on")
         request_worker(app)
         return RedirectResponse("/invoices?status=paid", status_code=303)
 
@@ -946,6 +956,18 @@ def extract_doc_id(payload: dict) -> int | None:
             if m := re.search(r"/documents/(\d+)", str(value)):
                 return int(m.group(1))
     return None
+
+
+def field_badges(doc: Document, from_record: bool) -> dict:
+    """Herkunft je Formularfeld: gespeicherte Herkunft bzw. die der Vorschläge."""
+    sugg = {k: v for k, v in (doc.suggestions or {}).items() if isinstance(v, dict) and not k.startswith("_")}
+    if not from_record:
+        return {k: {"source": v.get("source"), "confidence": v.get("confidence"), "confirmed": False} for k, v in sugg.items()}
+    badges = dict(doc.field_sources or {})
+    if doc.review_state == "pending":
+        # in der Inbox zählen aktuelle Vorschläge aus Firefly (Formular ist damit vorbelegt)
+        badges.update({k: {**v, "confirmed": False} for k, v in sugg.items() if v.get("source") == "firefly"})
+    return badges
 
 
 def form_values(doc: Document) -> tuple[dict, bool]:

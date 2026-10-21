@@ -1,24 +1,34 @@
-{% macro badge(name, sugg, from_record) -%}
-  {%- if not from_record and name in sugg -%}
-    {%- set s = sugg[name] -%}
-    {%- set src = {'rule': 'Regel', 'llm': 'AI', 'paperless': 'Paperless', 'default': 'Standard', 'firefly': 'Firefly'}.get(s.source, s.source) -%}
-    <span class="badge {{ 'low' if s.confidence < 0.8 }} src-{{ s.source }}" title="Quelle: {{ src }}">{{ src }}{% if s.source in ('rule', 'llm', 'firefly') %} {{ (s.confidence * 100)|round|int }} %{% endif %}</span>
+{% set SOURCE_TITLES = {
+  'rule': 'aus dem Dokumenttext erkannt (Regel)', 'llm': 'vom lokalen KI-Modell erkannt', 'paperless': 'aus deinen Paperless-Feldern',
+  'firefly': 'aus der Bankbuchung in Firefly', 'default': 'Standardwert', 'manual': 'von dir eingegeben oder geändert'} %}
+{% set SOURCE_NAMES = {'rule': 'Regel', 'llm': 'AI', 'paperless': 'Paperless', 'firefly': 'Firefly', 'default': 'Standard', 'manual': 'manuell'} %}
+
+{% macro badge(name, src) -%}
+  {%- set s = src.get(name) -%}
+  {%- if s and s.source -%}
+    {%- set label = SOURCE_NAMES.get(s.source, s.source) -%}
+    {%- set title = SOURCE_TITLES.get(s.source, s.source) ~ (' – von dir bestätigt' if s.confirmed and s.source != 'manual' else '') -%}
+    <span class="badge src-{{ s.source }} {{ 'low' if s.confidence is not none and s.confidence < 0.8 and not s.confirmed }}" title="{{ title }}">
+      {{- label -}}
+      {%- if s.confidence is not none and s.source in ('rule', 'llm', 'firefly') and not s.confirmed %} {{ (s.confidence * 100)|round|int }} %{% endif -%}
+      {%- if s.confirmed and s.source != 'manual' %} ✓{% endif -%}
+    </span>
   {%- endif -%}
 {%- endmacro %}
 
-{% macro input(name, label, values, sugg, from_record, type='text', step=None, hint=None) -%}
+{% macro input(name, label, values, src, type='text', step=None, hint=None) -%}
   {%- set v = values.get(name) -%}
   <label class="field">
-    <span>{{ label }} {{ badge(name, sugg, from_record) }}</span>
+    <span>{{ label }} {{ badge(name, src) }}</span>
     <input type="{{ type }}" name="{{ name }}" value="{{ v.isoformat() if v is not none and v.isoformat is defined else (v if v is not none else '') }}"{% if step %} step="{{ step }}"{% endif %}>
     {% if hint %}<small>{{ hint }}</small>{% endif %}
   </label>
 {%- endmacro %}
 
-{% macro select(name, label, values, sugg, from_record, options) -%}
+{% macro select(name, label, values, src, options) -%}
   {%- set v = values.get(name) -%}
   <label class="field">
-    <span>{{ label }} {{ badge(name, sugg, from_record) }}</span>
+    <span>{{ label }} {{ badge(name, src) }}</span>
     <select name="{{ name }}">
       {% for key, text in options %}<option value="{{ key }}" {{ 'selected' if v == key }}>{{ text }}</option>{% endfor %}
     </select>
