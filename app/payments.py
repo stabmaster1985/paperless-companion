@@ -1,8 +1,9 @@
 """Abgleich offener Rechnungen mit Abbuchungen aus Firefly III."""
 
+import json
 import logging
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -108,15 +109,44 @@ def match(session: Session, transactions: list[Transaction], settings: Settings)
 
 
 def run(session: Session, client: FireflyClient, settings: Settings, today: date) -> dict[str, int]:
-    open_dates = [
-        d for inv in session.scalars(select(Invoice).where(Invoice.status == "open").options(selectinload(Invoice.document)))
-        if (span := window(inv)) and (d := span[0])
-    ]
-    if not open_dates:
-        return {"suggested": 0, "accepted": 0}
-    start = max(min(open_dates), today - timedelta(days=settings.firefly_lookback_days))
-    transactions = list(client.withdrawals(start, today))
-    return match(session, transactions, settings)
+    open_invoices = list(session.scalars(select(Invoice).where(Invoice.status == "open").options(selectinload(Invoice.document))))
+    with_amount = [inv for inv in open_invoices if inv.amount is not None]
+    open_dates = [d for inv in with_amount if (span := window(inv)) and (d := span[0])]
+    result = {"open": len(open_invoices), "open_with_amount": len(with_amount), "transactions": 0, "suggested": 0, "accepted": 0}
+    if open_dates:
+        start = max(min(open_dates), today - timedelta(days=settings.firefly_lookback_days))
+        transactions = list(client.withdrawals(start, today))
+        result["transactions"] = len(transactions)
+        result.update(match(session, transactions, settings))
+    _remember(session, result)
+    return result
+
+
+def _remember(session: Session, result: dict) -> None:
+    from app.models import KeyValue
+
+    value = json.dumps({**result, "at": datetime.now(timezone.utc).isoformat(timespec="minutes")})
+    item = session.get(KeyValue, "last_payment_run")
+    if item:
+        item.value = value
+    else:
+        session.add(KeyValue(key="last_payment_run", value=value))
+
+
+def summary(session: Session) -> dict:
+    """Bisheriger Nutzen des Abgleichs (für die Systemseite)."""
+    from app.models import KeyValue
+
+    matches = list(session.scalars(select(PaymentMatch).options(selectinload(PaymentMatch.invoice))))
+    accepted = [m for m in matches if m.state == "accepted"]
+    item = session.get(KeyValue, "last_payment_run")
+    return {
+        "accepted": len(accepted),
+        "accepted_sum": round(sum(m.amount for m in accepted), 2),
+        "suggested": len([m for m in matches if m.state == "suggested" and m.invoice and m.invoice.status == "open"]),
+        "rejected": len([m for m in matches if m.state == "rejected"]),
+        "last_run": json.loads(item.value) if item else None,
+    }
 
 
 def accept(session: Session, match_id: int) -> PaymentMatch | None:

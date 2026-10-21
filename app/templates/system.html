@@ -138,6 +138,21 @@ setInterval(async () => {
     {% elif firefly_status.ok %}
       <p>{{ settings.firefly_url }}</p><p class="ok">✔ verbunden (Version {{ firefly_status.version }})</p>
       <p class="muted">Automatische Übernahme eindeutiger Treffer: {{ 'an' if settings.firefly_auto_accept else 'aus' }}</p>
+      {% set ps = payment_summary %}
+      {% if ps %}
+      <p><strong>{{ ps.accepted }}</strong> Rechnungen über Firefly als bezahlt erkannt{% if ps.accepted %} ({{ ps.accepted_sum|eur }}){% endif %}
+        {% if ps.suggested %} · <a href="/invoices">{{ ps.suggested }} Vorschläge offen</a>{% endif %}
+        {% if ps.rejected %} · {{ ps.rejected }} abgelehnt{% endif %}</p>
+      {% if ps.last_run %}
+      <p class="muted">Letzter Abgleich {{ ps.last_run.at[8:10] }}.{{ ps.last_run.at[5:7] }}. {{ ps.last_run.at[11:16] }} (UTC):
+        {% if not ps.last_run.open %}keine offenen Rechnungen.
+        {% elif not ps.last_run.open_with_amount %}{{ ps.last_run.open }} offene Rechnungen, aber keine mit Betrag.
+        {% else %}{{ ps.last_run.transactions }} Abbuchungen für {{ ps.last_run.open_with_amount }} von {{ ps.last_run.open }} offenen Rechnungen geprüft,
+          {{ ps.last_run.suggested + ps.last_run.accepted }} neue Treffer.{% endif %}</p>
+      {% else %}
+      <p class="muted">Noch kein Abgleich gelaufen – unter <a href="/invoices">Rechnungen</a> „Mit Firefly III abgleichen“.</p>
+      {% endif %}
+      {% endif %}
     {% else %}
       <p>{{ settings.firefly_url }}</p><p class="bad">✘ {{ firefly_status.error }}</p>
     {% endif %}

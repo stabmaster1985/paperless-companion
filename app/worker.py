@@ -197,11 +197,18 @@ class Worker:
         try:
             with session_scope() as session:
                 counts = payments.run(session, client, self.settings, datetime.now(self.tz).date())
-            if any(counts.values()):
+            if counts["open"]:
                 log.info("Zahlungsabgleich: %s", counts)
+                found = counts["suggested"] + counts["accepted"]
+                self.note(
+                    f"Zahlungsabgleich mit Firefly: {counts['transactions']} Abbuchungen geprüft für "
+                    f"{counts['open_with_amount']} offene Rechnungen – "
+                    + (f"{found} passende Zahlungen gefunden" if found else "keine neuen Treffer")
+                )
         except FireflyError as exc:
             log.warning("Zahlungsabgleich fehlgeschlagen: %s", exc)
             self.last_error = str(exc)
+            self.note(f"Zahlungsabgleich mit Firefly fehlgeschlagen: {exc}", "error")
         finally:
             client.close()
 

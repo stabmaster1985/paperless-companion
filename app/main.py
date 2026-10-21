@@ -387,7 +387,13 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             return RedirectResponse(f"/invoices?msg={quote('Firefly III ist nicht konfiguriert')}", status_code=303)
         try:
             counts = payments.run(session, client, settings, today())
-            msg = f"Abgleich fertig: {counts['suggested']} Vorschläge, {counts['accepted']} automatisch als bezahlt markiert"
+            if not counts["open"]:
+                msg = "Keine offenen Rechnungen – nichts abzugleichen"
+            elif not counts["open_with_amount"]:
+                msg = f"{counts['open']} offene Rechnungen, aber keine mit Betrag – ohne Betrag kann nichts zugeordnet werden"
+            else:
+                msg = (f"{counts['transactions']} Abbuchungen für {counts['open_with_amount']} offene Rechnungen geprüft: "
+                       f"{counts['suggested']} Vorschläge, {counts['accepted']} automatisch als bezahlt markiert")
         except FireflyError as exc:
             msg = f"Fehler beim Abgleich: {exc}"
         finally:
@@ -466,6 +472,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             outdated_count=len(pipeline.outdated_documents(session)), analysis_version=pipeline.ANALYSIS_VERSION,
             queue_paused=pipeline.kv_get(session, "queue_paused") == "1", **activity_context(),
             overview=pipeline.analysis_overview(session, settings),
+            payment_summary=payments.summary(session) if settings.firefly_enabled else None,
             summaries_queued=session.scalar(select(func.count()).select_from(Document).where(Document.summary_state == "queued")),
             llm_now=settings.llm_allowed_at(datetime.now(ZoneInfo(settings.timezone)).hour),
         )

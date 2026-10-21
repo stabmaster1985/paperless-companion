@@ -124,3 +124,13 @@ def test_web_flow(client):
     with session_scope() as s:
         inv = s.get(Document, 1).invoice
         assert inv.status == "paid" and inv.paid_on == date(2026, 10, 10)
+
+
+def test_summary_shows_benefit(client):
+    client.post("/payments/run")
+    page = client.get("/system").text
+    assert "1 Vorschläge offen" in page and "Abbuchungen für 1 von 1 offenen Rechnungen geprüft" in page
+    with session_scope() as s:
+        match_id = s.query(PaymentMatch).one().id
+    client.post(f"/payments/{match_id}/accept")
+    assert "1</strong> Rechnungen über Firefly als bezahlt erkannt (78,00 €)" in client.get("/system").text
