@@ -3,6 +3,7 @@
 import json
 import logging
 import re
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import select
@@ -10,7 +11,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.config import Settings
 from app.firefly import FireflyClient, Transaction
-from app.models import Invoice, PaymentMatch
+from app.models import Document, Invoice, PaymentMatch
 
 log = logging.getLogger(__name__)
 
@@ -108,16 +109,164 @@ def match(session: Session, transactions: list[Transaction], settings: Settings)
     return counts
 
 
+# --------------------------------------------------------------------------- Dokumente in der Inbox
+
+
+@dataclass
+class Candidate:
+    """Rechnungsangaben eines noch nicht bestätigten Dokuments (aus den Vorschlägen)."""
+
+    document: Document
+    amount: float | None
+    invoice_number: str | None
+    iban: str | None
+    issuer: str | None
+    invoice_date: date | None
+    due_date: date | None
+
+
+# Ohne Betrag: Rechnungsnummer (mind. 4 Zeichen) im Verwendungszweck oder IBAN + Empfänger müssen passen
+PARTIAL_MIN = 40
+
+
+def candidate(doc: Document) -> Candidate | None:
+    from app import pipeline
+
+    if doc.kind != "invoice" or doc.review_state != "pending":
+        return None
+    v = pipeline.parse_values("invoice", pipeline.suggestion_values(doc))
+    if v.get("status") == "paid" and (doc.suggestions or {}).get("status", {}).get("source") != "firefly":
+        return None  # laut Dokument/Paperless bereits bezahlt
+    return Candidate(doc, v.get("amount"), v.get("invoice_number"), v.get("iban"), v.get("issuer"),
+                     v.get("invoice_date"), v.get("due_date"))
+
+
+def score_candidate(c: Candidate, tx: Transaction) -> tuple[int, list[str]] | None:
+    if c.amount is not None:
+        return score(c, tx)  # type: ignore[arg-type] – gleiche Attribute wie Invoice
+    span = window(c)  # type: ignore[arg-type]
+    if span is None or not span[0] <= tx.date <= span[1]:
+        return None
+    points, reasons = 0, []
+    if c.invoice_number and len(_compact(c.invoice_number)) >= 4 and _compact(c.invoice_number) in _compact(tx.text):
+        points += 40
+        reasons.append("Rechnungsnr.")
+    if c.iban and tx.iban and c.iban.replace(" ", "").upper() == tx.iban:
+        points += 30
+        reasons.append("IBAN")
+    if not reasons:
+        return None  # ohne Betrag nur mit eindeutigem Merkmal
+    issuer = c.issuer or c.document.correspondent or ""
+    if _words(issuer) & _words(f"{tx.counterparty} {tx.description}"):
+        points += 20
+        reasons.append("Empfänger")
+    if reasons == ["IBAN"]:
+        return None  # IBAN allein reicht nicht (gleicher Empfänger, viele Rechnungen)
+    return (points, reasons + ["Betrag aus Buchung"]) if points >= PARTIAL_MIN else None
+
+
+def _used_transactions(session: Session, exclude_doc: int | None = None) -> set[str]:
+    used = {m.tx_id for m in session.scalars(select(PaymentMatch).where(PaymentMatch.state.in_(("accepted", "suggested"))))}
+    for doc in session.scalars(select(Document).where(Document.review_state == "pending", Document.kind == "invoice")):
+        if doc.id != exclude_doc and (p := (doc.suggestions or {}).get("_payment")):
+            used.add(p.get("tx_id"))
+    return used
+
+
+def best_payment(c: Candidate, transactions: list[Transaction], used: set[str]):
+    scored = []
+    for tx in transactions:
+        if tx.journal_id in used:
+            continue
+        if (result := score_candidate(c, tx)) is not None:
+            scored.append((result[0], tx, result[1]))
+    if not scored:
+        return None
+    scored.sort(key=lambda item: -item[0])
+    best = scored[0]
+    if c.amount is not None and best[0] < SUGGEST_MIN and len(scored) > 1:
+        return None  # nur der Betrag passt und ist nicht eindeutig
+    return best
+
+
+def apply_payment(doc: Document, points: int, tx: Transaction, reasons: list[str]) -> None:
+    """Zahlung als Vorschlag am Dokument hinterlegen und Felder vorbelegen (Bestätigung bleibt beim Nutzer)."""
+    from app.extraction.rules import field
+
+    sugg = dict(doc.suggestions or {})
+    conf = 0.9 if points >= AUTO_MIN else 0.75
+    sugg["_payment"] = {
+        "tx_id": tx.journal_id, "group_id": tx.group_id, "date": tx.date.isoformat(), "amount": tx.amount,
+        "counterparty": tx.counterparty[:200], "description": tx.description[:300], "score": points,
+        "reasons": ", ".join(reasons),
+    }
+    sugg["status"] = field("paid", conf, "firefly")
+    sugg["paid_on"] = field(tx.date, conf, "firefly")
+    if "Betrag aus Buchung" in reasons:
+        sugg["amount"] = field(tx.amount, 0.75, "firefly")
+    doc.suggestions = sugg
+
+
+def pending_candidates(session: Session) -> list[Candidate]:
+    docs = session.scalars(select(Document).where(Document.review_state == "pending", Document.kind == "invoice"))
+    return [c for d in docs if "_payment" not in (d.suggestions or {}) and (c := candidate(d))]
+
+
+def match_pending(session: Session, transactions: list[Transaction], candidates: list[Candidate]) -> int:
+    used = _used_transactions(session)
+    found = 0
+    for c in candidates:
+        if (best := best_payment(c, transactions, used)) is not None:
+            apply_payment(c.document, *best)
+            used.add(best[1].journal_id)
+            found += 1
+    return found
+
+
+def check_document(session: Session, doc: Document, client: FireflyClient, today: date) -> dict | None:
+    """Direkt nach der Analyse: passende Abbuchung für ein Inbox-Dokument suchen."""
+    c = candidate(doc)
+    if c is None or (span := window(c)) is None:  # type: ignore[arg-type]
+        return None
+    if span[0] > today:
+        return None
+    transactions = list(client.withdrawals(span[0], min(span[1], today)))
+    best = best_payment(c, transactions, _used_transactions(session, exclude_doc=doc.id))
+    if best is None:
+        return None
+    apply_payment(doc, *best)
+    return doc.suggestions["_payment"]
+
+
+def record_confirmed_payment(session: Session, doc: Document) -> None:
+    """Beim Bestätigen einer vorbelegten Zahlung die Buchung als verwendet merken."""
+    p = (doc.suggestions or {}).get("_payment")
+    inv = doc.invoice
+    if not p or inv is None or inv.status != "paid" or (inv.paid_on and inv.paid_on.isoformat() != p["date"]):
+        return
+    session.flush()
+    if session.scalar(select(PaymentMatch).where(PaymentMatch.invoice_id == inv.id, PaymentMatch.tx_id == p["tx_id"])):
+        return
+    session.add(PaymentMatch(
+        invoice_id=inv.id, tx_id=p["tx_id"], tx_group_id=p["group_id"], tx_date=date.fromisoformat(p["date"]),
+        amount=p["amount"], counterparty=p["counterparty"], description=p["description"], score=p["score"],
+        reasons=p["reasons"], state="accepted",
+    ))
+
+
 def run(session: Session, client: FireflyClient, settings: Settings, today: date) -> dict[str, int]:
     open_invoices = list(session.scalars(select(Invoice).where(Invoice.status == "open").options(selectinload(Invoice.document))))
     with_amount = [inv for inv in open_invoices if inv.amount is not None]
-    open_dates = [d for inv in with_amount if (span := window(inv)) and (d := span[0])]
-    result = {"open": len(open_invoices), "open_with_amount": len(with_amount), "transactions": 0, "suggested": 0, "accepted": 0}
-    if open_dates:
-        start = max(min(open_dates), today - timedelta(days=settings.firefly_lookback_days))
+    pending = pending_candidates(session)
+    starts = [span[0] for item in [*with_amount, *pending] if (span := window(item))]  # type: ignore[arg-type]
+    result = {"open": len(open_invoices), "open_with_amount": len(with_amount), "transactions": 0, "suggested": 0,
+              "accepted": 0, "pending": len(pending), "pending_found": 0}
+    if starts:
+        start = max(min(starts), today - timedelta(days=settings.firefly_lookback_days))
         transactions = list(client.withdrawals(start, today))
         result["transactions"] = len(transactions)
         result.update(match(session, transactions, settings))
+        result["pending_found"] = match_pending(session, transactions, pending)
     _remember(session, result)
     return result
 

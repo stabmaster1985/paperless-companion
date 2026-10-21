@@ -134,3 +134,74 @@ def test_summary_shows_benefit(client):
         match_id = s.query(PaymentMatch).one().id
     client.post(f"/payments/{match_id}/accept")
     assert "1</strong> Rechnungen über Firefly als bezahlt erkannt (78,00 €)" in client.get("/system").text
+
+
+def add_pending(s, doc_id, **sugg):
+    from app.extraction.rules import field
+
+    doc = Document(id=doc_id, title=f"Rechnung {doc_id}", created=date(2026, 9, 1), correspondent="Stadtwerke",
+                   kind="invoice", kind_source="doctype", review_state="pending", extraction_state="done",
+                   suggestions={k: field(v, 0.9) for k, v in sugg.items()})
+    s.add(doc)
+    return doc
+
+
+def test_pending_document_gets_payment_prefilled(db, settings):
+    with db() as s:
+        add_pending(s, 1, amount=78.0, invoice_date=date(2026, 9, 1), due_date=date(2026, 9, 15))
+        add_pending(s, 2, invoice_number="RE-5555", invoice_date=date(2026, 9, 1))  # ohne Betrag
+        add_pending(s, 3, invoice_date=date(2026, 9, 1))  # nichts Eindeutiges
+    transactions = [
+        tx("10", date(2026, 9, 12), 78.0, "Stadtwerke GmbH", "Abschlag"),
+        tx("11", date(2026, 9, 20), 112.4, "Versorger", "Rechnung RE-5555"),
+    ]
+    with db() as s:
+        assert payments.match_pending(s, transactions, payments.pending_candidates(s)) == 2
+    with db() as s:
+        one = s.get(Document, 1).suggestions
+        assert one["status"]["value"] == "paid" and one["paid_on"] == {"value": "2026-09-12", "confidence": 0.75, "source": "firefly"}
+        two = s.get(Document, 2).suggestions
+        assert two["amount"]["value"] == 112.4 and two["amount"]["source"] == "firefly"
+        assert "Betrag aus Buchung" in two["_payment"]["reasons"]
+        assert "_payment" not in s.get(Document, 3).suggestions
+        # Dokumente mit Vorschlag werden nicht erneut gesucht, Buchungen nicht doppelt verwendet
+        assert [c.document.id for c in payments.pending_candidates(s)] == [3]
+        assert payments._used_transactions(s) == {"10", "11"}
+
+
+def test_check_document_after_analysis(db, mock_api):
+    from tests.test_payments import FIREFLY_PAGE
+
+    route = mock_api.get(f"{FIREFLY}/api/v1/transactions").respond(json=FIREFLY_PAGE)
+    with db() as s:
+        add_pending(s, 1, amount=78.0, invoice_number="RE-1", invoice_date=date(2026, 10, 5))
+    with db() as s:
+        found = payments.check_document(s, s.get(Document, 1), FireflyClient(FIREFLY, "t"), date(2026, 10, 20))
+        assert found["date"] == "2026-10-10" and "Rechnungsnr." in found["reasons"]
+        assert s.get(Document, 1).suggestions["status"]["confidence"] == 0.9
+    params = dict(route.calls.last.request.url.params)
+    assert params["start"] == "2026-09-28" and params["end"] == "2026-10-20"
+
+
+@pytest.fixture
+def review_client(settings, mock_api):
+    settings.firefly_url, settings.firefly_token = FIREFLY, "t"
+    mock_api.get(f"{FIREFLY}/api/v1/about").respond(json={"data": {"version": "6.2.0"}})
+    app = create_app(settings, start_worker=False)
+    with TestClient(app) as c:
+        with session_scope() as s:
+            doc = add_pending(s, 1, amount=78.0, invoice_date=date(2026, 10, 5))
+        with session_scope() as s:
+            payments.apply_payment(s.get(Document, 1), 115, tx("900", date(2026, 10, 10), 78.0, "Stadtwerke", "Abschlag RE-1"),
+                                   ["Betrag", "Rechnungsnr."])
+        yield c
+
+
+def test_review_page_and_confirm_records_match(review_client):
+    page = review_client.get("/documents/1").text
+    assert "In Firefly gefunden:" in page and "Firefly 90 %" in page and 'value="2026-10-10"' in page
+    review_client.post("/documents/1/confirm", data={"amount": "78.00", "status": "paid", "paid_on": "2026-10-10",
+                                                     "invoice_date": "2026-10-05"})
+    with session_scope() as s:
+        m = s.query(PaymentMatch).one()
+        assert m.state == "accepted" and m.tx_id == "900" and s.get(Document, 1).invoice.status == "paid"

@@ -1,8 +1,8 @@
 {% macro badge(name, sugg, from_record) -%}
   {%- if not from_record and name in sugg -%}
     {%- set s = sugg[name] -%}
-    {%- set src = {'rule': 'Regel', 'llm': 'AI', 'paperless': 'Paperless', 'default': 'Standard'}.get(s.source, s.source) -%}
-    <span class="badge {{ 'low' if s.confidence < 0.8 }} src-{{ s.source }}" title="Quelle: {{ src }}">{{ src }}{% if s.source in ('rule', 'llm') %} {{ (s.confidence * 100)|round|int }} %{% endif %}</span>
+    {%- set src = {'rule': 'Regel', 'llm': 'AI', 'paperless': 'Paperless', 'default': 'Standard', 'firefly': 'Firefly'}.get(s.source, s.source) -%}
+    <span class="badge {{ 'low' if s.confidence < 0.8 }} src-{{ s.source }}" title="Quelle: {{ src }}">{{ src }}{% if s.source in ('rule', 'llm', 'firefly') %} {{ (s.confidence * 100)|round|int }} %{% endif %}</span>
   {%- endif -%}
 {%- endmacro %}
 

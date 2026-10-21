@@ -73,6 +73,15 @@ document.querySelectorAll('#viewer .tab[data-tab]').forEach((tab) => tab.addEven
 {% if doc.kind == 'other' %}
   <p class="empty">Dieses Dokument wird nicht ausgewertet. Wähle oben eine Art, um es als Rechnung, Vertrag oder Garantie zu erfassen.</p>
 {% else %}
+{% set pay = sugg.get('_payment') %}
+{% if pay and doc.review_state == 'pending' %}
+<div class="notice ok payment-found">
+  <strong>In Firefly gefunden:</strong> Abbuchung am {{ pay.date[8:10] }}.{{ pay.date[5:7] }}.{{ pay.date[:4] }} · {{ pay.amount|eur }}
+  an {{ pay.counterparty or 'unbekannt' }}{% if pay.description %} – „{{ pay.description }}“{% endif %}
+  <br><small>Treffer über: {{ pay.reasons }}. „Status“, „Bezahlt am“{% if 'Betrag aus Buchung' in pay.reasons %} und „Betrag“{% endif %} sind daraus vorbelegt – bitte prüfen.
+  {% if firefly_base %}<a href="{{ firefly_base }}/transactions/show/{{ pay.group_id }}" target="_blank" rel="noopener">Buchung in Firefly öffnen ↗</a>{% endif %}</small>
+</div>
+{% endif %}
 <form method="post" action="/documents/{{ doc.id }}/confirm" class="card">
   <input type="hidden" name="next" value="{{ '/inbox' if doc.review_state == 'pending' else '/documents/' ~ doc.id }}">
 

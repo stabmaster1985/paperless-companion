@@ -195,6 +195,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             related=[(i, session.get(Document, i)) for i in sorted(pipeline.related_ids(session, doc_id))],
             pf=doc.paperless_fields or {}, settings=settings, msg=msg,
             text_html=text_html, text_found=text_found, text_error=text_error, HL_LABELS=highlight.LABELS,
+            firefly_base=settings.firefly_url.rstrip("/") if settings.firefly_enabled else "",
             pending_left=session.scalar(
                 select(func.count()).select_from(Document).where(Document.review_state == "pending", Document.id != doc_id)
             ),
@@ -225,6 +226,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         pipeline.apply_values(session, doc, doc.kind, pipeline.parse_values(doc.kind, form))
         doc.review_state = "confirmed"
         doc.auto_confirmed = False
+        payments.record_confirmed_payment(session, doc)
         doc.writeback_pending = True
         request_worker(app)
         if form.get("after") == "next":
@@ -387,13 +389,17 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             return RedirectResponse(f"/invoices?msg={quote('Firefly III ist nicht konfiguriert')}", status_code=303)
         try:
             counts = payments.run(session, client, settings, today())
-            if not counts["open"]:
+            if not counts["open"] and not counts["pending"]:
                 msg = "Keine offenen Rechnungen – nichts abzugleichen"
+            elif not counts["open"]:
+                msg = f"{counts['transactions']} Abbuchungen für {counts['pending']} Rechnungen in der Inbox geprüft"
             elif not counts["open_with_amount"]:
                 msg = f"{counts['open']} offene Rechnungen, aber keine mit Betrag – ohne Betrag kann nichts zugeordnet werden"
             else:
                 msg = (f"{counts['transactions']} Abbuchungen für {counts['open_with_amount']} offene Rechnungen geprüft: "
                        f"{counts['suggested']} Vorschläge, {counts['accepted']} automatisch als bezahlt markiert")
+            if counts["pending_found"]:
+                msg += f" · {counts['pending_found']} Zahlungen für Rechnungen in der Inbox vorbelegt"
         except FireflyError as exc:
             msg = f"Fehler beim Abgleich: {exc}"
         finally:
@@ -948,6 +954,11 @@ def form_values(doc: Document) -> tuple[dict, bool]:
     if record is None:
         return pipeline.suggestion_values(doc), False
     values = {name: getattr(record, name, None) for name in pipeline.FIELD_TYPES[doc.kind]}
+    if doc.review_state == "pending":
+        # Aus Firefly vorbelegte Werte auch dann zeigen, wenn es schon einen Datensatz gibt
+        for name, item in (doc.suggestions or {}).items():
+            if isinstance(item, dict) and item.get("source") == "firefly" and name in values:
+                values[name] = pipeline.coerce(pipeline.FIELD_TYPES[doc.kind][name], item.get("value"))
     if doc.kind == "invoice":
         values["warranty_enabled"] = doc.warranty is not None
         values["warranty_months"] = doc.warranty.months if doc.warranty else None

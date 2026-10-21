@@ -197,13 +197,14 @@ class Worker:
         try:
             with session_scope() as session:
                 counts = payments.run(session, client, self.settings, datetime.now(self.tz).date())
-            if counts["open"]:
+            if counts["open"] or counts["pending"]:
                 log.info("Zahlungsabgleich: %s", counts)
                 found = counts["suggested"] + counts["accepted"]
                 self.note(
                     f"Zahlungsabgleich mit Firefly: {counts['transactions']} Abbuchungen geprüft für "
-                    f"{counts['open_with_amount']} offene Rechnungen – "
-                    + (f"{found} passende Zahlungen gefunden" if found else "keine neuen Treffer")
+                    f"{counts['open_with_amount']} offene Rechnungen und {counts['pending']} Rechnungen in der Inbox – "
+                    + (f"{found} Zahlungen für offene Rechnungen, {counts['pending_found']} für die Inbox gefunden"
+                       if found or counts["pending_found"] else "keine neuen Treffer")
                 )
         except FireflyError as exc:
             log.warning("Zahlungsabgleich fehlgeschlagen: %s", exc)
@@ -274,6 +275,8 @@ class Worker:
                 )
             self._count("analyses")
             self.note(self._describe(title, info, time.monotonic() - started), document_id=doc_id)
+            if info.get("kind") == "invoice" and info.get("review") == "pending":
+                self._check_payment(doc_id, title)
         except Exception as exc:  # noqa: BLE001
             log.warning("Analyse von Dokument %s fehlgeschlagen: %s", doc_id, exc)
             self.note(f"„{title}“: Analyse fehlgeschlagen – {exc}", "error", doc_id)
@@ -284,6 +287,25 @@ class Worker:
         finally:
             self.current_document = self.current_task = self.current_since = None
         return True
+
+    def _check_payment(self, doc_id: int, title: str) -> None:
+        """Für eine neue Inbox-Rechnung gleich in Firefly nach der passenden Abbuchung suchen."""
+        client = make_firefly(self.settings)
+        if client is None:
+            return
+        try:
+            with session_scope() as session:
+                found = payments.check_document(session, session.get(Document, doc_id), client, datetime.now(self.tz).date())
+            if found:
+                self.note(
+                    f"„{title}“: Zahlung in Firefly gefunden ({found['date'][8:10]}.{found['date'][5:7]}., "
+                    f"{found['amount']:.2f} €, {found['reasons']}) – zum Prüfen vorbelegt",
+                    document_id=doc_id,
+                )
+        except FireflyError as exc:
+            self.note(f"„{title}“: Firefly-Suche fehlgeschlagen – {exc}", "error", doc_id)
+        finally:
+            client.close()
 
     def _describe(self, title: str, info: dict, seconds: float) -> str:
         kind = pipeline.KINDS.get(info.get("kind"), "Dokument")

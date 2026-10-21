@@ -215,6 +215,12 @@ mit offenen Rechnungen:
 - Mit `FIREFLY_AUTO_ACCEPT=true` werden Treffer ab 90 Punkten (Betrag plus Rechnungsnummer
   oder IBAN) direkt als bezahlt markiert.
 - Jede Buchung wird höchstens einer Rechnung zugeordnet. Lastschriften werden ebenfalls erkannt.
+- **Auch für die Inbox:** Direkt nach der Analyse einer Rechnung, die geprüft werden muss, und bei
+  jedem stündlichen Abgleich sucht der Companion die passende Abbuchung. Auf der Prüfseite steht
+  dann „In Firefly gefunden“. Status, „Bezahlt am“ und gegebenenfalls der Betrag sind daraus
+  vorbelegt und mit der Quelle „Firefly“ gekennzeichnet. Fehlt der Betrag im Dokument, genügt
+  die Rechnungsnummer im Verwendungszweck (oder IBAN plus Empfänger), und der Betrag kommt aus
+  der Buchung. Übernommen wird erst beim Bestätigen.
 
 ### Vorgänge
 
