@@ -13,6 +13,14 @@
 <p class="muted">Der Companion liest Paperless nur. Hier stehen Werte, die er für deine Custom Fields und Metadaten vorschlägt.
   Nichts davon wird geschrieben, bevor du es auswählst und übernimmst. Verworfene Vorschläge erscheinen erst wieder, wenn sich der Wert ändert.</p>
 {% if msg %}<div class="notice">{{ msg }}</div>{% endif %}
+{% if unresolved_tags[0] %}
+<div class="notice warn">{{ unresolved_tags[0] }} Dokumente tragen Tags nur als Nummer ({{ unresolved_tags[1]|join(', ') }}), weil der Paperless-Benutzer des Companion
+  diese Tags nicht sehen darf. Gib ihm in Paperless das Recht „Anzeigen“ für die Tags (z.B. mit dem Skript <code>paperless_grant_view.py</code>, siehe Hilfe/README)
+  und lies dann den Archiv-Index neu ein – die Nummern werden automatisch durch die Namen ersetzt.
+  <form method="post" action="/settings/reindex" class="inline"><input type="hidden" name="back" value="{{ request.url.path }}"><button class="small">Archiv-Index neu einlesen</button></form>
+  <br><small>Solange bleiben diese Nummern bei Vorschlägen außen vor.</small></div>
+{% endif %}
+
 
 <section class="card">
 <h2>Custom Fields {{ help("Werte für deine Paperless-Custom-Fields (Betrag, Fällig am …) aus bestätigten Dokumenten und deinen Eingaben. Erst „übernehmen“ schreibt sie nach Paperless.") }}</h2>

@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.extraction.rules import normalize
 from app.models import Document, MetaDecision
+from app.pipeline import is_unresolved_tag
 from app.ollama import OllamaClient, OllamaError
 from app.paperless import PaperlessClient
 
@@ -82,7 +83,7 @@ def vocabulary(session: Session, names: dict, archive: list | None = None) -> di
     """
     usage: dict[str, Counter] = {"tags": Counter(), "correspondents": Counter(), "document_types": Counter()}
     for _, tags, corr, doctype in archive if archive is not None else _archive(session):
-        usage["tags"].update(tags)
+        usage["tags"].update(t for t in tags if not is_unresolved_tag(t))
         if corr:
             usage["correspondents"][corr] += 1
         if doctype:
@@ -113,7 +114,7 @@ def history(session: Session, doc: Document, archive: list | None = None) -> dic
         return {"count": 0, "tags": [], "document_type": None}
     rows = [(t, d) for i, t, c, d in (archive if archive is not None else _archive(session)) if c == corr and i != doc.id]
     count = len(rows)
-    tags = Counter(t for tag_list, _ in rows for t in set(tag_list))
+    tags = Counter(t for tag_list, _ in rows for t in set(tag_list) if not is_unresolved_tag(t))
     types = Counter(t for _, t in rows if t)
     common_tags = [t for t, n in tags.most_common() if count >= 3 and n / count >= 0.5]
     doctype = None

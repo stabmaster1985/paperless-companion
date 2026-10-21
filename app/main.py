@@ -596,6 +596,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                 for n in [*names, *missing]]
         overrides = appsettings.stored(session)
         return render(request, "settings.html", rows=rows, error=error, msg=msg, diagnosis=diagnosis,
+                      unresolved_tags=pipeline.unresolved_tag_count(session),
                       SECTIONS=appsettings.SECTIONS, CHOICES=appsettings.CHOICES, field_kind=appsettings.kind,
                       settings=settings, overrides=overrides, env_settings=env_settings,
                       stored=pipeline.kv_get(session, "doctype_settings") is not None,
@@ -637,17 +638,20 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         return RedirectResponse(f"/settings?msg={quote(msg)}#app-settings", status_code=303)
 
     @app.post("/settings/reindex")
-    def settings_reindex(session: Session = Depends(get_session)):
+    def settings_reindex(back: str = Form("/settings"), session: Session = Depends(get_session)):
         """Archiv-Index neu einlesen, z.B. nachdem in Paperless Leserechte ergänzt wurden."""
         paperless = make_paperless(settings, timeout=60)
         try:
             total, _ = pipeline.index_sync(session, paperless, settings)
-            msg = f"Archiv-Index neu eingelesen: {total} Dokumente"
+            missing, _ = pipeline.unresolved_tag_count(session)
+            msg = f"Archiv-Index neu eingelesen: {total} Dokumente" + (
+                f" – {missing} Dokumente haben weiterhin Tags ohne Namen (Leserechte prüfen)" if missing else "")
         except PaperlessError as exc:
             msg = f"Fehler: {exc}"
         finally:
             paperless.close()
-        return RedirectResponse(f"/settings?msg={quote(msg)}", status_code=303)
+        back = back if back in ("/settings", "/paperless-changes") else "/settings"
+        return RedirectResponse(f"{back}?msg={quote(msg)}", status_code=303)
 
     @app.post("/settings/doctypes")
     async def settings_doctypes(request: Request, session: Session = Depends(get_session)):
@@ -1073,7 +1077,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             meta_open_count=sum(len(i) for _, i in meta_open), meta_query=meta_query(meta_filter), meta_accepted_count=sum(len(i) for _, i in meta_accepted), quality=metadata.quality(session), META_ITEMS=metadata.ITEMS,
             META_SOURCES=metadata.SOURCES, hints=metadata.archive_hints(session), HINTS=metadata.HINTS,
             meta_queued=session.scalar(select(func.count()).select_from(Document).where(Document.meta_state.in_(("queued", "running")))),
-            meta_status=pipeline.meta_overview(session), queue_paused=pipeline.kv_get(session, "queue_paused") == "1",
+            meta_status=pipeline.meta_overview(session), unresolved_tags=pipeline.unresolved_tag_count(session), queue_paused=pipeline.kv_get(session, "queue_paused") == "1",
             llm_now=settings.llm_allowed_at(datetime.now(ZoneInfo(settings.timezone)).hour),
             settings=settings,
         )

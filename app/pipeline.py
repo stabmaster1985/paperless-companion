@@ -283,7 +283,8 @@ def upsert_document(
     doc.title = data.get("title") or ""
     doc.correspondent = names["correspondents"].get(data.get("correspondent"))
     doc.document_type = new_type
-    doc.tags = sorted(names["tags"].get(t, str(t)) for t in data.get("tags") or [])
+    # Unbekannte IDs (Tag für den API-Benutzer nicht sichtbar) als „#12“ merken – siehe repair_tag_names
+    doc.tags = sorted(names["tags"].get(t, f"#{t}") for t in data.get("tags") or [])
     created = data.get("created") or data.get("created_date")
     doc.created = date.fromisoformat(created[:10]) if created else None
     doc.modified = data.get("modified")
@@ -307,11 +308,55 @@ def upsert_document(
     return doc
 
 
+UNRESOLVED_TAG = re.compile(r"#?(\d+)")
+
+
+def is_unresolved_tag(name: str) -> bool:
+    """Tag, dessen Namen der Companion nicht lesen durfte („#12“, ältere Stände „12“)."""
+    return bool(UNRESOLVED_TAG.fullmatch(name or ""))
+
+
+def repair_tag_names(session: Session, tag_names: dict[int, str]) -> int:
+    """Gespeicherte Tag-Nummern durch Namen ersetzen, sobald Paperless die Tags liefert (z.B. nach Rechte-Freigabe)."""
+    if not tag_names:
+        return 0
+    known_names = {n.lower() for n in tag_names.values()}
+    repaired = 0
+    for doc in session.scalars(select(Document).where(Document.tags.is_not(None))):
+        tags = doc.tags or []
+        if not any(is_unresolved_tag(t) for t in tags):
+            continue
+        fixed = []
+        for t in tags:
+            m = UNRESOLVED_TAG.fullmatch(t)
+            # „12“ ohne # nur ersetzen, wenn es keinen echten Tag namens „12“ gibt
+            if m and int(m.group(1)) in tag_names and (t.startswith("#") or t.lower() not in known_names):
+                fixed.append(tag_names[int(m.group(1))])
+            else:
+                fixed.append(t)
+        if fixed != tags:
+            doc.tags = sorted(fixed)
+            repaired += 1
+    return repaired
+
+
+def unresolved_tag_count(session: Session) -> tuple[int, list[str]]:
+    """Wie viele Dokumente tragen Tags nur als Nummer? (Anzahl, Beispiele)"""
+    docs, examples = 0, []
+    for tags in session.scalars(select(Document.tags)):
+        bad = [t for t in tags or [] if is_unresolved_tag(t)]
+        if bad:
+            docs += 1
+            examples += [t for t in bad if t not in examples][:5 - len(examples)]
+    return docs, examples
+
+
 def sync(session: Session, paperless: PaperlessClient, settings: Settings) -> int:
     since = kv_get(session, "last_modified")
     if since is None:
         since = (datetime.now(timezone.utc) - timedelta(days=settings.initial_sync_days)).isoformat()
     names = load_names(paperless, settings)
+    repair_tag_names(session, names["tags"])
     newest = _parse_dt(since)
     count = 0
     for data in paperless.documents_modified_after(since):
@@ -331,6 +376,7 @@ def index_sync(session: Session, paperless: PaperlessClient, settings: Settings 
     aber nur, wenn der Abgleich vollständig war.
     """
     names = load_names(paperless, settings)
+    repair_tag_names(session, names["tags"])
     total, documents = paperless.all_documents_metadata()
     seen: set[int] = set()
     for data in documents:

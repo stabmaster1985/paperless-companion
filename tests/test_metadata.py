@@ -299,3 +299,31 @@ def test_filter_by_document_tags_and_correspondent(client):
     assert "has_tag=Haus" in response.headers["location"]
     with session_scope() as s:
         assert "tag:Elektronik" in s.get(Document, 3).meta_accepted
+
+
+def test_unresolved_tag_numbers_are_repaired_and_ignored(db, settings, mock_api):
+    from app import pipeline
+
+    run_all(db, settings)
+    with db() as s:
+        s.get(Document, 1).tags = ["#31", "30"]  # Tags waren nicht sichtbar (alt: „30“, neu: „#31“)
+        for i in range(10, 13):
+            s.add(Document(id=i, title=f"Abschlag {i}", correspondent="Stadtwerke", tags=["#77"], extraction_state="skipped"))
+    with db() as s:
+        assert pipeline.unresolved_tag_count(s)[0] == 4
+        doc = s.get(Document, 1)
+        # Nummern werden weder vorgeschlagen noch ins Vokabular übernommen
+        assert metadata.history(s, doc)["tags"] == []
+        assert "#77" not in metadata.vocabulary(s, {"tags": {30: "Steuer"}})["tags"]
+        assert pipeline.repair_tag_names(s, {30: "Steuer", 31: "Haus"}) == 1
+        assert doc.tags == ["Haus", "Steuer"]
+        assert pipeline.unresolved_tag_count(s) == (3, ["#77"])
+
+
+def test_notice_for_unresolved_tags(client):
+    with session_scope() as s:
+        s.get(Document, 2).tags = ["#55"]
+    page = client.get("/paperless-changes").text
+    assert "1 Dokumente tragen Tags nur als Nummer (#55)" in page
+    response = client.post("/settings/reindex", data={"back": "/paperless-changes"}, follow_redirects=False)
+    assert response.headers["location"].startswith("/paperless-changes?msg=")
