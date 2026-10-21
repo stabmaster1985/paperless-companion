@@ -41,6 +41,8 @@ class Document(Base):
     meta_state: Mapped[str | None] = mapped_column(String)
     # Verworfene Metadaten-Vorschläge ("tag:Strom" / "title" -> Wert)
     meta_dismissed: Mapped[dict | None] = mapped_column(JSON)
+    # Vorgemerkte Vorschläge, noch nicht in Paperless ("tag:Strom" -> {"value", "source", "new_tag"})
+    meta_accepted: Mapped[dict | None] = mapped_column(JSON)
     meta_pending: Mapped[bool] = mapped_column(default=False, server_default="0")
     page_count: Mapped[int | None] = mapped_column(Integer)
     original_file_name: Mapped[str | None] = mapped_column(String)
@@ -150,6 +152,25 @@ class SentReminder(Base):
 
     key: Mapped[str] = mapped_column(String, primary_key=True)
     sent_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class MetaDecision(Base):
+    """Deine Entscheidung zu einem Metadaten-Vorschlag – Grundlage für Lernen und Trefferquote."""
+
+    __tablename__ = "meta_decisions"
+    __table_args__ = (UniqueConstraint("document_id", "key"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    document_id: Mapped[int] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"))
+    key: Mapped[str] = mapped_column(String)  # title | correspondent | document_type | tag:<Name>
+    item: Mapped[str] = mapped_column(String)  # title | correspondent | document_type | tag
+    correspondent: Mapped[str | None] = mapped_column(String)  # Absender zum Zeitpunkt der Entscheidung
+    suggested: Mapped[str | None] = mapped_column(String)
+    value: Mapped[str | None] = mapped_column(String)  # vorgemerkter (ggf. geänderter) Wert
+    source: Mapped[str] = mapped_column(String, default="llm")  # llm | history
+    decision: Mapped[str] = mapped_column(String)  # accepted | edited | dismissed
+    decided_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    transferred_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 class KeyValue(Base):

@@ -46,25 +46,19 @@
 <p class="empty">Keine Vorschläge für Custom Fields.</p>
 {% endif %}
 
-<h2 id="metadata">Titel, Tags, Korrespondent, Dokumenttyp</h2>
-<p class="muted">Vorschläge aus dem lokalen Modell (<span class="badge src-llm">AI</span>) und aus deinen übrigen Dokumenten desselben Absenders
-  (<span class="badge src-history">Verlauf</span>). Hier stehen fehlende Tags, Titel nur, wenn der jetzige nichtssagend ist
-  (z.B. „Scan_0012“), und Korrespondent/Dokumenttyp nur, wenn sie in Paperless fehlen. Abweichungen bei gepflegten Werten siehst du auf der Dokumentseite.
-  {% if meta_queued %}<br><span class="tag">{{ meta_queued }} Vorschläge in Arbeit</span>{% endif %}</p>
-{% if meta_rows %}
-<form method="post" action="/paperless-changes/meta" id="meta-form">
+{% macro meta_table(form_id, rows) %}
   <div class="table-wrap"><table class="list">
     <thead><tr>
-      <th><input type="checkbox" aria-label="Alle auswählen" onclick="document.querySelectorAll('#meta-form input[name=item]').forEach(c => c.checked = this.checked)"></th>
-      <th>Dokument</th><th>Was</th><th>Paperless jetzt</th><th>Vorschlag</th>
+      <th><input type="checkbox" aria-label="Alle auswählen" onclick="document.querySelectorAll('#{{ form_id }} input[name=item]').forEach(c => c.checked = this.checked)"></th>
+      <th>Dokument</th><th>Was</th><th>Paperless jetzt</th><th>{{ 'Vorgemerkt' if form_id == 'meta-accepted' else 'Vorschlag' }}</th>
     </tr></thead>
     <tbody>
-    {% for doc, items in meta_rows %}
+    {% for doc, items in rows %}
       {% for it in items %}
       <tr>
         <td><input type="checkbox" name="item" value="{{ doc.id }}:{{ it.key }}"></td>
         <td>{% if loop.first %}<a href="/documents/{{ doc.id }}#metadata">{{ doc.title or ('#' ~ doc.id) }}</a> {{ doclink(doc.id) }}<br><small>{{ doc.correspondent or '' }}</small>{% endif %}</td>
-        <td>{{ it.label }}{% if it.new_tag %} <small class="soon">neu anlegen</small>{% endif %}</td>
+        <td>{{ it.label }}{% if it.new_tag %} <small class="soon">neuer Tag</small>{% endif %}</td>
         <td>{{ it.current or '' }}{% if not it.current %}<span class="muted">{{ 'fehlt' if it.key.startswith('tag:') else 'leer' }}</span>{% endif %}</td>
         <td><strong>{{ it.new }}</strong> <span class="badge src-{{ it.source }}">{{ META_SOURCES.get(it.source, it.source) }}</span></td>
       </tr>
@@ -72,15 +66,67 @@
     {% endfor %}
     </tbody>
   </table></div>
+{% endmacro %}
+
+<h2 id="metadata">Titel, Tags, Korrespondent, Dokumenttyp</h2>
+<p class="muted">Vorschläge aus dem lokalen Modell (<span class="badge src-llm">AI</span>) und aus deinen übrigen Dokumenten desselben Absenders
+  (<span class="badge src-history">Verlauf</span>). <strong>Vormerken</strong> speichert deine Entscheidung nur im Companion – die App lernt sofort daraus
+  (vorgemerkte Tags und Titel fließen in die nächsten Vorschläge ein). Nach Paperless geht erst etwas, wenn du <strong>Übertragen</strong> wählst.
+  {% if meta_queued %}<br><span class="tag">{{ meta_queued }} Vorschläge in Arbeit</span>{% endif %}</p>
+
+<h3>Vorgemerkt – wartet auf Übertragung ({{ meta_accepted_count }})</h3>
+{% if meta_accepted %}
+<form method="post" action="/paperless-changes/meta" id="meta-accepted">
+  {{ meta_table('meta-accepted', meta_accepted) }}
   <div class="actions">
-    <button name="action" value="approve" class="primary" onclick="return confirm('Ausgewählte Metadaten jetzt in Paperless schreiben?')">Ausgewählte in Paperless übernehmen</button>
+    <button name="action" value="transfer" class="primary" onclick="return confirm('Ausgewählte vorgemerkte Werte jetzt in Paperless schreiben?')">Ausgewählte nach Paperless übertragen</button>
+    <button name="action" value="transfer_all" onclick="return confirm('Alle vorgemerkten Werte jetzt in Paperless schreiben?')">Alle übertragen</button>
+    <button name="action" value="withdraw">Vormerkung zurücknehmen</button>
+    <button name="action" value="dismiss">Verwerfen</button>
+  </div>
+  <p class="hint">Beim Übertragen werden Tags nur ergänzt (vorhandene bleiben), vorgemerkte neue Tags werden dabei in Paperless angelegt.</p>
+</form>
+{% else %}
+<p class="empty">Nichts vorgemerkt.</p>
+{% endif %}
+
+<h3>Offene Vorschläge</h3>
+<p class="muted">Hier stehen fehlende Tags, Titel nur, wenn der jetzige nichtssagend ist (z.B. „Scan_0012“), und Korrespondent/Dokumenttyp nur,
+  wenn sie in Paperless fehlen. Abweichungen bei gepflegten Werten siehst du auf der Dokumentseite.</p>
+{% if meta_open %}
+<form method="post" action="/paperless-changes/meta" id="meta-open">
+  {{ meta_table('meta-open', meta_open) }}
+  <div class="actions">
+    <button name="action" value="accept" class="primary">Ausgewählte vormerken</button>
     <button name="action" value="dismiss">Ausgewählte verwerfen</button>
   </div>
-  <p class="hint">Tags werden nur ergänzt, vorhandene bleiben erhalten. Neue Tags werden nur angelegt, wenn du sie auswählst. Verworfene Tags schlägt die App für denselben Absender nicht mehr vor.</p>
+  <p class="hint">Verworfene Tags schlägt die App für denselben Absender nicht mehr vor.</p>
 </form>
 {% else %}
 <p class="empty">Keine offenen Metadaten-Vorschläge.</p>
 {% endif %}
+
+<section class="card">
+  <h2>Wie gut sind die Vorschläge?</h2>
+  {% if quality.rows %}
+  <div class="table-wrap"><table class="list">
+    <thead><tr><th>Quelle</th><th>Was</th><th>übernommen</th><th>geändert</th><th>verworfen</th><th>Trefferquote</th></tr></thead>
+    <tbody>
+    {% for r in quality.rows %}
+      <tr>
+        <td><span class="badge src-{{ r.source }}">{{ META_SOURCES.get(r.source, r.source) }}</span></td>
+        <td>{{ META_ITEMS.get(r.item, r.item) }}</td>
+        <td>{{ r.accepted }}</td><td>{{ r.edited }}</td><td>{{ r.dismissed }}</td>
+        <td><strong>{{ r.rate }} %</strong> <small class="muted">von {{ r.total }}</small></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <p class="muted">„Geändert“ = Titel vor dem Vormerken angepasst. {{ quality.waiting }} Entscheidungen warten auf die Übertragung, {{ quality.transferred }} sind bereits in Paperless.</p>
+  {% else %}
+  <p class="muted">Noch keine Entscheidungen. Sobald du Vorschläge vormerkst oder verwirfst, siehst du hier, wie oft AI und Verlauf richtig liegen.</p>
+  {% endif %}
+</section>
 
 <section class="card">
   <h2>Archiv-Check</h2>

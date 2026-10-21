@@ -202,26 +202,41 @@ FIELD_SUMMARY=Zusammenfassung KI
 ### Metadaten-Vorschläge: Titel, Tags, Korrespondent, Dokumenttyp
 
 Wenn ein Dokument ohnehin analysiert wird, schlägt die App auch Paperless-Metadaten vor.
-Gespeichert wird nur im Companion. In Paperless geschrieben wird erst, wenn du einen
-Vorschlag auswählst und übernimmst.
+Der Ablauf hat drei Schritte, und nur der letzte schreibt nach Paperless:
+
+1. **Vorschlag** – aus dem Verlauf und/oder per AI (siehe unten).
+2. **Vormerken oder verwerfen** – speichert deine Entscheidung nur im Companion. So kannst du
+   in Ruhe sammeln und beobachten, wie gut die Vorschläge sind.
+3. **Übertragen** – unter **Für Paperless → Vorgemerkt** einzeln, ausgewählt oder alle auf einmal.
+   Tags werden dabei nur ergänzt, vorgemerkte neue Tags erst jetzt in Paperless angelegt.
+
+Woher die Vorschläge kommen:
 
 - **Verlauf** (ohne AI, kostet nichts): Tragen mindestens die Hälfte der übrigen Dokumente
   desselben Korrespondenten einen Tag (bzw. 60 % denselben Dokumenttyp), wird er vorgeschlagen.
-  So lernt die App aus dem, was du in Paperless pflegst und übernimmst.
 - **AI**: Das lokale Modell liest den Dokumentanfang und wählt Tags, Korrespondent und
   Dokumenttyp **nur aus deinen vorhandenen** Listen (per JSON-Schema erzwungen). Neue Tags
-  (höchstens zwei) werden als „neu anlegen“ markiert und nur angelegt, wenn du sie auswählst.
-  Dazu kommt ein sprechender Titel wie „Stromrechnung Oktober 2026“.
-- **Abgleich**: Unter **Für Paperless → Titel, Tags …** stehen nur die nützlichen
-  Unterschiede: fehlende Tags, ein Titel nur, wenn der jetzige nichtssagend ist
-  („Scan_0012“, Dateiname), Korrespondent/Typ nur, wenn sie fehlen. Alle Abweichungen
-  (auch bei gepflegten Werten) zeigt die Dokumentseite im Abschnitt „Paperless-Metadaten“,
-  wo du den Titel vor dem Übernehmen noch ändern kannst.
-- **Lernen aus Ablehnungen**: Verworfene Tags schlägt die App für denselben Korrespondenten
-  nicht mehr vor, weder aus dem Verlauf noch per AI.
-- **Archiv-Check**: Die Seite „Für Paperless“ zählt Dokumente ohne Tags, mit nichtssagendem
-  Titel oder ohne Korrespondent. Über den Filter „Hinweis“ in der Dokumentliste wählst du sie
-  gezielt aus und klickst „Metadaten für ausgewählte vorschlagen“.
+  (höchstens zwei) sind als „neuer Tag“ markiert. Dazu kommt ein sprechender Titel.
+
+**Die App lernt schon aus Vorgemerktem**, nicht erst aus dem, was in Paperless steht:
+
+- Vorgemerkte Tags, Korrespondenten und Dokumenttypen zählen für den Verlauf so, als
+  stünden sie bereits in Paperless. Vorgemerkte neue Tags kann die AI danach wie vorhandene
+  wählen, damit gleiche Dokumente denselben neuen Tag bekommen.
+- Vorgemerkte (und von dir geänderte) Titel bekommt die AI als Stilbeispiele, gleicher Absender zuerst.
+- Verworfene Tags schlägt die App für denselben Korrespondenten nicht mehr vor.
+
+**Wie gut ist das?** Die Seite „Für Paperless“ zeigt je Quelle (AI/Verlauf) und Art
+(Tag, Titel, …), wie oft du übernommen, geändert oder verworfen hast, als Trefferquote.
+
+Unter „Offene Vorschläge“ stehen nur nützliche Unterschiede: fehlende Tags, ein Titel nur,
+wenn der jetzige nichtssagend ist („Scan_0012“, Dateiname), Korrespondent/Typ nur, wenn sie
+fehlen. Alle Abweichungen zeigt die Dokumentseite im Abschnitt „Paperless-Metadaten“; dort
+kannst du den Titel vor dem Vormerken ändern.
+
+Der **Archiv-Check** auf „Für Paperless“ zählt Dokumente ohne Tags, mit nichtssagendem Titel
+oder ohne Korrespondent. Über den Filter „Hinweis“ in der Dokumentliste wählst du sie gezielt
+aus und klickst „Metadaten für ausgewählte vorschlagen“.
 
 `META_MODE=new` (Standard) erzeugt Vorschläge automatisch für neu analysierte Dokumente,
 `manual` nur auf Anforderung, `off` schaltet die Funktion ab. Die Vorschläge laufen in derselben

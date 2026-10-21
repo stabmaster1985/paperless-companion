@@ -57,17 +57,59 @@ def test_suggest_with_ai_and_approve(db, settings, mock_api):
     create_tag = mock_api.post(f"{PAPERLESS}/api/tags/").respond(json={"id": 99, "name": "Elektronik"})
     with db() as s:
         doc = s.get(Document, 3)
-        written = metadata.approve(paperless, doc, ["tag:Haus", "tag:Elektronik", "title", "correspondent"],
-                                   title_override="Rechnung Waschmaschine")
+        # Vormerken schreibt nichts nach Paperless
+        assert metadata.accept(s, doc, ["tag:Haus", "tag:Elektronik", "title", "correspondent"], title="Rechnung Waschmaschine") == 4
+        assert patches(mock_api) == [] and doc.title == "Scan 0815"
+        states = {i["key"]: i["state"] for i in metadata.pending(doc)}
+        assert states == {"tag:Haus": "accepted", "tag:Elektronik": "accepted", "title": "accepted",
+                          "correspondent": "accepted", "document_type": "open"}
+    with db() as s:
+        doc = s.get(Document, 3)
+        written = metadata.transfer(s, paperless, doc)
         assert sorted(written) == ["correspondent", "tag:Elektronik", "tag:Haus", "title"]
         assert doc.title == "Rechnung Waschmaschine" and doc.correspondent == "Stadtwerke"
-        assert doc.tags == ["Haus", "Elektronik"]
+        assert doc.tags == ["Haus", "Elektronik"] and not doc.meta_accepted
         # Nur der Dokumenttyp ist noch offen
         assert [i["key"] for i in metadata.pending(doc)] == ["document_type"]
+        q = metadata.quality(s)
+        assert q["transferred"] == 4 and q["waiting"] == 0
+        assert {(r["item"], r["accepted"], r["edited"]) for r in q["rows"]} == {
+            ("tag", 2, 0), ("title", 0, 1), ("correspondent", 1, 0)}
     assert patches(mock_api)[-1] == {
         "title": "Rechnung Waschmaschine", "correspondent": 10, "tags": [31, 99],
     }
     assert json.loads(create_tag.calls.last.request.content)["name"] == "Elektronik"
+
+
+def test_learns_from_accepted_before_transfer(db, settings, mock_api):
+    """Vorgemerktes zählt für Verlauf, Vokabular und Titelbeispiele, ohne dass Paperless geändert wird."""
+    run_all(db, settings)
+    paperless = PaperlessClient(PAPERLESS, "secret")
+    with db() as s:
+        for i in range(10, 13):
+            s.add(Document(id=i, title=f"Scan {i}", correspondent="Elektromarkt", tags=[], extraction_state="skipped",
+                           meta_suggestion={"tags": [{"name": "Garantiefall", "source": "llm", "new": True}],
+                                            "title": {"value": f"Kassenbon {i}", "source": "llm"}}))
+    with db() as s:
+        for i in range(10, 13):
+            metadata.accept(s, s.get(Document, i), ["tag:Garantiefall", "title"],
+                            title=f"Kaufbeleg Fernseher {i}" if i == 12 else None)
+    with db() as s:
+        s.get(Document, 3).correspondent = "Elektromarkt"
+    chat = mock_api.post(f"{OLLAMA}/api/chat").mock(return_value=chat_answer({**ANSWER, "tags": ["Garantiefall"], "new_tags": []}))
+    with db() as s:
+        doc = s.get(Document, 3)
+        metadata.suggest(s, doc, paperless, OllamaClient(OLLAMA, "m"), settings)
+        tags = {t["name"]: t for t in doc.meta_suggestion["tags"]}
+        # Aus dem Verlauf (3 vorgemerkte Dokumente) und weiterhin als neuer Tag markiert
+        assert tags["Garantiefall"]["source"] == "history" and tags["Garantiefall"]["new"]
+    body = json.loads(chat.calls.last.request.content)
+    assert "Garantiefall" in body["format"]["properties"]["tags"]["items"]["enum"]
+    prompt = body["messages"][1]["content"]
+    assert "„Kaufbeleg Fernseher 12“" in prompt and "Garantiefall" in prompt
+    assert patches(mock_api) == []
+    with db() as s:
+        assert metadata.quality(s)["waiting"] == 6
 
 
 def test_only_useful_items_for_paperless_page(db, settings, mock_api):
@@ -95,7 +137,7 @@ def test_history_and_rejected_tags(db, settings, mock_api):
         assert not info["ai"]
         assert [(i["key"], i["source"]) for i in metadata.pending(doc)] == [
             ("tag:Haus", "history"), ("tag:Strom", "history"), ("document_type", "history")]
-        metadata.dismiss(doc, ["tag:Strom"])
+        metadata.dismiss(s, doc, ["tag:Strom"])
         assert [i["key"] for i in metadata.pending(doc)] == ["tag:Haus", "document_type"]
     with db() as s:
         # Abgelehnter Tag wird für den Absender nicht mehr vorgeschlagen – auch nicht bei anderen Dokumenten
@@ -139,20 +181,28 @@ def client(settings, mock_api):
 
 def test_web_review_and_approve(client, mock_api):
     page = client.get("/paperless-changes").text
-    assert "Rechnung Waschmaschine September 2026" in page and "neu anlegen" in page and "Archiv-Check" in page
+    assert "Rechnung Waschmaschine September 2026" in page and "neuer Tag" in page and "Archiv-Check" in page
     # Menüzahl: Dokument 1 (Custom Fields) + Dokument 3 (nur Metadaten)
     assert 'Für Paperless <span class="pill">2</span>' in page
     page = client.get("/documents/3").text
     assert 'id="metadata"' in page and 'name="title" value="Rechnung Waschmaschine September 2026"' in page
 
-    response = client.post("/paperless-changes/meta", data={"item": ["3:tag:Haus", "3:document_type"], "action": "approve"},
-                           follow_redirects=False)
-    assert "2%20%C3%84nderungen" in response.headers["location"]
+    client.post("/paperless-changes/meta", data={"item": ["3:tag:Haus", "3:document_type"], "action": "accept"})
+    assert patches(mock_api) == []
+    page = client.get("/paperless-changes").text
+    assert "Vorgemerkt – wartet auf Übertragung (2)" in page and "Trefferquote" in page
+    assert "vorgemerkt" in client.get("/documents/3").text
+    response = client.post("/paperless-changes/meta", data={"action": "transfer_all"}, follow_redirects=False)
+    assert "2%20vorgemerkte" in response.headers["location"]
     assert patches(mock_api)[-1] == {"document_type": 20, "tags": [31]}
     with session_scope() as s:
         doc = s.get(Document, 3)
         assert doc.document_type == "Rechnung" and doc.extraction_state == "queued"  # Art wird neu bestimmt
 
+    client.post("/documents/3/meta", data={"item": ["tag:Elektronik"], "action": "accept"})
+    client.post("/documents/3/meta", data={"item": ["tag:Elektronik"], "action": "withdraw"})
+    with session_scope() as s:
+        assert not s.get(Document, 3).meta_accepted
     client.post("/documents/3/meta", data={"item": ["tag:Elektronik"], "action": "dismiss"})
     with session_scope() as s:
         assert "tag:Elektronik" in s.get(Document, 3).meta_dismissed

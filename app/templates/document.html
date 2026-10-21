@@ -175,24 +175,30 @@ document.querySelectorAll('#viewer .tab[data-tab]').forEach((tab) => tab.addEven
       <thead><tr><th></th><th>Was</th><th>Paperless jetzt</th><th>Vorschlag</th></tr></thead>
       <tbody>
       {% for it in meta_items %}
-        <tr>
-          <td><input type="checkbox" name="item" value="{{ it.key }}" aria-label="{{ it.label }} übernehmen" {{ 'checked' if it.useful is not defined or it.useful }}></td>
-          <td>{{ it.label }}{% if it.new_tag %} <small class="soon">neu anlegen</small>{% endif %}</td>
+        <tr class="{{ 'accepted' if it.state == 'accepted' }}">
+          <td><input type="checkbox" name="item" value="{{ it.key }}" aria-label="{{ it.label }} auswählen" {{ 'checked' if it.useful }}></td>
+          <td>{{ it.label }}{% if it.new_tag %} <small class="soon">neuer Tag</small>{% endif %}</td>
           <td>{% if it.current %}{{ it.current }}{% elif it.key.startswith('tag:') %}<span class="muted">fehlt</span>{% else %}<span class="muted">leer</span>{% endif %}</td>
           <td>
             {% if it.key == 'title' %}<input name="title" value="{{ it.new }}" maxlength="128" aria-label="Neuer Titel">
             {% else %}<strong>{{ it.new }}</strong>{% endif %}
             <span class="badge src-{{ it.source }}">{{ META_SOURCES.get(it.source, it.source) }}</span>
+            {% if it.state == 'accepted' %}<span class="tag tag-ok">vorgemerkt</span>{% endif %}
           </td>
         </tr>
       {% endfor %}
       </tbody>
     </table></div>
     <div class="actions">
-      <button name="action" value="approve" class="primary small" onclick="return confirm('Ausgewählte Metadaten jetzt in Paperless schreiben?')">Ausgewählte in Paperless übernehmen</button>
-      <button name="action" value="dismiss" class="small">Ausgewählte verwerfen</button>
+      <button name="action" value="accept" class="primary small">Ausgewählte vormerken</button>
+      <button name="action" value="dismiss" class="small">Verwerfen</button>
+      {% if meta_items|selectattr('state', 'equalto', 'accepted')|list %}
+      <button name="action" value="withdraw" class="small">Vormerkung zurücknehmen</button>
+      <button name="action" value="transfer" class="small" onclick="return confirm('Ausgewählte vorgemerkte Werte jetzt in Paperless schreiben?')">Vorgemerkte nach Paperless übertragen</button>
+      {% endif %}
     </div>
-    <p class="hint">Tags werden nur ergänzt, vorhandene bleiben. Neue Tags werden nur angelegt, wenn du sie auswählst. Verworfene Tags schlägt die App für {{ doc.correspondent or 'diesen Absender' }} nicht mehr vor.</p>
+    <p class="hint">Vormerken speichert nur im Companion (die App lernt daraus), übertragen wird erst auf Knopfdruck – hier oder gesammelt unter „Für Paperless“.
+      Tags werden nur ergänzt. Verworfene Tags schlägt die App für {{ doc.correspondent or 'diesen Absender' }} nicht mehr vor.</p>
   </form>
   {% elif ms %}
     <p class="muted">Keine offenen Vorschläge – Paperless passt zum Vorschlag oder du hast ihn bereits übernommen bzw. verworfen.</p>

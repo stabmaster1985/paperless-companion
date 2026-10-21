@@ -204,30 +204,33 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             doc.meta_state = "queued"
             request_worker(app)
             msg = "Metadaten-Vorschlag angefordert"
-        elif action == "dismiss":
-            msg = f"{metadata.dismiss(doc, keys)} Vorschläge verworfen"
-        elif action == "approve":
-            msg = apply_meta(session, {doc_id: keys}, {doc_id: str(form.get("title") or "")})
+        elif action in ("accept", "dismiss", "withdraw", "transfer"):
+            msg = meta_action(session, action, {doc_id: keys}, {doc_id: str(form.get("title") or "")})
         else:
             raise HTTPException(400)
         return RedirectResponse(f"/documents/{doc_id}?msg={quote(msg)}#metadata", status_code=303)
 
-    def apply_meta(session: Session, selected: dict[int, list[str]], titles: dict[int, str] | None = None) -> str:
-        """Ausgewählte Metadaten-Vorschläge nach Paperless schreiben (nur nach ausdrücklicher Auswahl)."""
+    def meta_action(session: Session, action: str, selected: dict[int, list[str]], titles: dict[int, str] | None = None) -> str:
+        """Vormerken/Verwerfen/Zurücknehmen nur im Companion; nur „transfer“ schreibt nach Paperless."""
+        titles = titles or {}
+        docs = {i: d for i in selected if (d := session.get(Document, i)) is not None}
+        if action == "accept":
+            n = sum(metadata.accept(session, d, selected[i], titles.get(i)) for i, d in docs.items())
+            return f"{n} Vorschläge vorgemerkt – noch nicht in Paperless"
+        if action == "dismiss":
+            return f"{sum(metadata.dismiss(session, d, selected[i]) for i, d in docs.items())} Vorschläge verworfen"
+        if action == "withdraw":
+            return f"{sum(metadata.withdraw(session, d, selected[i]) for i, d in docs.items())} Vormerkungen zurückgenommen"
         done, errors = 0, []
         paperless = make_paperless(settings, timeout=30)
         try:
-            for doc_id, keys in selected.items():
-                doc = session.get(Document, doc_id)
-                if doc is None or not keys:
-                    continue
+            for doc_id, doc in docs.items():
                 old_type = doc.document_type
                 try:
-                    written = metadata.approve(paperless, doc, keys, (titles or {}).get(doc_id))
+                    done += len(metadata.transfer(session, paperless, doc, selected[doc_id]))
                 except PaperlessError as exc:
                     errors.append(f"#{doc_id}: {exc}")
                     continue
-                done += len(written)
                 # Neuer Dokumenttyp kann die Art ändern -> unbestätigte Analyse neu einreihen
                 if doc.document_type != old_type and doc.extraction_state == "done" \
                         and doc.review_state != "confirmed" and doc.kind_source not in ("manual", "fields"):
@@ -235,7 +238,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                     request_worker(app)
         finally:
             paperless.close()
-        return f"{done} Änderungen in Paperless übernommen" + (f". Probleme: {'; '.join(errors[:5])}" if errors else "")
+        return f"{done} vorgemerkte Änderungen nach Paperless übertragen" + (f". Probleme: {'; '.join(errors[:5])}" if errors else "")
 
     @app.get("/documents/{doc_id}", response_class=HTMLResponse)
     def document_detail(request: Request, doc_id: int, msg: str = "", session: Session = Depends(get_session)):
@@ -922,15 +925,19 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     def paperless_changes(request: Request, msg: str = "", session: Session = Depends(get_session)):
         rows = pipeline.documents_with_changes(session, settings, today())
         names = fields.role_names(settings)
-        meta_rows = []
+        meta_open, meta_accepted = [], []
         for doc in session.scalars(select(Document).where(Document.meta_pending.is_(True)).order_by(Document.id)):
-            if items := metadata.pending(doc):
-                meta_rows.append((doc, items))
-            else:
+            items = metadata.pending(doc)
+            if not items:
                 doc.meta_pending = False
+            if accepted := [i for i in items if i["state"] == "accepted"]:
+                meta_accepted.append((doc, accepted))
+            if opened := [i for i in items if i["state"] == "open"]:
+                meta_open.append((doc, opened))
         return render(
             request, "paperless_changes.html", rows=rows, names=names, msg=msg, create_fields=settings.writeback_create_fields,
-            meta_rows=meta_rows, META_SOURCES=metadata.SOURCES, hints=metadata.archive_hints(session), HINTS=metadata.HINTS,
+            meta_open=meta_open, meta_accepted=meta_accepted, meta_accepted_count=sum(len(i) for _, i in meta_accepted), quality=metadata.quality(session), META_ITEMS=metadata.ITEMS,
+            META_SOURCES=metadata.SOURCES, hints=metadata.archive_hints(session), HINTS=metadata.HINTS,
             meta_queued=session.scalar(select(func.count()).select_from(Document).where(Document.meta_state.in_(("queued", "running")))),
             settings=settings,
         )
@@ -944,12 +951,14 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             if doc_id.isdigit() and key:
                 selected.setdefault(int(doc_id), []).append(key)
         action = form.get("action")
-        if not selected or action not in ("approve", "dismiss"):
+        if action == "transfer_all":
+            selected = {d.id: [i["key"] for i in metadata.pending(d) if i["state"] == "accepted"]
+                        for d in session.scalars(select(Document).where(Document.meta_accepted.is_not(None)))}
+            action = "transfer"
+        if not any(selected.values()) or action not in ("accept", "dismiss", "withdraw", "transfer"):
             msg = "Nichts ausgewählt"
-        elif action == "dismiss":
-            msg = f"{sum(metadata.dismiss(session.get(Document, i), keys) for i, keys in selected.items() if session.get(Document, i))} Vorschläge verworfen"
         else:
-            msg = apply_meta(session, selected)
+            msg = meta_action(session, action, selected)
         return RedirectResponse(f"/paperless-changes?msg={quote(msg)}#metadata", status_code=303)
 
     @app.post("/paperless-changes")

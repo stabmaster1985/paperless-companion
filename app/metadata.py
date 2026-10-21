@@ -1,14 +1,16 @@
 """Vorschläge für Paperless-Metadaten: Titel, Tags, Korrespondent, Dokumenttyp.
 
-Die Vorschläge werden nur im Companion gespeichert. Nach Paperless geschrieben wird erst,
-wenn du sie einzeln übernimmst (siehe ``approve``).
+Ablauf: vorschlagen -> vormerken oder verwerfen (nur im Companion) -> gesammelt übertragen.
+Nach Paperless geschrieben wird erst beim Übertragen (``transfer``).
 
 Zwei Quellen:
-- „Verlauf“: Was deine übrigen Dokumente desselben Korrespondenten in Paperless tragen
-  (kostet keine Rechenzeit, lernt aus dem, was du in Paperless pflegst und übernimmst).
+- „Verlauf“: Was deine übrigen Dokumente desselben Korrespondenten tragen.
 - „AI“: Das lokale Modell liest den Anfang des Dokuments und wählt aus deinen vorhandenen
   Tags, Korrespondenten und Dokumenttypen (per JSON-Schema auf diese Listen beschränkt).
-Abgelehnte Vorschläge merkt sich die App und schlägt sie für den Korrespondenten nicht erneut vor.
+
+Gelernt wird bereits aus Vorgemerktem: Vorgemerkte Tags/Typen/Korrespondenten zählen für den
+Verlauf und das Vokabular so, als stünden sie schon in Paperless, vorgemerkte Titel dienen der AI
+als Stilbeispiele, verworfene Tags werden für den Absender nicht mehr vorgeschlagen.
 """
 
 import re
@@ -16,16 +18,16 @@ from collections import Counter
 from datetime import datetime, timezone
 from pathlib import PurePath
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.extraction.rules import normalize
-from app.models import Document
+from app.models import Document, MetaDecision
 from app.ollama import OllamaClient, OllamaError
 from app.paperless import PaperlessClient
 
-ITEMS = {"title": "Titel", "correspondent": "Korrespondent", "document_type": "Dokumenttyp", "tags": "Tags"}
+ITEMS = {"title": "Titel", "correspondent": "Korrespondent", "document_type": "Dokumenttyp", "tag": "Tag"}
 SOURCES = {"llm": "AI", "history": "Verlauf"}
 MAX_TAGS = 4
 MAX_NEW_TAGS = 2
@@ -53,11 +55,34 @@ def is_generic_title(title: str | None, original_file_name: str | None = None) -
 # --------------------------------------------------------------------------- Kontext aus dem Archiv
 
 
-def vocabulary(session: Session, names: dict) -> dict[str, list[str]]:
-    """Vorhandene Tags/Korrespondenten/Dokumenttypen aus Paperless, die häufig benutzten zuerst."""
+def effective(doc_tags, correspondent, document_type, accepted: dict | None) -> tuple[list[str], str | None, str | None]:
+    """Werte inklusive vorgemerkter, noch nicht übertragener Vorschläge."""
+    accepted = accepted or {}
+    tags = list(doc_tags or [])
+    have = {t.lower() for t in tags}
+    for key, entry in accepted.items():
+        if key.startswith("tag:") and entry["value"].lower() not in have:
+            tags.append(entry["value"])
+            have.add(entry["value"].lower())
+    corr = accepted["correspondent"]["value"] if "correspondent" in accepted else correspondent
+    doctype = accepted["document_type"]["value"] if "document_type" in accepted else document_type
+    return tags, corr, doctype
+
+
+def _archive(session: Session) -> list[tuple[int, list[str], str | None, str | None]]:
+    rows = session.execute(select(Document.id, Document.tags, Document.correspondent, Document.document_type,
+                                  Document.meta_accepted))
+    return [(i, *effective(t, c, d, a)) for i, t, c, d, a in rows]
+
+
+def vocabulary(session: Session, names: dict, archive: list | None = None) -> dict[str, list[str]]:
+    """Vorhandene Tags/Korrespondenten/Dokumenttypen, die häufig benutzten zuerst.
+
+    Vorgemerkte neue Tags gehören schon dazu, damit gleiche Dokumente denselben neuen Tag bekommen.
+    """
     usage: dict[str, Counter] = {"tags": Counter(), "correspondents": Counter(), "document_types": Counter()}
-    for tags, corr, doctype in session.execute(select(Document.tags, Document.correspondent, Document.document_type)):
-        usage["tags"].update(tags or [])
+    for _, tags, corr, doctype in archive if archive is not None else _archive(session):
+        usage["tags"].update(tags)
         if corr:
             usage["correspondents"][corr] += 1
         if doctype:
@@ -65,32 +90,30 @@ def vocabulary(session: Session, names: dict) -> dict[str, list[str]]:
     result = {}
     for key in usage:
         available = list(names.get(key, {}).values())
+        if key == "tags":
+            known = {n.lower() for n in available}
+            available += [t for t in usage["tags"] if t.lower() not in known]
         available.sort(key=lambda n: (-usage[key][n], n.lower()))
         result[key] = available[:VOCAB_LIMIT] if key != "document_types" else available
     return result
 
 
 def rejected_tags(session: Session, correspondent: str | None) -> set[str]:
-    """Für diesen Korrespondenten bereits abgelehnte Tags (kleingeschrieben)."""
+    """Für diesen Korrespondenten verworfene Tags (kleingeschrieben)."""
     if not correspondent:
         return set()
-    rejected: set[str] = set()
-    for dismissed in session.scalars(
-        select(Document.meta_dismissed).where(Document.correspondent == correspondent, Document.meta_dismissed.is_not(None))
-    ):
-        rejected.update(k[4:].lower() for k in dismissed or {} if k.startswith("tag:"))
-    return rejected
+    return {v.lower() for v in session.scalars(select(MetaDecision.value).where(
+        MetaDecision.item == "tag", MetaDecision.decision == "dismissed", MetaDecision.correspondent == correspondent))}
 
 
-def history(session: Session, doc: Document) -> dict:
-    """Was tragen die anderen Dokumente desselben Korrespondenten? (mind. 3 Dokumente)"""
-    if not doc.correspondent:
+def history(session: Session, doc: Document, archive: list | None = None) -> dict:
+    """Was tragen die anderen Dokumente desselben Korrespondenten (inkl. Vorgemerktem)? Ab 3 Dokumenten."""
+    _, corr, _ = effective(doc.tags, doc.correspondent, doc.document_type, doc.meta_accepted)
+    if not corr:
         return {"count": 0, "tags": [], "document_type": None}
-    rows = session.execute(
-        select(Document.tags, Document.document_type).where(Document.correspondent == doc.correspondent, Document.id != doc.id)
-    ).all()
+    rows = [(t, d) for i, t, c, d in (archive if archive is not None else _archive(session)) if c == corr and i != doc.id]
     count = len(rows)
-    tags = Counter(t for tag_list, _ in rows for t in set(tag_list or []))
+    tags = Counter(t for tag_list, _ in rows for t in set(tag_list))
     types = Counter(t for _, t in rows if t)
     common_tags = [t for t, n in tags.most_common() if count >= 3 and n / count >= 0.5]
     doctype = None
@@ -98,6 +121,17 @@ def history(session: Session, doc: Document) -> dict:
         name, n = types.most_common(1)[0]
         doctype = name if n / count >= 0.6 else None
     return {"count": count, "tags": common_tags, "document_type": doctype}
+
+
+def title_examples(session: Session, correspondent: str | None, limit: int = 4) -> list[str]:
+    """Von dir vorgemerkte Titel (auch noch nicht übertragene) als Stilvorlage, gleicher Absender zuerst."""
+    rows = session.execute(
+        select(MetaDecision.value, MetaDecision.correspondent).where(
+            MetaDecision.item == "title", MetaDecision.decision.in_(("accepted", "edited"))
+        ).order_by(MetaDecision.decided_at.desc()).limit(50)
+    ).all()
+    rows.sort(key=lambda r: r[1] != correspondent)  # stabil: gleicher Absender zuerst, sonst neueste
+    return [value for value, _ in rows[:limit] if value]
 
 
 # --------------------------------------------------------------------------- AI
@@ -127,7 +161,8 @@ def schema(vocab: dict[str, list[str]]) -> dict:
     }
 
 
-def build_prompt(doc: Document, text: str, vocab: dict, hist: dict, rejected: set[str], max_input: int) -> str:
+def build_prompt(doc: Document, text: str, vocab: dict, hist: dict, rejected: set[str], max_input: int,
+                 examples: list[str] | None = None) -> str:
     lines = [
         "Schlage für das Dokument vor:",
         "- title: kurzer, sprechender deutscher Titel (max. 60 Zeichen) nach dem Muster „Was – Wofür/Zeitraum“, "
@@ -145,6 +180,8 @@ def build_prompt(doc: Document, text: str, vocab: dict, hist: dict, rejected: se
             f"Andere Dokumente dieses Absenders ({hist['count']}) haben meist die Tags: {', '.join(hist['tags']) or 'keine'}"
             + (f" und den Typ {hist['document_type']}" if hist["document_type"] else "")
         )
+    if examples:
+        lines.append("So benennt der Nutzer Dokumente (Stil übernehmen): " + "; ".join(f"„{e}“" for e in examples))
     if rejected:
         lines.append("Diese Tags hat der Nutzer für diesen Absender abgelehnt, nicht vorschlagen: " + ", ".join(sorted(rejected)))
     lines += [
@@ -165,14 +202,15 @@ def _pick(value, allowed: list[str]) -> str | None:
     return lookup.get(str(value or "").strip().lower())
 
 
-def ask_llm(client: OllamaClient, doc: Document, text: str, vocab: dict, hist: dict, rejected: set[str], max_input: int) -> dict:
+def ask_llm(client: OllamaClient, doc: Document, text: str, vocab: dict, hist: dict, rejected: set[str], max_input: int,
+            examples: list[str] | None = None) -> dict:
     if not text.strip():
         raise OllamaError("Dokument hat keinen Text (OCR fehlt?)")
-    prompt = build_prompt(doc, text, vocab, hist, rejected, max_input)
+    prompt = build_prompt(doc, text, vocab, hist, rejected, max_input, examples)
     # Passt alles ins Kontextfenster? (grob 3 Zeichen je Token, Platz für die Antwort lassen)
     budget = (client.num_ctx - 600) * 3
     if len(prompt) > budget:
-        prompt = build_prompt(doc, text, vocab, hist, rejected, max(800, max_input - (len(prompt) - budget)))
+        prompt = build_prompt(doc, text, vocab, hist, rejected, max(800, max_input - (len(prompt) - budget)), examples)
     data = client.extract_json(SYSTEM, prompt, schema(vocab))
     title = re.sub(r"\s+", " ", str(data.get("title") or "")).strip().strip('"„“')[:80]
     tags = [t for t in (_pick(v, vocab["tags"]) for v in data.get("tags") or []) if t]
@@ -200,15 +238,25 @@ def suggest(
 ) -> dict:
     """Vorschlag erzeugen und am Dokument speichern. Gibt Infos für das Aktivitätsprotokoll zurück."""
     names = names or {e: paperless.names(e) for e in ("tags", "correspondents", "document_types")}
-    vocab = vocabulary(session, names)
-    hist = history(session, doc)
-    rejected = rejected_tags(session, doc.correspondent)
+    archive = _archive(session)
+    vocab = vocabulary(session, names, archive)
+    hist = history(session, doc, archive)
+    _, corr, _ = effective(doc.tags, doc.correspondent, doc.document_type, doc.meta_accepted)
+    rejected = rejected_tags(session, corr)
+    in_paperless = {n.lower() for n in names.get("tags", {}).values()}
     suggestion: dict = {"tags": [], "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
     info = {"ai": False, "ai_seconds": None}
 
+    def add_tag(name: str, source: str) -> None:
+        if name.lower() in rejected or name.lower() in {t["name"].lower() for t in suggestion["tags"]}:
+            return
+        entry = {"name": name, "source": source}
+        if name.lower() not in in_paperless:
+            entry["new"] = True
+        suggestion["tags"].append(entry)
+
     for tag in hist["tags"]:
-        if tag.lower() not in rejected:
-            suggestion["tags"].append({"name": tag, "source": "history"})
+        add_tag(tag, "history")
     if hist["document_type"]:
         suggestion["document_type"] = {"value": hist["document_type"], "source": "history"}
 
@@ -217,18 +265,12 @@ def suggest(
 
         started = time.monotonic()
         text = paperless.get_document(doc.id).get("content") or ""
-        result = ask_llm(ollama, doc, text, vocab, hist, rejected, settings.meta_max_input_chars)
+        result = ask_llm(ollama, doc, text, vocab, hist, rejected, settings.meta_max_input_chars,
+                         title_examples(session, corr))
         info.update(ai=True, ai_seconds=time.monotonic() - started)
         suggestion["model"] = ollama.model
-        have = {t["name"].lower() for t in suggestion["tags"]}
-        for tag in result["tags"]:
-            if tag.lower() not in have and tag.lower() not in rejected:
-                suggestion["tags"].append({"name": tag, "source": "llm"})
-                have.add(tag.lower())
-        for tag in result["new_tags"]:
-            if tag.lower() not in have and tag.lower() not in rejected:
-                suggestion["tags"].append({"name": tag, "source": "llm", "new": True})
-                have.add(tag.lower())
+        for tag in [*result["tags"], *result["new_tags"]]:
+            add_tag(tag, "llm")
         if result["title"]:
             suggestion["title"] = {"value": result["title"], "source": "llm"}
         for key in ("correspondent", "document_type"):
@@ -238,43 +280,60 @@ def suggest(
     doc.meta_suggestion = suggestion
     doc.meta_state = "done"
     refresh_pending(doc)
-    open_items = pending(doc)
+    open_items = [i for i in pending(doc) if i["state"] == "open"]
     info["items"] = list(dict.fromkeys(p["label"] for p in open_items))
     info["pending"] = len(open_items)
     return info
 
 
-# --------------------------------------------------------------------------- Abgleich mit Paperless
+# --------------------------------------------------------------------------- Entscheiden und übertragen
+
+
+def _current(doc: Document, key: str) -> str | None:
+    return None if key.startswith("tag:") else getattr(doc, key)
+
+
+def _in_paperless(doc: Document, key: str, value: str) -> bool:
+    if key.startswith("tag:"):
+        return value.lower() in {t.lower() for t in doc.tags or []}
+    return (_current(doc, key) or "").strip().lower() == value.strip().lower()
 
 
 def pending(doc: Document, everything: bool = False) -> list[dict]:
-    """Offene Unterschiede Vorschlag -> Paperless.
+    """Vorgemerkte (state=accepted) und offene (state=open) Unterschiede zu Paperless.
 
-    Für „Für Paperless“ (everything=False) nur, was echten Nutzen hat: fehlende Tags, ein Titel nur,
-    wenn der jetzige nichtssagend ist, Korrespondent/Dokumenttyp nur, wenn in Paperless leer.
-    Auf der Dokumentseite (everything=True) auch abweichende Titel/Korrespondenten/Typen.
+    Offene Vorschläge zeigt „Für Paperless“ (everything=False) nur mit echtem Nutzen: fehlende Tags,
+    ein Titel nur, wenn der jetzige nichtssagend ist, Korrespondent/Dokumenttyp nur, wenn in Paperless leer.
+    Die Dokumentseite (everything=True) zeigt auch abweichende Titel/Korrespondenten/Typen.
+    Vorgemerktes erscheint immer, bis es übertragen ist oder Paperless denselben Wert hat.
     """
     sugg = doc.meta_suggestion or {}
     dismissed = doc.meta_dismissed or {}
+    accepted = doc.meta_accepted or {}
     items = []
-    current_tags = {t.lower() for t in doc.tags or []}
+    for key, entry in accepted.items():
+        if _in_paperless(doc, key, entry["value"]):
+            continue
+        items.append({"key": key, "label": "Tag" if key.startswith("tag:") else ITEMS[key], "current": _current(doc, key),
+                      "new": entry["value"], "source": entry.get("source", "llm"), "new_tag": bool(entry.get("new_tag")),
+                      "state": "accepted", "useful": True})
     for tag in sugg.get("tags", []):
         key = f"tag:{tag['name']}"
-        if tag["name"].lower() in current_tags or key in dismissed:
+        if key in accepted or key in dismissed or _in_paperless(doc, key, tag["name"]):
             continue
         items.append({"key": key, "label": "Tag", "current": None, "new": tag["name"], "source": tag["source"],
-                      "new_tag": bool(tag.get("new"))})
-    for key, current in (("title", doc.title), ("correspondent", doc.correspondent), ("document_type", doc.document_type)):
+                      "new_tag": bool(tag.get("new")), "state": "open", "useful": True})
+    for key in ("title", "correspondent", "document_type"):
         entry = sugg.get(key)
-        if not entry or not entry.get("value"):
+        if not entry or not entry.get("value") or key in accepted:
             continue
-        value = entry["value"]
-        if (current or "").strip().lower() == value.strip().lower() or dismissed.get(key) == value:
+        value, current = entry["value"], _current(doc, key)
+        if _in_paperless(doc, key, value) or dismissed.get(key) == value:
             continue
         useful = is_generic_title(current, doc.original_file_name) if key == "title" else not current
         if useful or everything:
             items.append({"key": key, "label": ITEMS[key], "current": current, "new": value, "source": entry["source"],
-                          "useful": useful})
+                          "new_tag": False, "state": "open", "useful": useful})
     return items
 
 
@@ -283,29 +342,78 @@ def refresh_pending(doc: Document) -> bool:
     return doc.meta_pending
 
 
-def dismiss(doc: Document, keys: list[str]) -> int:
-    """Vorschläge verwerfen; abgelehnte Tags werden für den Korrespondenten nicht mehr vorgeschlagen."""
-    dismissed = dict(doc.meta_dismissed or {})
+def _record(session: Session, doc: Document, item: dict, decision: str, value: str | None) -> None:
+    row = session.scalar(select(MetaDecision).where(MetaDecision.document_id == doc.id, MetaDecision.key == item["key"]))
+    if row is None:
+        row = MetaDecision(document_id=doc.id, key=item["key"], item="tag" if item["key"].startswith("tag:") else item["key"])
+        session.add(row)
+    _, corr, _ = effective(doc.tags, doc.correspondent, doc.document_type, doc.meta_accepted)
+    suggested = ((doc.meta_suggestion or {}).get(item["key"]) or {}).get("value") if not item["key"].startswith("tag:") else None
+    row.correspondent = corr
+    row.suggested = suggested or (row.suggested if row.suggested else item["new"])
+    row.value, row.source, row.decision = value, item["source"], decision
+    row.decided_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    row.transferred_at = None
+
+
+def accept(session: Session, doc: Document, keys: list[str], title: str | None = None) -> int:
+    """Vorschläge vormerken – nur im Companion, die App lernt sofort daraus."""
+    accepted = dict(doc.meta_accepted or {})
     count = 0
     for item in pending(doc, everything=True):
-        if item["key"] in keys:
-            dismissed[item["key"]] = item["new"]
-            count += 1
-    doc.meta_dismissed = dismissed or None
+        if item["key"] not in keys:
+            continue
+        value = title.strip() if item["key"] == "title" and title and title.strip() else item["new"]
+        if item["state"] == "accepted" and value == item["new"]:
+            continue
+        accepted[item["key"]] = {"value": value, "source": item["source"], "new_tag": item["new_tag"],
+                                 "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+        suggested = ((doc.meta_suggestion or {}).get(item["key"]) or {}).get("value", item["new"])
+        _record(session, doc, item, "edited" if item["key"] == "title" and value != suggested else "accepted", value)
+        count += 1
+    doc.meta_accepted = dict(accepted) or None  # neues Objekt, damit SQLAlchemy die JSON-Änderung erkennt
     refresh_pending(doc)
     return count
 
 
-def approve(
-    paperless: PaperlessClient, doc: Document, keys: list[str], title_override: str | None = None
-) -> list[str]:
-    """Ausgewählte Vorschläge in Paperless schreiben. Gibt die übernommenen Schlüssel zurück.
+def dismiss(session: Session, doc: Document, keys: list[str]) -> int:
+    """Verwerfen (auch Vorgemerktes). Verworfene Tags schlägt die App für den Absender nicht mehr vor."""
+    dismissed = dict(doc.meta_dismissed or {})
+    accepted = dict(doc.meta_accepted or {})
+    count = 0
+    for item in pending(doc, everything=True):
+        if item["key"] in keys:
+            _record(session, doc, item, "dismissed", item["new"])
+            accepted.pop(item["key"], None)
+            dismissed[item["key"]] = item["new"]
+            count += 1
+    doc.meta_dismissed = dismissed or None
+    doc.meta_accepted = accepted or None
+    refresh_pending(doc)
+    return count
 
-    Tags werden nur ergänzt (vorhandene bleiben), neue Tags nur angelegt, wenn ausgewählt.
+
+def withdraw(session: Session, doc: Document, keys: list[str]) -> int:
+    """Vormerkung zurücknehmen – der Vorschlag ist wieder offen."""
+    accepted = dict(doc.meta_accepted or {})
+    count = 0
+    for key in keys:
+        if accepted.pop(key, None) is not None:
+            row = session.scalar(select(MetaDecision).where(MetaDecision.document_id == doc.id, MetaDecision.key == key))
+            if row is not None and row.transferred_at is None:
+                session.delete(row)
+            count += 1
+    doc.meta_accepted = accepted or None
+    refresh_pending(doc)
+    return count
+
+
+def transfer(session: Session, paperless: PaperlessClient, doc: Document, keys: list[str] | None = None) -> list[str]:
+    """Vorgemerkte Werte nach Paperless schreiben (alle oder die ausgewählten). Gibt die übertragenen Schlüssel zurück.
+
+    Tags werden nur ergänzt (vorhandene bleiben), neue Tags beim Übertragen angelegt.
     """
-    items = {i["key"]: i for i in pending(doc, everything=True) if i["key"] in keys}
-    if title_override is not None and title_override.strip() and "title" in keys:
-        items.setdefault("title", {"key": "title", "new": title_override.strip()})["new"] = title_override.strip()
+    items = {i["key"]: i for i in pending(doc) if i["state"] == "accepted" and (keys is None or i["key"] in keys)}
     if not items:
         return []
     payload: dict = {}
@@ -319,7 +427,6 @@ def approve(
             else:
                 items.pop(key)  # inzwischen in Paperless gelöscht
     tag_items = [i for k, i in items.items() if k.startswith("tag:")]
-    added_tags: list[str] = []
     if tag_items:
         current = paperless.get_document(doc.id).get("tags") or []
         tag_ids = {name.lower(): i for i, name in paperless.names("tags").items()}
@@ -327,13 +434,10 @@ def approve(
         for item in tag_items:
             tag_id = tag_ids.get(item["new"].lower())
             if tag_id is None:
-                if not item.get("new_tag"):
-                    items.pop(item["key"])
-                    continue
                 tag_id = paperless.ensure_tag(item["new"])
+                tag_ids[item["new"].lower()] = tag_id
             if tag_id not in wanted:
                 wanted.append(tag_id)
-            added_tags.append(item["new"])
         payload["tags"] = wanted
     if not payload:
         return []
@@ -345,18 +449,43 @@ def approve(
         doc.correspondent = items["correspondent"]["new"]
     if "document_type" in payload:
         doc.document_type = items["document_type"]["new"]
-    if added_tags:
-        doc.tags = [*(doc.tags or []), *[t for t in added_tags if t.lower() not in {x.lower() for x in doc.tags or []}]]
+    if tag_items:
+        have = {t.lower() for t in doc.tags or []}
+        doc.tags = [*(doc.tags or []), *[i["new"] for i in tag_items if i["new"].lower() not in have]]
+    accepted = {k: v for k, v in (doc.meta_accepted or {}).items() if k not in items}
+    doc.meta_accepted = accepted or None
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    for row in session.scalars(select(MetaDecision).where(MetaDecision.document_id == doc.id, MetaDecision.key.in_(list(items)))):
+        row.transferred_at = now
     refresh_pending(doc)
     return list(items)
+
+
+def quality(session: Session) -> dict:
+    """Trefferquote deiner Entscheidungen je Quelle und Art – so siehst du, wie gut die Vorschläge sind."""
+    table: dict = {}
+    for item, source, decision in session.execute(select(MetaDecision.item, MetaDecision.source, MetaDecision.decision)):
+        row = table.setdefault((source, item), {"accepted": 0, "edited": 0, "dismissed": 0})
+        row[decision] = row.get(decision, 0) + 1
+    rows = []
+    for (source, item), counts in sorted(table.items()):
+        total = sum(counts.values())
+        rows.append({"source": source, "item": item, **counts, "total": total,
+                     "rate": round(100 * (counts["accepted"] + counts["edited"]) / total) if total else 0})
+    waiting = session.scalar(select(func.count()).select_from(MetaDecision).where(
+        MetaDecision.decision.in_(("accepted", "edited")), MetaDecision.transferred_at.is_(None)))
+    transferred = session.scalar(select(func.count()).select_from(MetaDecision).where(MetaDecision.transferred_at.is_not(None)))
+    return {"rows": rows, "waiting": waiting, "transferred": transferred}
 
 
 def archive_hints(session: Session) -> dict:
     """Wo lohnt sich ein Vorschlag? Zahlen für die Seite „Für Paperless“."""
     untagged = generic = no_corr = 0
-    for tags, title, file_name, corr in session.execute(
-        select(Document.tags, Document.title, Document.original_file_name, Document.correspondent)
+    for tags, title, file_name, corr, accepted in session.execute(
+        select(Document.tags, Document.title, Document.original_file_name, Document.correspondent, Document.meta_accepted)
     ):
+        tags, corr, _ = effective(tags, corr, None, accepted)
+        title = (accepted or {}).get("title", {}).get("value", title)
         untagged += not tags
         generic += is_generic_title(title, file_name)
         no_corr += not corr
@@ -364,12 +493,13 @@ def archive_hints(session: Session) -> dict:
 
 
 def matches_hint(doc: Document, hint: str) -> bool:
+    tags, corr, _ = effective(doc.tags, doc.correspondent, None, doc.meta_accepted)
     if hint == "untagged":
-        return not doc.tags
+        return not tags
     if hint == "generic_title":
-        return is_generic_title(doc.title, doc.original_file_name)
+        return is_generic_title((doc.meta_accepted or {}).get("title", {}).get("value", doc.title), doc.original_file_name)
     if hint == "no_correspondent":
-        return not doc.correspondent
+        return not corr
     if hint == "meta_pending":
         return bool(doc.meta_pending)
     return True
