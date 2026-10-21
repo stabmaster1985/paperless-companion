@@ -66,7 +66,8 @@
       {% for it in items %}
       <tr>
         <td><input type="checkbox" name="item" value="{{ doc.id }}:{{ it.key }}"></td>
-        <td>{% if loop.first %}<a href="/documents/{{ doc.id }}#metadata">{{ doc.title or ('#' ~ doc.id) }}</a> {{ doclink(doc.id) }}<br><small>{{ doc.correspondent or '' }}</small>{% endif %}</td>
+        <td>{% if loop.first %}<a href="/documents/{{ doc.id }}#metadata">{{ doc.title or ('#' ~ doc.id) }}</a> {{ doclink(doc.id) }}<br><small>{{ doc.correspondent or '' }}{% if doc.document_type %} · {{ doc.document_type }}{% endif %}</small>
+          <div class="tags">{% for t in doc.tags or [] %}<span class="tag" title="Tag in Paperless">{{ t }}</span>{% else %}<small class="muted">keine Tags</small>{% endfor %}</div>{% endif %}</td>
         <td>{{ it.label }}{% if it.new_tag %} <small class="soon" title="{{ TIPS.neuer_tag }}">neuer Tag</small>{% endif %}</td>
         <td>{{ it.current or '' }}{% if not it.current %}<span class="muted">{{ 'fehlt' if it.key.startswith('tag:') else 'leer' }}</span>{% endif %}</td>
         <td><strong>{{ it.new }}</strong> <span class="badge src-{{ it.source }}" title="{{ TIPS.get(it.source, '') }}">{{ META_SOURCES.get(it.source, it.source) }}</span></td>
@@ -105,29 +106,47 @@
   {%- if last.meta_open %} · jüngster mit offenen Punkten: <strong>{{ last.meta_open|ts }}</strong>{% endif %}</p>
 
 {% set mf = meta_filter %}
-{% set mf_active = mf.what or mf.source or mf.value %}
-{% macro mf_hidden(mf) %}{% for k in ('what', 'source', 'value') if mf[k] %}<input type="hidden" name="{{ k }}" value="{{ mf[k] }}">{% endfor %}{% endmacro %}
+{% set mf_active = mf.values()|select|list|length > 0 %}
+{% macro mf_hidden(mf) %}{% for k, v in mf.items() if v %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}{% endmacro %}
+{% macro none_label(v) %}{{ '(ohne)' if v == NONE else v }}{% endmacro %}
 <form method="get" action="/paperless-changes#metadata" class="card filter-card meta-filter">
   <nav class="tabs" aria-label="Art des Vorschlags">
     {% set total_open = meta_counts.what.values()|sum %}
-    <a href="/paperless-changes?{{ 'source=' ~ mf.source if mf.source }}#metadata" class="{{ 'active' if not mf.what }}">Alle ({{ total_open }})</a>
+    <a href="/paperless-changes?{{ mq(what='', value='') }}#metadata" class="{{ 'active' if not mf.what }}">Alle ({{ total_open }})</a>
     {% for key, label in [('title', 'Titel'), ('tag', 'Tags'), ('correspondent', 'Korrespondent'), ('document_type', 'Dokumenttyp')] %}
-    <a href="/paperless-changes?what={{ key }}{{ '&source=' ~ mf.source if mf.source }}#metadata" class="{{ 'active' if mf.what == key }}">{{ label }} ({{ meta_counts.what.get(key, 0) }})</a>
+    <a href="/paperless-changes?{{ mq(what=key, value='') }}#metadata" class="{{ 'active' if mf.what == key }}">{{ label }} ({{ meta_counts.what.get(key, 0) }})</a>
     {% endfor %}
   </nav>
+  <input type="hidden" name="what" value="{{ mf.what }}">
+  <p class="filter-legend">Vorschlag {{ help("Filtert die einzelnen Vorschläge: nach Quelle oder einem bestimmten vorgeschlagenen Tag.") }}</p>
   <div class="grid">
-    <input type="hidden" name="what" value="{{ mf.what }}">
     <label class="field"><span>Quelle</span>
       <select name="source" onchange="this.form.submit()"><option value="">alle</option>
         {% for key, text in META_SOURCES.items() %}<option value="{{ key }}" {{ 'selected' if mf.source == key }}>{{ text }} ({{ meta_counts.source.get(key, 0) }})</option>{% endfor %}</select></label>
     {% if mf.what in ('', 'tag') and meta_counts.tags %}
-    <label class="field"><span>Bestimmter Tag</span>
+    <label class="field"><span>Vorgeschlagener Tag</span>
       <select name="value" onchange="this.form.submit()"><option value="">alle</option>
         {% for tag, n in meta_counts.tags.most_common() %}<option value="{{ tag }}" {{ 'selected' if mf.value|lower == tag|lower }}>{{ tag }} ({{ n }})</option>{% endfor %}</select></label>
     {% endif %}
   </div>
-  <noscript><button class="small">Filtern</button></noscript>
-  {% if mf_active %}<a class="button small" href="/paperless-changes#metadata">Filter zurücksetzen</a>{% endif %}
+  <p class="filter-legend">Dokument – jetziger Stand in Paperless {{ help("Wählt die Dokumente aus, deren Vorschläge du sehen willst, z.B. erst alle mit dem Tag „Haus“ oder alle von einem Absender. Die Zahlen nennen Dokumente mit offenen Vorschlägen.") }}</p>
+  <div class="grid">
+    <label class="field"><span>Hat Tag</span>
+      <select name="has_tag" onchange="this.form.submit()"><option value="">alle</option>
+        {% for tag, n in meta_counts.doc_tags.most_common() %}<option value="{{ tag }}" {{ 'selected' if mf.has_tag|lower == tag|lower }}>{{ none_label(tag) }} ({{ n }})</option>{% endfor %}</select></label>
+    <label class="field"><span>Korrespondent</span>
+      <select name="correspondent" onchange="this.form.submit()"><option value="">alle</option>
+        {% for name, n in meta_counts.correspondents.most_common() %}<option value="{{ name }}" {{ 'selected' if mf.correspondent|lower == name|lower }}>{{ none_label(name) }} ({{ n }})</option>{% endfor %}</select></label>
+    <label class="field"><span>Dokumenttyp</span>
+      <select name="doctype" onchange="this.form.submit()"><option value="">alle</option>
+        {% for name, n in meta_counts.doctypes.most_common() %}<option value="{{ name }}" {{ 'selected' if mf.doctype|lower == name|lower }}>{{ none_label(name) }} ({{ n }})</option>{% endfor %}</select></label>
+    <label class="field"><span>Suche</span>
+      <input type="search" name="q" value="{{ mf.q }}" placeholder="Titel, Absender oder ID"></label>
+  </div>
+  <div class="actions">
+    <button class="small">Filtern</button>
+    {% if mf_active %}<a class="button small" href="/paperless-changes#metadata">Filter zurücksetzen</a>{% endif %}
+  </div>
 </form>
 
 <section class="card">

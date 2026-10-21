@@ -349,10 +349,34 @@ def filter_items(items: list[dict], what: str = "", source: str = "", value: str
             and (not value or i["new"].lower() == value.lower())]
 
 
-def pending_rows(session: Session, state: str, what: str = "", source: str = "", value: str = "") -> list[tuple]:
+# Filter auf „Für Paperless“: Vorschlag (what/source/value) und Dokument (has_tag/correspondent/doctype/q)
+FILTER_KEYS = ("what", "source", "value", "has_tag", "correspondent", "doctype", "q")
+NONE = "__none__"  # Filterwert „ohne …“
+
+
+def doc_matches(doc: Document, has_tag: str = "", correspondent: str = "", doctype: str = "", q: str = "") -> bool:
+    """Dokument nach seinem jetzigen Stand in Paperless filtern (Tag, Korrespondent, Typ, Titel/Absender-Suche)."""
+    tags = {t.lower() for t in doc.tags or []}
+    if has_tag and ((has_tag == NONE and tags) or (has_tag != NONE and has_tag.lower() not in tags)):
+        return False
+    for wanted, current in ((correspondent, doc.correspondent), (doctype, doc.document_type)):
+        if wanted and ((wanted == NONE and current) or (wanted != NONE and (current or "").lower() != wanted.lower())):
+            return False
+    if q:
+        needle = q.lower()
+        if needle not in (doc.title or "").lower() and needle not in (doc.correspondent or "").lower() \
+                and needle != str(doc.id):
+            return False
+    return True
+
+
+def pending_rows(session: Session, state: str, what: str = "", source: str = "", value: str = "",
+                 has_tag: str = "", correspondent: str = "", doctype: str = "", q: str = "") -> list[tuple]:
     """(Dokument, Vorschläge) aller Dokumente mit offenen bzw. vorgemerkten Vorschlägen, gefiltert."""
     rows = []
     for doc in session.scalars(select(Document).where(Document.meta_pending.is_(True)).order_by(Document.id)):
+        if not doc_matches(doc, has_tag, correspondent, doctype, q):
+            continue
         items = filter_items([i for i in pending(doc) if i["state"] == state], what, source, value)
         if items:
             rows.append((doc, items))

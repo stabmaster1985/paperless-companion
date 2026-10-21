@@ -274,3 +274,28 @@ def test_filter_open_suggestions(client):
     assert response.headers["location"].startswith("/paperless-changes?what=tag&value=Haus&msg=1%20Vorschl")
     with session_scope() as s:
         assert list(s.get(Document, 3).meta_accepted) == ["tag:Haus"]
+
+
+def test_filter_by_document_tags_and_correspondent(client):
+    with session_scope() as s:
+        doc = s.get(Document, 3)
+        doc.tags = ["Haus"]  # jetziger Stand in Paperless
+        doc.meta_suggestion = {**doc.meta_suggestion, "tags": [{"name": "Elektronik", "source": "llm", "new": True}]}
+        metadata.refresh_pending(doc)
+    page = client.get("/paperless-changes").text
+    assert '<option value="Haus" >Haus (1)</option>' in page or "Haus (1)" in page
+    assert '<span class="tag" title="Tag in Paperless">Haus</span>' in page
+    open_part = lambda html: html.split("Offene Vorschläge")[1].split("Wie gut")[0]
+    assert "Elektronik" in open_part(client.get("/paperless-changes?has_tag=Haus").text)
+    assert "Keine offenen Metadaten-Vorschläge für diesen Filter" in client.get("/paperless-changes?has_tag=Steuer").text
+    assert "Elektronik" in open_part(client.get("/paperless-changes?correspondent=__none__&q=scan").text)
+    assert "Keine offenen" in client.get("/paperless-changes?correspondent=Stadtwerke").text
+    # Sammelaktion berücksichtigt den Dokument-Filter
+    client.post("/paperless-changes/meta", data={"action": "accept_all", "has_tag": "Steuer"})
+    with session_scope() as s:
+        assert not s.get(Document, 3).meta_accepted
+    response = client.post("/paperless-changes/meta", data={"action": "accept_all", "has_tag": "Haus", "what": "tag"},
+                           follow_redirects=False)
+    assert "has_tag=Haus" in response.headers["location"]
+    with session_scope() as s:
+        assert "tag:Elektronik" in s.get(Document, 3).meta_accepted

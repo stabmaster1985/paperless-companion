@@ -1019,17 +1019,27 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     # ------------------------------------------------------------------ Für Paperless (nur mit Zustimmung)
 
     @app.get("/paperless-changes", response_class=HTMLResponse)
-    def paperless_changes(request: Request, msg: str = "", what: str = "", source: str = "", value: str = "",
-                          session: Session = Depends(get_session)):
+    def paperless_changes(request: Request, msg: str = "", session: Session = Depends(get_session)):
+        flt = {k: str(request.query_params.get(k) or "").strip() for k in metadata.FILTER_KEYS}
+        what, source, value = flt["what"], flt["source"], flt["value"]
+        doc_flt = {k: flt[k] for k in ("has_tag", "correspondent", "doctype", "q")}
         rows = pipeline.documents_with_changes(session, settings, today())
         names = fields.role_names(settings)
         meta_open, meta_accepted = [], []
         # Zähler für den Filter (über alle offenen Vorschläge, unabhängig vom gewählten Filter)
-        counts = {"what": Counter(), "source": Counter(), "tags": Counter()}
+        counts = {"what": Counter(), "source": Counter(), "tags": Counter(),
+                  "doc_tags": Counter(), "correspondents": Counter(), "doctypes": Counter()}
         for doc in session.scalars(select(Document).where(Document.meta_pending.is_(True)).order_by(Document.id)):
             items = metadata.pending(doc)
             if not items:
                 doc.meta_pending = False
+            if any(i["state"] == "open" for i in items):
+                # Auswahllisten für die Dokument-Filter: jetziger Stand in Paperless
+                counts["doc_tags"].update(doc.tags or [metadata.NONE])
+                counts["correspondents"][doc.correspondent or metadata.NONE] += 1
+                counts["doctypes"][doc.document_type or metadata.NONE] += 1
+            if not metadata.doc_matches(doc, **doc_flt):
+                continue
             for i in items:
                 if i["state"] == "open":
                     counts["what"][metadata.item_type(i["key"])] += 1
@@ -1041,7 +1051,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                 meta_accepted.append((doc, accepted))
             if opened := [i for i in items if i["state"] == "open"]:
                 meta_open.append((doc, opened))
-        meta_filter = {"what": what, "source": source, "value": value}
+        meta_filter = flt
         def newest(values):
             values = [v for v in values if v]
             return max(values) if values else None
@@ -1059,6 +1069,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             request, "paperless_changes.html", rows=rows, last=last, change_info=pipeline.change_info,
             SOURCE_LABELS=pipeline.SOURCE_LABELS, names=names, msg=msg, create_fields=settings.writeback_create_fields,
             meta_open=meta_open, meta_accepted=meta_accepted, meta_filter=meta_filter, meta_counts=counts,
+            mq=lambda **changes: meta_query({**flt, **changes}), NONE=metadata.NONE,
             meta_open_count=sum(len(i) for _, i in meta_open), meta_query=meta_query(meta_filter), meta_accepted_count=sum(len(i) for _, i in meta_accepted), quality=metadata.quality(session), META_ITEMS=metadata.ITEMS,
             META_SOURCES=metadata.SOURCES, hints=metadata.archive_hints(session), HINTS=metadata.HINTS,
             meta_queued=session.scalar(select(func.count()).select_from(Document).where(Document.meta_state.in_(("queued", "running")))),
@@ -1083,7 +1094,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             if doc_id.isdigit() and key:
                 selected.setdefault(int(doc_id), []).append(key)
         action = str(form.get("action") or "")
-        flt = {k: str(form.get(k) or "") for k in ("what", "source", "value")}
+        flt = {k: str(form.get(k) or "") for k in metadata.FILTER_KEYS}
         if action.endswith("_all"):
             # alle mit dem aktuellen Filter angezeigten (vorgemerkte bzw. offene)
             state = "accepted" if action == "transfer_all" else "open"
