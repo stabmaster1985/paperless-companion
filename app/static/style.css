@@ -255,3 +255,4 @@ img.thumb { width: 56px; height: 72px; object-fit: cover; object-position: top; 
 .legend-sources .badge { margin-left: 0; }
 .src-note { font-size: .75rem; color: var(--muted); }
 @media (prefers-color-scheme: dark) { .badge.src-firefly { background: #2f2445; color: #c9b3f5; } }
+.tx-link { white-space: nowrap; margin-left: .35rem; }

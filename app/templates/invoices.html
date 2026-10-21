@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import doclink %}
+{% from "macros.html" import doclink, txlinks %}
 {% block content %}
 <div class="head">
   <h1>Rechnungen</h1>
@@ -18,7 +18,7 @@
         <td><a href="/documents/{{ m.invoice.document_id }}">{{ m.invoice.issuer or m.invoice.document.title }}</a><br>
           <small>{{ m.invoice.amount|eur }}{% if m.invoice.invoice_number %} · Nr. {{ m.invoice.invoice_number }}{% endif %} · fällig {{ m.invoice.due_date|d }}</small></td>
         <td>{{ m.tx_date|d }} · {{ m.amount|eur }}<br>
-          <small>{% if firefly_link %}<a href="{{ firefly_link(m.tx_group_id) }}" target="_blank" rel="noopener">{{ m.counterparty or 'Buchung' }} ↗</a>{% else %}{{ m.counterparty }}{% endif %} – {{ m.description }}</small></td>
+          <small>{{ m.counterparty or 'Buchung' }} – {{ m.description }}{{ txlinks(m.tx_group_id, m.tx_date) }}</small></td>
         <td class="hide-sm"><span class="badge {{ 'low' if m.score < 90 }}">{{ m.reasons }}</span></td>
         <td class="nowrap">
           <form method="post" action="/payments/{{ m.id }}/accept" class="inline"><button class="small primary">Bezahlt</button></form>
@@ -49,7 +49,8 @@
         {% else %}{{ i.due_date|d }}{% if overdue %} <span class="tag tag-overdue">überfällig</span>{% endif %}{% endif %}
         {% if i.status == 'paid' %}<br><small>bezahlt {{ i.paid_on|d }}
           {%- set ps = (i.document.field_sources or {}).get('paid_on') or (i.document.field_sources or {}).get('status') %}
-          {%- if ps %} · <span class="src-note" title="Herkunft">{{ SOURCE_LABELS.get(ps.source, ps.source) }}{{ ' ✓' if ps.confirmed and ps.source != 'manual' }}</span>{% endif %}</small>{% endif %}
+          {%- if ps %} · <span class="src-note" title="Herkunft">{{ SOURCE_LABELS.get(ps.source, ps.source) }}{{ ' ✓' if ps.confirmed and ps.source != 'manual' }}</span>{% endif %}
+          {%- if ps and ps.source == 'firefly' %}{% set pay = payment_of(i.document) %}{% if pay %}{{ txlinks(pay.group_id, pay.date) }}{% endif %}{% endif %}</small>{% endif %}
       </td>
       <td class="hide-sm">{{ i.invoice_number or '–' }}</td>
       <td>

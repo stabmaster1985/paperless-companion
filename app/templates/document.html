@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import input, select, doclink %}
+{% from "macros.html" import input, select, doclink, txlinks %}
 {% block title %}{{ doc.title }} – Paperless Companion{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
@@ -79,8 +79,17 @@ document.querySelectorAll('#viewer .tab[data-tab]').forEach((tab) => tab.addEven
   <strong>In Firefly gefunden:</strong> Abbuchung am {{ pay.date[8:10] }}.{{ pay.date[5:7] }}.{{ pay.date[:4] }} · {{ pay.amount|eur }}
   an {{ pay.counterparty or 'unbekannt' }}{% if pay.description %} – „{{ pay.description }}“{% endif %}
   <br><small>Treffer über: {{ pay.reasons }}. „Status“, „Bezahlt am“{% if 'Betrag aus Buchung' in pay.reasons %} und „Betrag“{% endif %} sind daraus vorbelegt – bitte prüfen.
-  {% if firefly_base %}<a href="{{ firefly_base }}/transactions/show/{{ pay.group_id }}" target="_blank" rel="noopener">Buchung in Firefly öffnen ↗</a>{% endif %}</small>
+  Buchung prüfen:{{ txlinks(pay.group_id, pay.date) }}</small>
 </div>
+{% elif doc.invoice %}
+{% set linked = payment_of(doc) %}
+{% if linked and linked.state != 'prefilled' %}
+<div class="notice {{ 'ok' if linked.state == 'accepted' else '' }}">
+  {{ 'Bezahlt laut' if linked.state == 'accepted' else 'Passende' }} Firefly-Buchung vom {{ linked.date[8:10] }}.{{ linked.date[5:7] }}.{{ linked.date[:4] }} · {{ linked.amount|eur }}
+  an {{ linked.counterparty or 'unbekannt' }}{% if linked.description %} – „{{ linked.description }}“{% endif %}
+  <br><small>{% if linked.reasons %}Treffer über: {{ linked.reasons }}. {% endif %}Buchung prüfen:{{ txlinks(linked.group_id, linked.date) }}</small>
+</div>
+{% endif %}
 {% endif %}
 <form method="post" action="/documents/{{ doc.id }}/confirm" class="card">
   <p class="legend-sources muted">Herkunft:

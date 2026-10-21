@@ -74,6 +74,13 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         return stamp.astimezone(ZoneInfo(settings.timezone)).strftime("%d.%m.%Y %H:%M")
 
     templates.env.filters["ts"] = fmt_ts
+    templates.env.globals["tx_links"] = lambda group_id, day: payments.links(settings, group_id, day)
+
+    def payment_of(doc: Document) -> dict | None:
+        with session_scope() as s:
+            return payments.payment_for(s, s.get(Document, doc.id))
+
+    templates.env.globals["payment_of"] = payment_of
     templates.env.globals.update(HINTS=metadata.HINTS, META_SOURCES=metadata.SOURCES, KINDS=pipeline.KINDS, link_base=settings.paperless_link_base, auth=bool(settings.app_password))
 
     @app.middleware("http")
@@ -280,7 +287,6 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             pf=doc.paperless_fields or {}, settings=settings, msg=msg,
             text_html=text_html, text_found=text_found, text_error=text_error, HL_LABELS=highlight.LABELS,
             meta_items=metadata.pending(doc, everything=True), META_SOURCES=metadata.SOURCES,
-            firefly_base=settings.firefly_url.rstrip("/") if settings.firefly_enabled else "",
             pending_left=session.scalar(
                 select(func.count()).select_from(Document).where(Document.review_state == "pending", Document.id != doc_id)
             ),
@@ -462,13 +468,9 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         query = select(Invoice).order_by(Invoice.due_date.asc().nulls_last())
         if status in ("open", "paid"):
             query = query.where(Invoice.status == status)
-        firefly = make_firefly(settings)
-        firefly_link = firefly.link if firefly else None
-        if firefly:
-            firefly.close()
         return render(
             request, "invoices.html", invoices=session.scalars(query).all(), status=status,
-            matches=payments.suggestions(session), firefly_link=firefly_link, msg=msg, SOURCE_LABELS=pipeline.SOURCE_LABELS,
+            matches=payments.suggestions(session), msg=msg, SOURCE_LABELS=pipeline.SOURCE_LABELS,
             firefly_enabled=settings.firefly_enabled,
         )
 

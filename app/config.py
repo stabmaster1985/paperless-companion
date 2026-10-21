@@ -83,6 +83,8 @@ class Settings(BaseSettings):
     # Zahlungsabgleich mit Firefly III
     firefly_url: str = ""
     firefly_token: str = ""
+    # Optional: Adresse deines Firefly-Dashboards (firefly-dashboard), für Links zur Kontrolle von Buchungen
+    firefly_dashboard_url: str = ""
     firefly_lookback_days: int = 120
     firefly_auto_accept: bool = False  # eindeutige Treffer (Betrag + Rechnungsnr./IBAN) direkt als bezahlt markieren
 

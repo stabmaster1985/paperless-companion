@@ -264,7 +264,9 @@ einer etwa eine Minute. Ohne Ollama gibt es nur Vorschläge aus dem Verlauf.
 
 `FIREFLY_URL` und `FIREFLY_TOKEN` setzen. Das Token ist ein persönliches Zugangstoken aus
 *Optionen → Profil → OAuth*. Der Companion liest stündlich die Abbuchungen und vergleicht sie
-mit offenen Rechnungen:
+mit offenen Rechnungen. Zum Kontrollieren ist jede gefundene Buchung verlinkt (Rechnungsliste,
+Dokumentseite, „Für Paperless“): direkt in Firefly und – wenn `FIREFLY_DASHBOARD_URL` gesetzt
+ist – in deinem Firefly-Dashboard, gefiltert auf den Buchungstag.
 
 | Indiz | Punkte |
 |---|---|

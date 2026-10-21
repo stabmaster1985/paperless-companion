@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import doclink %}
+{% from "macros.html" import doclink, txlinks %}
 {% macro show(role, value) -%}
   {%- if value is none -%}<span class="muted">leer</span>
   {%- elif role == 'related' -%}{% for i in value %}<a href="/documents/{{ i }}">#{{ i }}</a>{{ ', ' if not loop.last }}{% endfor %}
@@ -34,6 +34,7 @@
         <td><strong>{{ show(role, new) }}</strong></td>
         {% set info = change_info(doc, role) %}
         <td class="hide-sm nowrap"><small>{{ info.at|ts }}{% if info.source %}<br><span class="muted">{{ SOURCE_LABELS.get(info.source, info.source) }}</span>{% endif %}
+          {%- if info.source == 'firefly' %}{% set pay = payment_of(doc) %}{% if pay %}<br>{{ txlinks(pay.group_id, pay.date) }}{% endif %}{% endif %}
           {%- if doc.analyzed_at and info.at and info.at[:16] != doc.analyzed_at.isoformat()[:16] %}<br><span class="muted">analysiert {{ doc.analyzed_at|ts }}</span>{% endif %}</small></td>
       </tr>
       {% endfor %}

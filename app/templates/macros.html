@@ -38,3 +38,8 @@
 {% macro doclink(doc_id) -%}
   {%- if link_base -%}<a href="{{ link_base }}/documents/{{ doc_id }}/details" target="_blank" rel="noopener" class="ext" title="In Paperless öffnen">↗</a>{%- endif -%}
 {%- endmacro %}
+
+{# Links zur Kontrolle einer Firefly-Buchung: in Firefly und (optional) im Dashboard am Buchungstag #}
+{% macro txlinks(group_id, day) -%}
+  {%- for label, url in tx_links(group_id, day) %} <a class="tx-link" href="{{ url }}" target="_blank" rel="noopener" title="Buchung {{ 'in Firefly' if label == 'Firefly' else 'im Dashboard (Buchungstag)' }} öffnen">{{ label }} ↗</a>{% endfor -%}
+{%- endmacro %}

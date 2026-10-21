@@ -323,6 +323,33 @@ def reject(session: Session, match_id: int) -> PaymentMatch | None:
     return m
 
 
+def payment_for(session: Session, doc: Document) -> dict | None:
+    """Die Buchung, aus der Werte des Dokuments stammen: bestätigt, vorgeschlagen oder in der Inbox vorbelegt."""
+    inv = doc.invoice
+    if inv is not None:
+        for state in ("accepted", "suggested"):
+            m = session.scalar(select(PaymentMatch).where(PaymentMatch.invoice_id == inv.id, PaymentMatch.state == state)
+                               .order_by(PaymentMatch.score.desc()).limit(1))
+            if m is not None:
+                return {"group_id": m.tx_group_id, "date": m.tx_date.isoformat(), "amount": m.amount,
+                        "counterparty": m.counterparty, "description": m.description, "reasons": m.reasons, "state": state}
+    p = (doc.suggestions or {}).get("_payment")
+    if p:
+        return {**p, "state": "prefilled"}
+    return None
+
+
+def links(settings, group_id: str | None, day) -> list[tuple[str, str]]:
+    """Links zur Kontrolle einer Buchung: direkt in Firefly und (optional) im Dashboard am Buchungstag."""
+    result = []
+    if settings.firefly_url and group_id:
+        result.append(("Firefly", f"{settings.firefly_url.rstrip('/')}/transactions/show/{group_id}"))
+    if settings.firefly_dashboard_url and day:
+        iso = day if isinstance(day, str) else day.isoformat()
+        result.append(("Dashboard", f"{settings.firefly_dashboard_url.rstrip('/')}/#/buchungen?von={iso}&bis={iso}"))
+    return result
+
+
 def suggestions(session: Session) -> list[PaymentMatch]:
     return list(session.scalars(
         select(PaymentMatch).join(Invoice)

@@ -216,3 +216,25 @@ def test_accepted_payment_marks_firefly_source(client):
         src = s.get(Document, 1).field_sources["paid_on"]
         assert src["source"] == "firefly" and src["confirmed"] is True
     assert "Firefly ✓" in client.get("/invoices?status=paid").text
+
+
+def test_links_to_firefly_and_dashboard(client, settings):
+    settings.firefly_dashboard_url = "http://dash.test/"
+    client.post("/payments/run")
+    page = client.get("/invoices").text
+    assert f'href="{FIREFLY}/transactions/show/500"' in page
+    assert 'href="http://dash.test/#/buchungen?von=2026-10-10&amp;bis=2026-10-10"' in page
+    assert "Passende Firefly-Buchung vom 10.10.2026" in client.get("/documents/1").text
+    with session_scope() as s:
+        match_id = s.query(PaymentMatch).one().id
+    client.post(f"/payments/{match_id}/accept")
+    assert "Bezahlt laut Firefly-Buchung vom 10.10.2026" in client.get("/documents/1").text
+    paid = client.get("/invoices?status=paid").text
+    assert "Firefly ✓" in paid and "http://dash.test/#/buchungen?von=2026-10-10" in paid
+
+
+def test_inbox_prefill_links(review_client, settings):
+    settings.firefly_dashboard_url = "http://dash.test"
+    page = review_client.get("/documents/1").text
+    assert "In Firefly gefunden:" in page and f"{FIREFLY}/transactions/show/" in page
+    assert "http://dash.test/#/buchungen?von=2026-10-10&amp;bis=2026-10-10" in page
