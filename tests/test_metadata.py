@@ -226,7 +226,7 @@ def test_changes_page_shows_dates(client):
         assert s.get(Document, 2).field_sources["proposal:comment"]["source"] == "manual"
     page = client.get("/paperless-changes").text
     assert "Zuletzt erstellter Metadaten-Vorschlag: <strong>20.10.2026 10:15</strong>" in page  # Europe/Berlin
-    assert "Vorschlag 20.10.2026 10:15" in page and "Jüngster offener Vorschlag" in page and ">Stand<" in page
+    assert 'Vorschlag <span class="nowrap">20.10.2026 10:15</span>' in page and "Jüngster offener Vorschlag" in page and ">Stand<" in page
 
 
 def test_meta_status_and_backfill(client):
