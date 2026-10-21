@@ -209,7 +209,7 @@ def test_document_page_comment_and_links(client, mock_api):
     assert {"field": 42, "value": "Rückruf am Montag"} in bodies[0]["custom_fields"]
     assert {"field": 43, "value": [2]} in bodies[0]["custom_fields"]  # übrige Felder bleiben erhalten
     assert bodies[1]["custom_fields"] == [{"field": 43, "value": [1, 2]}]
-    assert "Keine Vorschläge für Paperless" in client.get("/paperless-changes").text
+    assert "Keine Vorschläge für Custom Fields" in client.get("/paperless-changes").text
 
 
 def test_summary_button_queues(client):

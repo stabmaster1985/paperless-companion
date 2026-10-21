@@ -199,6 +199,35 @@ FIELD_SUMMARY=Zusammenfassung KI
   *Text* fassen in Paperless nur 128 Zeichen, die Zusammenfassung wird passend gekürzt.
   Sie wird im Companion gespeichert und unter „Für Paperless“ zur Übernahme angeboten.
 
+### Metadaten-Vorschläge: Titel, Tags, Korrespondent, Dokumenttyp
+
+Wenn ein Dokument ohnehin analysiert wird, schlägt die App auch Paperless-Metadaten vor.
+Gespeichert wird nur im Companion. In Paperless geschrieben wird erst, wenn du einen
+Vorschlag auswählst und übernimmst.
+
+- **Verlauf** (ohne AI, kostet nichts): Tragen mindestens die Hälfte der übrigen Dokumente
+  desselben Korrespondenten einen Tag (bzw. 60 % denselben Dokumenttyp), wird er vorgeschlagen.
+  So lernt die App aus dem, was du in Paperless pflegst und übernimmst.
+- **AI**: Das lokale Modell liest den Dokumentanfang und wählt Tags, Korrespondent und
+  Dokumenttyp **nur aus deinen vorhandenen** Listen (per JSON-Schema erzwungen). Neue Tags
+  (höchstens zwei) werden als „neu anlegen“ markiert und nur angelegt, wenn du sie auswählst.
+  Dazu kommt ein sprechender Titel wie „Stromrechnung Oktober 2026“.
+- **Abgleich**: Unter **Für Paperless → Titel, Tags …** stehen nur die nützlichen
+  Unterschiede: fehlende Tags, ein Titel nur, wenn der jetzige nichtssagend ist
+  („Scan_0012“, Dateiname), Korrespondent/Typ nur, wenn sie fehlen. Alle Abweichungen
+  (auch bei gepflegten Werten) zeigt die Dokumentseite im Abschnitt „Paperless-Metadaten“,
+  wo du den Titel vor dem Übernehmen noch ändern kannst.
+- **Lernen aus Ablehnungen**: Verworfene Tags schlägt die App für denselben Korrespondenten
+  nicht mehr vor, weder aus dem Verlauf noch per AI.
+- **Archiv-Check**: Die Seite „Für Paperless“ zählt Dokumente ohne Tags, mit nichtssagendem
+  Titel oder ohne Korrespondent. Über den Filter „Hinweis“ in der Dokumentliste wählst du sie
+  gezielt aus und klickst „Metadaten für ausgewählte vorschlagen“.
+
+`META_MODE=new` (Standard) erzeugt Vorschläge automatisch für neu analysierte Dokumente,
+`manual` nur auf Anforderung, `off` schaltet die Funktion ab. Die Vorschläge laufen in derselben
+Warteschlange wie die Analysen (Pause, `LLM_ACTIVE_HOURS`); mit qwen2.5:3b auf der CPU dauert
+einer etwa eine Minute. Ohne Ollama gibt es nur Vorschläge aus dem Verlauf.
+
 ### Zahlungsabgleich mit Firefly III
 
 `FIREFLY_URL` und `FIREFLY_TOKEN` setzen. Das Token ist ein persönliches Zugangstoken aus

@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import cases, deadlines, events, fields, highlight, ics, notify, payments, pipeline, reminders, retention, selection, tax
+from app import cases, deadlines, events, fields, highlight, ics, metadata, notify, payments, pipeline, reminders, retention, selection, tax
 from app.config import Settings, get_settings
 from app.db import get_session, init_db, session_scope
 from app.models import Case, CaseDocument, CaseEntry, Contract, Document, Invoice, KeyValue, RetentionLog, RetentionRule, Warranty
@@ -63,7 +63,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     templates = Jinja2Templates(directory=BASE / "templates")
     templates.env.filters["d"] = events.fmt_date
     templates.env.filters["eur"] = events.fmt_money
-    templates.env.globals.update(KINDS=pipeline.KINDS, link_base=settings.paperless_link_base, auth=bool(settings.app_password))
+    templates.env.globals.update(HINTS=metadata.HINTS, META_SOURCES=metadata.SOURCES, KINDS=pipeline.KINDS, link_base=settings.paperless_link_base, auth=bool(settings.app_password))
 
     @app.middleware("http")
     async def require_login(request: Request, call_next):
@@ -82,7 +82,8 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     def render(request: Request, name: str, **ctx) -> HTMLResponse:
         with session_scope() as s:
             inbox_count = s.scalar(select(func.count()).select_from(Document).where(Document.review_state == "pending"))
-            outgoing = s.scalar(select(func.count()).select_from(Document).where(Document.writeback_pending.is_(True)))
+            outgoing = s.scalar(select(func.count()).select_from(Document).where(
+                Document.writeback_pending.is_(True) | Document.meta_pending.is_(True)))
         return templates.TemplateResponse(request, name, {
             "inbox_count": inbox_count, "outgoing_count": outgoing, "today": today(),
             "update_available": app.state.version.update_available, **ctx,
@@ -144,7 +145,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         docs = flt.apply(session)
         return render(
             request, "documents.html", docs=docs[:500], total=len(docs), flt=flt, msg=msg,
-            facets=selection.facets(session), METHODS=pipeline.METHODS, method_of=pipeline.analysis_method,
+            facets=selection.facets(session), settings_meta_mode=settings.meta_mode, METHODS=pipeline.METHODS, method_of=pipeline.analysis_method,
         )
 
     @app.post("/documents/analyze")
@@ -171,6 +172,70 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             msg += " (bereits bestätigte übersprungen)"
         query = flt.query_string()
         return RedirectResponse(f"/documents?{query}{'&' if query else ''}msg={quote(msg)}", status_code=303)
+
+    @app.post("/documents/suggest-meta")
+    async def documents_suggest_meta(request: Request, session: Session = Depends(get_session)):
+        """Für ausgewählte oder alle gefilterten Dokumente Metadaten-Vorschläge anfordern."""
+        form = await request.form()
+        flt = selection.Filter.from_mapping(form)
+        if form.get("scope") == "selected":
+            ids = [int(i) for i in form.getlist("doc") if str(i).isdigit()]
+            docs = [d for d in (session.get(Document, i) for i in ids) if d is not None]
+        else:
+            docs = flt.apply(session)
+        count = 0
+        for doc in docs:
+            if doc.meta_state not in ("queued", "running"):
+                doc.meta_state = "queued"
+                count += 1
+        request_worker(app)
+        msg = f"{count} Dokumente für Metadaten-Vorschläge eingereiht"
+        query = flt.query_string()
+        return RedirectResponse(f"/documents?{query}{'&' if query else ''}msg={quote(msg)}", status_code=303)
+
+    @app.post("/documents/{doc_id}/meta")
+    async def document_meta(doc_id: int, request: Request, session: Session = Depends(get_session)):
+        doc = session.get(Document, doc_id)
+        if doc is None:
+            raise HTTPException(404)
+        form = await request.form()
+        action, keys = form.get("action"), [str(k) for k in form.getlist("item")]
+        if action == "suggest":
+            doc.meta_state = "queued"
+            request_worker(app)
+            msg = "Metadaten-Vorschlag angefordert"
+        elif action == "dismiss":
+            msg = f"{metadata.dismiss(doc, keys)} Vorschläge verworfen"
+        elif action == "approve":
+            msg = apply_meta(session, {doc_id: keys}, {doc_id: str(form.get("title") or "")})
+        else:
+            raise HTTPException(400)
+        return RedirectResponse(f"/documents/{doc_id}?msg={quote(msg)}#metadata", status_code=303)
+
+    def apply_meta(session: Session, selected: dict[int, list[str]], titles: dict[int, str] | None = None) -> str:
+        """Ausgewählte Metadaten-Vorschläge nach Paperless schreiben (nur nach ausdrücklicher Auswahl)."""
+        done, errors = 0, []
+        paperless = make_paperless(settings, timeout=30)
+        try:
+            for doc_id, keys in selected.items():
+                doc = session.get(Document, doc_id)
+                if doc is None or not keys:
+                    continue
+                old_type = doc.document_type
+                try:
+                    written = metadata.approve(paperless, doc, keys, (titles or {}).get(doc_id))
+                except PaperlessError as exc:
+                    errors.append(f"#{doc_id}: {exc}")
+                    continue
+                done += len(written)
+                # Neuer Dokumenttyp kann die Art ändern -> unbestätigte Analyse neu einreihen
+                if doc.document_type != old_type and doc.extraction_state == "done" \
+                        and doc.review_state != "confirmed" and doc.kind_source not in ("manual", "fields"):
+                    doc.extraction_state = "queued"
+                    request_worker(app)
+        finally:
+            paperless.close()
+        return f"{done} Änderungen in Paperless übernommen" + (f". Probleme: {'; '.join(errors[:5])}" if errors else "")
 
     @app.get("/documents/{doc_id}", response_class=HTMLResponse)
     def document_detail(request: Request, doc_id: int, msg: str = "", session: Session = Depends(get_session)):
@@ -200,6 +265,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             related=[(i, session.get(Document, i)) for i in sorted(pipeline.related_ids(session, doc_id))],
             pf=doc.paperless_fields or {}, settings=settings, msg=msg,
             text_html=text_html, text_found=text_found, text_error=text_error, HL_LABELS=highlight.LABELS,
+            meta_items=metadata.pending(doc, everything=True), META_SOURCES=metadata.SOURCES,
             firefly_base=settings.firefly_url.rstrip("/") if settings.firefly_enabled else "",
             pending_left=session.scalar(
                 select(func.count()).select_from(Document).where(Document.review_state == "pending", Document.id != doc_id)
@@ -856,9 +922,35 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     def paperless_changes(request: Request, msg: str = "", session: Session = Depends(get_session)):
         rows = pipeline.documents_with_changes(session, settings, today())
         names = fields.role_names(settings)
+        meta_rows = []
+        for doc in session.scalars(select(Document).where(Document.meta_pending.is_(True)).order_by(Document.id)):
+            if items := metadata.pending(doc):
+                meta_rows.append((doc, items))
+            else:
+                doc.meta_pending = False
         return render(
-            request, "paperless_changes.html", rows=rows, names=names, msg=msg, create_fields=settings.writeback_create_fields
+            request, "paperless_changes.html", rows=rows, names=names, msg=msg, create_fields=settings.writeback_create_fields,
+            meta_rows=meta_rows, META_SOURCES=metadata.SOURCES, hints=metadata.archive_hints(session), HINTS=metadata.HINTS,
+            meta_queued=session.scalar(select(func.count()).select_from(Document).where(Document.meta_state.in_(("queued", "running")))),
+            settings=settings,
         )
+
+    @app.post("/paperless-changes/meta")
+    async def paperless_changes_meta(request: Request, session: Session = Depends(get_session)):
+        form = await request.form()
+        selected: dict[int, list[str]] = {}
+        for item in form.getlist("item"):
+            doc_id, _, key = str(item).partition(":")
+            if doc_id.isdigit() and key:
+                selected.setdefault(int(doc_id), []).append(key)
+        action = form.get("action")
+        if not selected or action not in ("approve", "dismiss"):
+            msg = "Nichts ausgewählt"
+        elif action == "dismiss":
+            msg = f"{sum(metadata.dismiss(session.get(Document, i), keys) for i, keys in selected.items() if session.get(Document, i))} Vorschläge verworfen"
+        else:
+            msg = apply_meta(session, selected)
+        return RedirectResponse(f"/paperless-changes?msg={quote(msg)}#metadata", status_code=303)
 
     @app.post("/paperless-changes")
     async def paperless_changes_apply(request: Request, session: Session = Depends(get_session)):

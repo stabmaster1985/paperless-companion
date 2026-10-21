@@ -482,6 +482,8 @@ def process_document(
     if settings.summary_mode == "new" and settings.llm_enabled and doc.summary_state is None \
             and not (doc.paperless_fields or {}).get("summary"):
         doc.summary_state = "queued"
+    if settings.meta_mode == "new" and doc.meta_state is None:
+        doc.meta_state = "queued"
 
     if kind == "other":
         doc.review_state = "none"
@@ -810,6 +812,9 @@ def clear_queue(session: Session) -> int:
     for doc in session.scalars(select(Document).where(Document.summary_state == "queued")):
         doc.summary_state = None
         count += 1
+    for doc in session.scalars(select(Document).where(Document.meta_state == "queued")):
+        doc.meta_state = "done" if doc.meta_suggestion else None
+        count += 1
     return count
 
 
@@ -823,6 +828,12 @@ def requeue_llm_errors(session: Session, include_exhausted: bool = False) -> int
 def next_queued(session: Session) -> Document | None:
     return session.scalars(
         select(Document).where(Document.extraction_state == "queued").order_by(Document.updated_at).limit(1)
+    ).first()
+
+
+def next_meta(session: Session) -> Document | None:
+    return session.scalars(
+        select(Document).where(Document.meta_state == "queued").order_by(Document.updated_at).limit(1)
     ).first()
 
 

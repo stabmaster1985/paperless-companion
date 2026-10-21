@@ -35,6 +35,9 @@
       <select name="state"><option value="">alle</option>
         {% for key, text in [('skipped', 'nur Index (nicht analysiert)'), ('queued', 'in Warteschlange'), ('running', 'läuft'), ('done', 'analysiert'), ('error', 'Fehler')] %}
         <option value="{{ key }}" {{ 'selected' if flt.state == key }}>{{ text }}</option>{% endfor %}</select></label>
+    <label class="field"><span>Hinweis</span>
+      <select name="hint"><option value="">alle</option>
+        {% for key, text in HINTS.items() %}<option value="{{ key }}" {{ 'selected' if flt.hint == key }}>{{ text }}</option>{% endfor %}</select></label>
     <label class="field"><span>Methode</span>
       <select name="method"><option value="">alle</option>
         {% for key, text in METHODS.items() %}<option value="{{ key }}" {{ 'selected' if flt.method == key }}>{{ text }}</option>{% endfor %}</select></label>
@@ -47,7 +50,7 @@
 
 {% if docs %}
 <form method="post" action="/documents/analyze" id="docs-form">
-  {% for key in ['q', 'kind', 'state', 'method', 'tag', 'doctype', 'correspondent', 'date_from', 'date_to', 'ids', 'view'] %}
+  {% for key in ['q', 'kind', 'state', 'method', 'tag', 'doctype', 'correspondent', 'date_from', 'date_to', 'ids', 'hint', 'view'] %}
     {% if flt[key] %}<input type="hidden" name="{{ key }}" value="{{ flt[key] }}">{% endif %}
   {% endfor %}
   <div class="actions bulk">
@@ -55,6 +58,11 @@
     <button name="scope" value="selected" class="small">Ausgewählte analysieren</button>
     <button name="scope" value="filter" class="small" onclick="return confirm('Alle {{ total }} gefilterten Dokumente analysieren? Mit AI dauert das auf der CPU je Dokument bis zu einige Minuten.')">Alle {{ total }} gefilterten analysieren</button>
     <label class="check small-check"><input type="checkbox" name="include_confirmed" value="1"> auch bereits bestätigte</label>
+    {% if settings_meta_mode != 'off' %}
+    <span class="sep" aria-hidden="true">|</span>
+    <button name="scope" value="selected" formaction="/documents/suggest-meta" class="small">Metadaten für ausgewählte vorschlagen</button>
+    <button name="scope" value="filter" formaction="/documents/suggest-meta" class="small" onclick="return confirm('Für alle {{ total }} gefilterten Dokumente Titel und Tags vorschlagen lassen? Mit AI dauert das auf der CPU je Dokument etwa eine Minute.')">… für alle {{ total }} gefilterten</button>
+    {% endif %}
   </div>
   <table class="list doc-list">
     <colgroup><col class="col-check"><col><col class="col-state"></colgroup>
@@ -71,6 +79,8 @@
           <a href="/documents/{{ doc.id }}">{{ doc.title or ('#' ~ doc.id) }}</a> {{ doclink(doc.id) }}
           <div class="meta">#{{ doc.id }}{% if doc.correspondent %} · {{ doc.correspondent }}{% endif %}{% if doc.created %} · {{ doc.created|d }}{% endif %}{% if doc.document_type %} · {{ doc.document_type }}{% endif %}</div>
           {% if doc.tags %}<div class="tags">{% for t in doc.tags %}<span class="tag">{{ t }}</span>{% endfor %}</div>{% endif %}
+          {% if doc.meta_pending %}<div class="meta"><a href="/documents/{{ doc.id }}#metadata" class="badge src-llm">Metadaten-Vorschlag</a></div>
+          {% elif doc.meta_state in ('queued', 'running') %}<div class="meta"><span class="tag">Metadaten {{ 'werden erstellt' if doc.meta_state == 'running' else 'warten' }}</span></div>{% endif %}
         </td>
         <td>
           <div class="state-line">

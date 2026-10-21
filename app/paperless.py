@@ -119,6 +119,13 @@ class PaperlessClient:
         except httpx.HTTPError as exc:
             raise PaperlessError(f"Tag setzen: {exc}") from exc
 
+    def update_document(self, doc_id: int, data: dict) -> None:
+        """Einzelne Metadaten setzen (title, correspondent, document_type, tags als IDs)."""
+        try:
+            self._client.patch(f"/api/documents/{doc_id}/", json=data).raise_for_status()
+        except httpx.HTTPError as exc:
+            raise PaperlessError(f"Dokument {doc_id} aktualisieren: {exc}") from exc
+
     def delete_document(self, doc_id: int) -> None:
         """Löscht ein Dokument (landet in Paperless im Papierkorb)."""
         try:

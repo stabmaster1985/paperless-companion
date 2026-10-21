@@ -35,6 +35,13 @@ class Document(Base):
     proposed_fields: Mapped[dict | None] = mapped_column(JSON)
     # Abgelehnte Vorschläge (Rolle -> Wert), damit sie nicht erneut erscheinen
     dismissed_fields: Mapped[dict | None] = mapped_column(JSON)
+    # Metadaten-Vorschlag (Titel, Tags, Korrespondent, Dokumenttyp), siehe app/metadata.py
+    meta_suggestion: Mapped[dict | None] = mapped_column(JSON)
+    # None | queued | running | done | error
+    meta_state: Mapped[str | None] = mapped_column(String)
+    # Verworfene Metadaten-Vorschläge ("tag:Strom" / "title" -> Wert)
+    meta_dismissed: Mapped[dict | None] = mapped_column(JSON)
+    meta_pending: Mapped[bool] = mapped_column(default=False, server_default="0")
     page_count: Mapped[int | None] = mapped_column(Integer)
     original_file_name: Mapped[str | None] = mapped_column(String)
 

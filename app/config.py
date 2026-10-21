@@ -71,6 +71,9 @@ class Settings(BaseSettings):
 
     # KI-Zusammenfassung: manual (nur per Knopf) | new (neue Dokumente automatisch) | off
     summary_mode: Literal["off", "manual", "new"] = "manual"
+    # Metadaten-Vorschläge (Titel, Tags, Korrespondent, Dokumenttyp): off | manual | new (= für jedes neu analysierte Dokument)
+    meta_mode: Literal["off", "manual", "new"] = "new"
+    meta_max_input_chars: int = 2500
     summary_max_input_chars: int = 3500
 
     # Steuer-Export: Tags (auch „Steuer: Kategorie“) und Dokumenttypen, die steuerrelevant sind

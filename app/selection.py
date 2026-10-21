@@ -44,6 +44,8 @@ class Filter:
     date_from: str = ""
     date_to: str = ""
     ids: str = ""
+    # Hinweis aus app/metadata.HINTS (z.B. untagged, generic_title)
+    hint: str = ""
     # analyzed (Standard: analysiert, in Arbeit oder aus Paperless-Feldern) | index (nur Index) | all
     view: str = ""
     errors: list[str] = field(default_factory=list)
@@ -97,6 +99,10 @@ class Filter:
         if self.tag:
             wanted = self.tag.lower()
             docs = [d for d in docs if wanted in {t.lower() for t in d.tags or []}]
+        if self.hint:
+            from app.metadata import matches_hint
+
+            docs = [d for d in docs if matches_hint(d, self.hint)]
         if self.method:
             docs = [d for d in docs if analysis_method(d) == self.method]
         return docs

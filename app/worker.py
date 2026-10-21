@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select, update
 
-from app import payments, pipeline, reminders
+from app import metadata, payments, pipeline, reminders
 from app.config import Settings
 from app.db import session_scope
 from app.models import Document
@@ -88,6 +88,7 @@ class Worker:
             # Nach Neustart abgebrochene Analysen erneut einreihen
             session.execute(update(Document).where(Document.extraction_state == "running").values(extraction_state="queued"))
             session.execute(update(Document).where(Document.summary_state == "running").values(summary_state="queued"))
+            session.execute(update(Document).where(Document.meta_state == "running").values(meta_state="queued"))
         ai = "aus" if not self.settings.llm_enabled else (
             f"Modell {self.settings.ollama_model}" + (f", nur {self.settings.llm_active_hours} Uhr" if self.settings.llm_active_hours else "")
         )
@@ -119,7 +120,8 @@ class Worker:
                 if self.version is not None:
                     self.version.refresh()  # höchstens stündlich bei GitHub
                 self._reminders()
-                worked = self._process_next(paperless, ollama) or self._summarize_next(paperless, ollama)
+                worked = (self._process_next(paperless, ollama) or self._summarize_next(paperless, ollama)
+                          or self._suggest_meta_next(paperless, ollama))
             except Exception as exc:  # noqa: BLE001 - Thread darf nicht sterben
                 log.exception("Fehler im Hintergrundprozess")
                 self.last_error = str(exc)
@@ -187,6 +189,9 @@ class Worker:
         self._last_tidy = time.monotonic()
         with session_scope() as session:
             pipeline.documents_with_changes(session, self.settings, datetime.now(self.tz).date())
+            # In Paperless inzwischen gepflegte Metadaten erledigen offene Vorschläge
+            for doc in session.scalars(select(Document).where(Document.meta_pending.is_(True))):
+                metadata.refresh_pending(doc)
 
     def _payments(self) -> None:
         """Stündlich offene Rechnungen mit Firefly-III-Buchungen abgleichen."""
@@ -240,6 +245,40 @@ class Worker:
                 doc = session.get(Document, doc_id)
                 doc.summary_state = "error"
                 doc.extraction_error = f"Zusammenfassung: {str(exc)[:500]}"
+        finally:
+            self.current_document = self.current_task = self.current_since = None
+        return True
+
+    def _suggest_meta_next(self, paperless: PaperlessClient, ollama: OllamaClient | None) -> bool:
+        """Einen Metadaten-Vorschlag erzeugen – nach Analysen und Zusammenfassungen.
+
+        Ohne AI nur aus dem Verlauf; mit AI nur im AI-Zeitfenster.
+        """
+        if self.paused() or (ollama is not None and not self.llm_allowed_now()):
+            return False
+        with session_scope() as session:
+            doc = pipeline.next_meta(session)
+            if doc is None:
+                return False
+            doc.meta_state = "running"
+            doc_id, title = doc.id, doc.title
+        self.current_document, self.current_task, self.current_since = doc_id, "Metadaten-Vorschlag", time.monotonic()
+        try:
+            with session_scope() as session:
+                info = metadata.suggest(session, session.get(Document, doc_id), paperless, ollama, self.settings)
+            if info["ai"]:
+                self._count("ai_calls")
+                self._count("ai_seconds", info["ai_seconds"])
+            how = f"AI {info['ai_seconds']:.1f} s" if info["ai"] else "aus dem Verlauf"
+            found = ", ".join(info["items"]) if info["items"] else "nichts Neues für Paperless"
+            self.note(f"„{title}“: Metadaten-Vorschlag ({how}) – {found}", document_id=doc_id)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Metadaten-Vorschlag für Dokument %s fehlgeschlagen: %s", doc_id, exc)
+            self.note(f"„{title}“: Metadaten-Vorschlag fehlgeschlagen – {exc}", "error", doc_id)
+            with session_scope() as session:
+                doc = session.get(Document, doc_id)
+                doc.meta_state = "error"
+                doc.extraction_error = f"Metadaten: {str(exc)[:500]}"
         finally:
             self.current_document = self.current_task = self.current_since = None
         return True

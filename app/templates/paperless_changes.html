@@ -10,10 +10,11 @@
 {%- endmacro %}
 {% block content %}
 <h1>Für Paperless</h1>
-<p class="muted">Der Companion liest Paperless nur. Hier stehen Werte, die er für deine Custom Fields vorschlägt.
+<p class="muted">Der Companion liest Paperless nur. Hier stehen Werte, die er für deine Custom Fields und Metadaten vorschlägt.
   Nichts davon wird geschrieben, bevor du es auswählst und übernimmst. Verworfene Vorschläge erscheinen erst wieder, wenn sich der Wert ändert.</p>
 {% if msg %}<div class="notice">{{ msg }}</div>{% endif %}
 
+<h2>Custom Fields</h2>
 {% if rows %}
 <form method="post" action="/paperless-changes" id="changes-form">
   <div class="table-wrap"><table class="list">
@@ -42,6 +43,53 @@
   <p class="hint">{% if create_fields %}Fehlende Felder (z.B. „{{ names.get('amount', 'Betrag') }}“) werden beim Übernehmen in Paperless angelegt. {% endif %}Andere Custom Fields des Dokuments bleiben unverändert.</p>
 </form>
 {% else %}
-<p class="empty">Keine Vorschläge für Paperless.</p>
+<p class="empty">Keine Vorschläge für Custom Fields.</p>
 {% endif %}
+
+<h2 id="metadata">Titel, Tags, Korrespondent, Dokumenttyp</h2>
+<p class="muted">Vorschläge aus dem lokalen Modell (<span class="badge src-llm">AI</span>) und aus deinen übrigen Dokumenten desselben Absenders
+  (<span class="badge src-history">Verlauf</span>). Hier stehen fehlende Tags, Titel nur, wenn der jetzige nichtssagend ist
+  (z.B. „Scan_0012“), und Korrespondent/Dokumenttyp nur, wenn sie in Paperless fehlen. Abweichungen bei gepflegten Werten siehst du auf der Dokumentseite.
+  {% if meta_queued %}<br><span class="tag">{{ meta_queued }} Vorschläge in Arbeit</span>{% endif %}</p>
+{% if meta_rows %}
+<form method="post" action="/paperless-changes/meta" id="meta-form">
+  <div class="table-wrap"><table class="list">
+    <thead><tr>
+      <th><input type="checkbox" aria-label="Alle auswählen" onclick="document.querySelectorAll('#meta-form input[name=item]').forEach(c => c.checked = this.checked)"></th>
+      <th>Dokument</th><th>Was</th><th>Paperless jetzt</th><th>Vorschlag</th>
+    </tr></thead>
+    <tbody>
+    {% for doc, items in meta_rows %}
+      {% for it in items %}
+      <tr>
+        <td><input type="checkbox" name="item" value="{{ doc.id }}:{{ it.key }}"></td>
+        <td>{% if loop.first %}<a href="/documents/{{ doc.id }}#metadata">{{ doc.title or ('#' ~ doc.id) }}</a> {{ doclink(doc.id) }}<br><small>{{ doc.correspondent or '' }}</small>{% endif %}</td>
+        <td>{{ it.label }}{% if it.new_tag %} <small class="soon">neu anlegen</small>{% endif %}</td>
+        <td>{{ it.current or '' }}{% if not it.current %}<span class="muted">{{ 'fehlt' if it.key.startswith('tag:') else 'leer' }}</span>{% endif %}</td>
+        <td><strong>{{ it.new }}</strong> <span class="badge src-{{ it.source }}">{{ META_SOURCES.get(it.source, it.source) }}</span></td>
+      </tr>
+      {% endfor %}
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <div class="actions">
+    <button name="action" value="approve" class="primary" onclick="return confirm('Ausgewählte Metadaten jetzt in Paperless schreiben?')">Ausgewählte in Paperless übernehmen</button>
+    <button name="action" value="dismiss">Ausgewählte verwerfen</button>
+  </div>
+  <p class="hint">Tags werden nur ergänzt, vorhandene bleiben erhalten. Neue Tags werden nur angelegt, wenn du sie auswählst. Verworfene Tags schlägt die App für denselben Absender nicht mehr vor.</p>
+</form>
+{% else %}
+<p class="empty">Keine offenen Metadaten-Vorschläge.</p>
+{% endif %}
+
+<section class="card">
+  <h2>Archiv-Check</h2>
+  <p class="muted">Wo sich ein Vorschlag lohnt. Vorschläge erzeugst du in der Dokumentliste für ausgewählte oder gefilterte Dokumente
+    {%- if settings.meta_mode == 'new' %}; neu analysierte Dokumente bekommen automatisch einen{% endif %}.</p>
+  <ul class="plain">
+    {% for key in ('untagged', 'generic_title', 'no_correspondent') %}
+    <li><strong>{{ hints[key] }}</strong> Dokumente {{ HINTS[key] }}{% if hints[key] %} – <a href="/documents?view=all&amp;hint={{ key }}">anzeigen und auswählen</a>{% endif %}</li>
+    {% endfor %}
+  </ul>
+</section>
 {% endblock %}

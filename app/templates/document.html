@@ -161,6 +161,52 @@ document.querySelectorAll('#viewer .tab[data-tab]').forEach((tab) => tab.addEven
 </form>
 {% endif %}
 
+<section class="card" id="metadata">
+  <h2>Paperless-Metadaten</h2>
+  {% set ms = doc.meta_suggestion or {} %}
+  {% if doc.meta_state in ('queued', 'running') %}
+    <p><span class="tag">{{ 'Vorschlag wird erstellt' if doc.meta_state == 'running' else 'Vorschlag in Warteschlange' }}</span></p>
+  {% elif doc.meta_state == 'error' %}
+    <p class="bad">{{ doc.extraction_error }}</p>
+  {% endif %}
+  {% if meta_items %}
+  <form method="post" action="/documents/{{ doc.id }}/meta">
+    <div class="table-wrap"><table class="list">
+      <thead><tr><th></th><th>Was</th><th>Paperless jetzt</th><th>Vorschlag</th></tr></thead>
+      <tbody>
+      {% for it in meta_items %}
+        <tr>
+          <td><input type="checkbox" name="item" value="{{ it.key }}" aria-label="{{ it.label }} übernehmen" {{ 'checked' if it.useful is not defined or it.useful }}></td>
+          <td>{{ it.label }}{% if it.new_tag %} <small class="soon">neu anlegen</small>{% endif %}</td>
+          <td>{% if it.current %}{{ it.current }}{% elif it.key.startswith('tag:') %}<span class="muted">fehlt</span>{% else %}<span class="muted">leer</span>{% endif %}</td>
+          <td>
+            {% if it.key == 'title' %}<input name="title" value="{{ it.new }}" maxlength="128" aria-label="Neuer Titel">
+            {% else %}<strong>{{ it.new }}</strong>{% endif %}
+            <span class="badge src-{{ it.source }}">{{ META_SOURCES.get(it.source, it.source) }}</span>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table></div>
+    <div class="actions">
+      <button name="action" value="approve" class="primary small" onclick="return confirm('Ausgewählte Metadaten jetzt in Paperless schreiben?')">Ausgewählte in Paperless übernehmen</button>
+      <button name="action" value="dismiss" class="small">Ausgewählte verwerfen</button>
+    </div>
+    <p class="hint">Tags werden nur ergänzt, vorhandene bleiben. Neue Tags werden nur angelegt, wenn du sie auswählst. Verworfene Tags schlägt die App für {{ doc.correspondent or 'diesen Absender' }} nicht mehr vor.</p>
+  </form>
+  {% elif ms %}
+    <p class="muted">Keine offenen Vorschläge – Paperless passt zum Vorschlag oder du hast ihn bereits übernommen bzw. verworfen.</p>
+  {% else %}
+    <p class="muted">Noch kein Vorschlag für Titel, Tags, Korrespondent und Dokumenttyp.</p>
+  {% endif %}
+  {% if ms.at %}<p class="muted"><small>Vorschlag vom {{ ms.at[8:10] }}.{{ ms.at[5:7] }}.{{ ms.at[:4] }} {{ ms.at[11:16] }} (UTC){% if ms.model %} · Modell {{ ms.model }}{% else %} · nur aus dem Verlauf{% endif %}</small></p>{% endif %}
+  {% if settings.meta_mode != 'off' and doc.meta_state not in ('queued', 'running') %}
+  <form method="post" action="/documents/{{ doc.id }}/meta" class="inline">
+    <button name="action" value="suggest" class="small">{{ 'Neu vorschlagen' if ms else 'Vorschlag erstellen' }}</button>
+  </form>
+  {% endif %}
+</section>
+
 <section class="card">
   <h2>Notizen &amp; Zusammenhänge</h2>
   <div class="stack">

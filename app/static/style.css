@@ -248,6 +248,8 @@ img.thumb { width: 56px; height: 72px; object-fit: cover; object-position: top; 
 .badge.src-firefly { background: #efe4ff; color: #5b3a9e; }
 .badge.src-manual { background: var(--warn-bg); color: var(--warn); }
 .badge.src-default { background: var(--bg); color: var(--muted); }
+.badge.src-history { background: var(--bg); color: var(--text); border: 1px dashed var(--border); }
+.actions .sep { color: var(--border); }
 .badge.low { outline: 1px dashed var(--warn); }
 .legend-sources { font-size: .8rem; margin-top: 0; }
 .legend-sources .badge { margin-left: 0; }
