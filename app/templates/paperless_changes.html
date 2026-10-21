@@ -15,12 +15,13 @@
 {% if msg %}<div class="notice">{{ msg }}</div>{% endif %}
 
 <h2>Custom Fields</h2>
+<p class="muted">{% if last.fields %}Jüngster offener Vorschlag: <strong>{{ last.fields|ts }}</strong> · {% endif %}letzte Analyse eines Dokuments: {{ last.analysis|ts }}</p>
 {% if rows %}
 <form method="post" action="/paperless-changes" id="changes-form">
   <div class="table-wrap"><table class="list">
     <thead><tr>
       <th><input type="checkbox" aria-label="Alle auswählen" onclick="document.querySelectorAll('#changes-form input[name=change]').forEach(c => c.checked = this.checked)"></th>
-      <th>Dokument</th><th>Feld</th><th>Paperless jetzt</th><th>Vorschlag</th>
+      <th>Dokument</th><th>Feld</th><th>Paperless jetzt</th><th>Vorschlag</th><th class="hide-sm">Stand</th>
     </tr></thead>
     <tbody>
     {% for doc, changes in rows %}
@@ -31,6 +32,9 @@
         <td>{{ names.get(role, role) }}</td>
         <td>{{ show(role, current) }}</td>
         <td><strong>{{ show(role, new) }}</strong></td>
+        {% set info = change_info(doc, role) %}
+        <td class="hide-sm nowrap"><small>{{ info.at|ts }}{% if info.source %}<br><span class="muted">{{ SOURCE_LABELS.get(info.source, info.source) }}</span>{% endif %}
+          {%- if doc.analyzed_at and info.at and info.at[:16] != doc.analyzed_at.isoformat()[:16] %}<br><span class="muted">analysiert {{ doc.analyzed_at|ts }}</span>{% endif %}</small></td>
       </tr>
       {% endfor %}
     {% endfor %}
@@ -50,7 +54,7 @@
   <div class="table-wrap"><table class="list">
     <thead><tr>
       <th><input type="checkbox" aria-label="Alle auswählen" onclick="document.querySelectorAll('#{{ form_id }} input[name=item]').forEach(c => c.checked = this.checked)"></th>
-      <th>Dokument</th><th>Was</th><th>Paperless jetzt</th><th>{{ 'Vorgemerkt' if form_id == 'meta-accepted' else 'Vorschlag' }}</th>
+      <th>Dokument</th><th>Was</th><th>Paperless jetzt</th><th>{{ 'Vorgemerkt' if form_id == 'meta-accepted' else 'Vorschlag' }}</th><th class="hide-sm">Stand</th>
     </tr></thead>
     <tbody>
     {% for doc, items in rows %}
@@ -61,6 +65,8 @@
         <td>{{ it.label }}{% if it.new_tag %} <small class="soon">neuer Tag</small>{% endif %}</td>
         <td>{{ it.current or '' }}{% if not it.current %}<span class="muted">{{ 'fehlt' if it.key.startswith('tag:') else 'leer' }}</span>{% endif %}</td>
         <td><strong>{{ it.new }}</strong> <span class="badge src-{{ it.source }}">{{ META_SOURCES.get(it.source, it.source) }}</span></td>
+        <td class="hide-sm nowrap"><small>{% if it.state == 'accepted' %}vorgemerkt {{ it.at|ts }}{% if it.suggested_at %}<br><span class="muted">Vorschlag {{ it.suggested_at|ts }}</span>{% endif %}
+          {%- else %}Vorschlag {{ it.at|ts }}{% endif %}</small></td>
       </tr>
       {% endfor %}
     {% endfor %}
@@ -73,6 +79,8 @@
   (<span class="badge src-history">Verlauf</span>). <strong>Vormerken</strong> speichert deine Entscheidung nur im Companion – die App lernt sofort daraus
   (vorgemerkte Tags und Titel fließen in die nächsten Vorschläge ein). Nach Paperless geht erst etwas, wenn du <strong>Übertragen</strong> wählst.
   {% if meta_queued %}<br><span class="tag">{{ meta_queued }} Vorschläge in Arbeit</span>{% endif %}</p>
+<p class="muted">Zuletzt erstellter Metadaten-Vorschlag: <strong>{{ last.meta_any|ts }}</strong>
+  {%- if last.meta_open %} · jüngster mit offenen Punkten: <strong>{{ last.meta_open|ts }}</strong>{% endif %}</p>
 
 <h3>Vorgemerkt – wartet auf Übertragung ({{ meta_accepted_count }})</h3>
 {% if meta_accepted %}

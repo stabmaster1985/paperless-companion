@@ -316,13 +316,13 @@ def pending(doc: Document, everything: bool = False) -> list[dict]:
             continue
         items.append({"key": key, "label": "Tag" if key.startswith("tag:") else ITEMS[key], "current": _current(doc, key),
                       "new": entry["value"], "source": entry.get("source", "llm"), "new_tag": bool(entry.get("new_tag")),
-                      "state": "accepted", "useful": True})
+                      "state": "accepted", "useful": True, "at": entry.get("at"), "suggested_at": sugg.get("at")})
     for tag in sugg.get("tags", []):
         key = f"tag:{tag['name']}"
         if key in accepted or key in dismissed or _in_paperless(doc, key, tag["name"]):
             continue
         items.append({"key": key, "label": "Tag", "current": None, "new": tag["name"], "source": tag["source"],
-                      "new_tag": bool(tag.get("new")), "state": "open", "useful": True})
+                      "new_tag": bool(tag.get("new")), "state": "open", "useful": True, "at": sugg.get("at")})
     for key in ("title", "correspondent", "document_type"):
         entry = sugg.get(key)
         if not entry or not entry.get("value") or key in accepted:
@@ -333,7 +333,7 @@ def pending(doc: Document, everything: bool = False) -> list[dict]:
         useful = is_generic_title(current, doc.original_file_name) if key == "title" else not current
         if useful or everything:
             items.append({"key": key, "label": ITEMS[key], "current": current, "new": value, "source": entry["source"],
-                          "new_tag": False, "state": "open", "useful": useful})
+                          "new_tag": False, "state": "open", "useful": useful, "at": sugg.get("at")})
     return items
 
 

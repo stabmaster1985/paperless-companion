@@ -638,11 +638,12 @@ def mark_changed(doc: Document) -> None:
     doc.writeback_pending = True
 
 
-def propose(doc: Document, role: str, value) -> None:
+def propose(doc: Document, role: str, value, source: str = "manual") -> None:
     """Eigene Eingabe für ein Paperless-Feld vormerken (wird erst nach Zustimmung geschrieben)."""
     proposed = dict(doc.proposed_fields or {})
     proposed[role] = _norm(value)
     doc.proposed_fields = proposed
+    set_source(doc, f"proposal:{role}", source)  # Zeitpunkt für „Für Paperless“
     dismissed = dict(doc.dismissed_fields or {})
     dismissed.pop(role, None)
     doc.dismissed_fields = dismissed
@@ -678,6 +679,31 @@ def dismiss_changes(doc: Document, settings: Settings, roles: list[str], today: 
     doc.writeback_pending = bool(pending_changes(doc, settings, today))
     if not doc.writeback_pending:
         apply_paperless_fields(doc)  # Paperless-Stand wieder maßgeblich
+
+
+# Aus welchen erfassten Feldern ergibt sich der Wert einer Paperless-Rolle?
+ROLE_FIELDS = {
+    "amount": ("amount",),
+    "due_date": ("due_date",),
+    "paid_on": ("paid_on", "status"),
+    "cancel_by": ("start_date", "initial_term_months", "end_date", "renewal_mode", "renewal_months",
+                  "notice_value", "notice_unit", "notice_to", "status", "cancelled_on"),
+    "term_end": ("start_date", "initial_term_months", "end_date", "renewal_mode", "renewal_months", "status"),
+    "warranty_end": ("purchase_date", "months", "invoice_date", "warranty_months"),
+}
+
+
+def change_info(doc: Document, role: str) -> dict:
+    """Wann (UTC, ISO) und woher stammt der vorgeschlagene Wert einer Rolle? Rückfall: letzte Analyse."""
+    sources = doc.field_sources or {}
+    if role in (doc.proposed_fields or {}) and f"proposal:{role}" in sources:
+        entry = sources[f"proposal:{role}"]
+        return {"at": entry.get("at"), "source": entry.get("source")}
+    entries = [sources[f] for f in ROLE_FIELDS.get(role, ()) if sources.get(f, {}).get("at")]
+    if entries:
+        newest = max(entries, key=lambda e: e["at"])
+        return {"at": newest["at"], "source": newest.get("source")}
+    return {"at": doc.analyzed_at.isoformat(timespec="minutes") if doc.analyzed_at else None, "source": None}
 
 
 def documents_with_changes(session: Session, settings: Settings, today: date) -> list[tuple[Document, list]]:
@@ -720,7 +746,7 @@ def process_summary(
         ollama, doc.title, doc.correspondent, data.get("content") or "", limit, settings.summary_max_input_chars
     )
     doc.summary = text
-    propose(doc, "summary", text)  # erst nach Zustimmung in Paperless
+    propose(doc, "summary", text, source="llm")  # erst nach Zustimmung in Paperless
     doc.summary_state = "done"
 
 

@@ -5,7 +5,7 @@ import re
 import tempfile
 import time
 from contextlib import asynccontextmanager
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
@@ -63,6 +63,17 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     templates = Jinja2Templates(directory=BASE / "templates")
     templates.env.filters["d"] = events.fmt_date
     templates.env.filters["eur"] = events.fmt_money
+
+    def fmt_ts(value) -> str:
+        """Zeitpunkt (ISO-Text oder datetime, UTC) in lokaler Zeit: 21.10.2026 09:35."""
+        if not value:
+            return "–"
+        stamp = datetime.fromisoformat(value) if isinstance(value, str) else value
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        return stamp.astimezone(ZoneInfo(settings.timezone)).strftime("%d.%m.%Y %H:%M")
+
+    templates.env.filters["ts"] = fmt_ts
     templates.env.globals.update(HINTS=metadata.HINTS, META_SOURCES=metadata.SOURCES, KINDS=pipeline.KINDS, link_base=settings.paperless_link_base, auth=bool(settings.app_password))
 
     @app.middleware("http")
@@ -967,8 +978,22 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                 meta_accepted.append((doc, accepted))
             if opened := [i for i in items if i["state"] == "open"]:
                 meta_open.append((doc, opened))
+        def newest(values):
+            values = [v for v in values if v]
+            return max(values) if values else None
+
+        last = {
+            # jüngster Wert unter den offenen Custom-Field-Vorschlägen
+            "fields": newest(pipeline.change_info(d, role)["at"] for d, changes in rows for role, _, _ in changes),
+            "analysis": session.scalar(select(func.max(Document.analyzed_at))),
+            # jüngster offene Metadaten-Vorschlag und überhaupt zuletzt erstellter Vorschlag
+            "meta_open": newest(i["at"] for _, items in meta_open for i in items),
+            "meta_any": newest((s or {}).get("at") for s in session.scalars(
+                select(Document.meta_suggestion).where(Document.meta_suggestion.is_not(None)))),
+        }
         return render(
-            request, "paperless_changes.html", rows=rows, names=names, msg=msg, create_fields=settings.writeback_create_fields,
+            request, "paperless_changes.html", rows=rows, last=last, change_info=pipeline.change_info,
+            SOURCE_LABELS=pipeline.SOURCE_LABELS, names=names, msg=msg, create_fields=settings.writeback_create_fields,
             meta_open=meta_open, meta_accepted=meta_accepted, meta_accepted_count=sum(len(i) for _, i in meta_accepted), quality=metadata.quality(session), META_ITEMS=metadata.ITEMS,
             META_SOURCES=metadata.SOURCES, hints=metadata.archive_hints(session), HINTS=metadata.HINTS,
             meta_queued=session.scalar(select(func.count()).select_from(Document).where(Document.meta_state.in_(("queued", "running")))),

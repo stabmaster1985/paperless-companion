@@ -214,3 +214,16 @@ def test_hint_filter_and_bulk_suggest(client):
     client.post("/documents/suggest-meta", data={"scope": "selected", "doc": ["1", "2"]})
     with session_scope() as s:
         assert s.get(Document, 1).meta_state == "queued" and s.get(Document, 3).meta_state == "done"
+
+
+def test_changes_page_shows_dates(client):
+    from app import pipeline
+
+    with session_scope() as s:
+        doc = s.get(Document, 3)
+        doc.meta_suggestion = {**doc.meta_suggestion, "at": "2026-10-20T08:15:00+00:00"}
+        pipeline.propose(s.get(Document, 2), "comment", "Rückruf")
+        assert s.get(Document, 2).field_sources["proposal:comment"]["source"] == "manual"
+    page = client.get("/paperless-changes").text
+    assert "Zuletzt erstellter Metadaten-Vorschlag: <strong>20.10.2026 10:15</strong>" in page  # Europe/Berlin
+    assert "Vorschlag 20.10.2026 10:15" in page and "Jüngster offener Vorschlag" in page and ">Stand<" in page
