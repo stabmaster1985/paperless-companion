@@ -203,3 +203,15 @@ def test_doctype_settings_survive_restart(settings, mock_api):
     settings.doctypes_invoice = "Rechnung"
     with TestClient(create_app(settings, start_worker=False)):
         assert settings.doctype_map() == {"beleg": "invoice"}
+
+
+def test_doctype_settings_without_paperless_types(client, mock_api):
+    """Liefert Paperless keine Typen (fehlende Leserechte), Hinweis + Rückgriff auf den lokalen Index."""
+    mock_api.get("http://paperless.test/api/document_types/").respond(
+        json={"count": 0, "next": None, "previous": None, "results": []})
+    mock_api.get("http://paperless.test/api/ui_settings/").respond(
+        json={"user": {"username": "companion", "is_superuser": False}, "permissions": ["view_document", "view_tag"]})
+    page = client.get("/settings").text
+    assert "Dem Paperless-Benutzer „companion“ fehlt das Recht „Anzeigen“ für: Dokumenttyp, Korrespondent" in page
+    assert 'name="kind:rechnung"' in page and "Archiv-Index neu einlesen" in page
+    assert client.post("/settings/reindex", follow_redirects=False).status_code == 303

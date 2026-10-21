@@ -529,13 +529,18 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     @app.get("/settings", response_class=HTMLResponse)
     def settings_page(request: Request, msg: str = "", session: Session = Depends(get_session)):
         paperless = make_paperless(settings, timeout=10)
-        error = None
+        error, diagnosis = None, None
         try:
             names = sorted(paperless.names("document_types").values(), key=str.lower)
+            if not names:
+                diagnosis = doctype_diagnosis(paperless.current_user())
         except PaperlessError as exc:
             names, error = [], str(exc)
         finally:
             paperless.close()
+        if not names:
+            # Rückgriff: Typen, die im lokalen Index an Dokumenten stehen
+            names = sorted({t for t in session.scalars(select(Document.document_type).distinct()) if t}, key=str.lower)
         counts = {(name or "").lower(): (total, analyzed) for name, total, analyzed in session.execute(
             select(Document.document_type, func.count(),
                    func.sum(case_((Document.extraction_state != "skipped", 1), else_=0))).group_by(Document.document_type)
@@ -548,9 +553,37 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         rows = [{"name": n, "key": n.lower(), "kind": choices["kinds"].get(n.lower(), ""),
                  "tax": n.lower() in choices["tax"], "count": counts.get(n.lower(), (0, 0)), "missing": n in missing}
                 for n in [*names, *missing]]
-        return render(request, "settings.html", rows=rows, error=error, msg=msg,
+        return render(request, "settings.html", rows=rows, error=error, msg=msg, diagnosis=diagnosis,
                       stored=pipeline.kv_get(session, "doctype_settings") is not None,
                       index_known_type=len(pipeline.index_documents_with_known_type(session, settings)))
+
+    def doctype_diagnosis(user: dict) -> str:
+        """Warum liefert Paperless keine Dokumenttypen? Meist fehlen dem API-Benutzer Leserechte."""
+        name = f"„{user['username']}“" if user.get("username") else "des API-Tokens"
+        needed = {"view_documenttype": "Dokumenttyp", "view_correspondent": "Korrespondent", "view_tag": "Tag",
+                  "view_customfield": "Benutzerdefiniertes Feld"}
+        missing = [label for perm, label in needed.items() if perm not in user.get("permissions", [])]
+        if user and not user.get("is_superuser") and "Dokumenttyp" in missing:
+            return (f"Dem Paperless-Benutzer {name} fehlt das Recht „Anzeigen“ für: {', '.join(missing)}. "
+                    "In Paperless unter Einstellungen → Benutzer & Gruppen beim Benutzer (oder seiner Gruppe) "
+                    "jeweils „Anzeigen“ setzen.")
+        return (f"Paperless hat für den Benutzer {name} keine Dokumenttypen geliefert. Entweder sind keine angelegt, "
+                "oder sie gehören einem anderen Benutzer und sind nicht für diesen freigegeben – in Paperless unter "
+                "Dokumenttypen beim jeweiligen Typ „Berechtigungen“ den Benutzer bei „Anzeigen“ eintragen "
+                "oder den Typ ohne Eigentümer anlegen.")
+
+    @app.post("/settings/reindex")
+    def settings_reindex(session: Session = Depends(get_session)):
+        """Archiv-Index neu einlesen, z.B. nachdem in Paperless Leserechte ergänzt wurden."""
+        paperless = make_paperless(settings, timeout=60)
+        try:
+            total, _ = pipeline.index_sync(session, paperless, settings)
+            msg = f"Archiv-Index neu eingelesen: {total} Dokumente"
+        except PaperlessError as exc:
+            msg = f"Fehler: {exc}"
+        finally:
+            paperless.close()
+        return RedirectResponse(f"/settings?msg={quote(msg)}", status_code=303)
 
     @app.post("/settings/doctypes")
     async def settings_doctypes(request: Request, session: Session = Depends(get_session)):

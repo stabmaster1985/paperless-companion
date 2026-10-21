@@ -51,6 +51,16 @@ class PaperlessClient:
         self._get("/api/documents/", page_size=1)
         return {"version": self.server_version, "api_version": self.api_version}
 
+    def current_user(self) -> dict:
+        """Angemeldeter API-Benutzer mit Rechten (aus /api/ui_settings/), leer wenn nicht lesbar."""
+        try:
+            data = self._get("/api/ui_settings/")
+        except PaperlessError:
+            return {}
+        user = data.get("user") or {}
+        return {"username": user.get("username") or user.get("display_name"), "is_superuser": bool(user.get("is_superuser")),
+                "permissions": data.get("permissions") or []}
+
     def names(self, endpoint: str) -> dict[int, str]:
         return {item["id"]: item["name"] for item in self._paginate(f"/api/{endpoint}/", page_size=500)}
 

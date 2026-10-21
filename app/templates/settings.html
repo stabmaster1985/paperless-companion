@@ -11,9 +11,16 @@
     {% if stored %}Sie hat Vorrang vor den Werten in der <code>.env</code>.{% else %}Vorausgewählt sind die Werte aus der <code>.env</code>.{% endif %}</p>
   {% if error %}
   <div class="notice error">Dokumenttypen konnten nicht aus Paperless gelesen werden: {{ error }}</div>
-  {% elif not rows %}
-  <p class="empty">In Paperless sind keine Dokumenttypen angelegt.</p>
-  {% else %}
+  {% endif %}
+  {% if diagnosis %}
+  <div class="notice warn">{{ diagnosis }}
+    {% if rows %}<br>Unten stehen ersatzweise die Typen aus dem lokalen Index.{% endif %}
+    <br>Danach hier den Archiv-Index neu einlesen, damit die Dokumente im Companion ihre Typen bekommen:
+    <form method="post" action="/settings/reindex" class="inline"><button class="small">Archiv-Index neu einlesen</button></form></div>
+  {% endif %}
+  {% if not error and not rows %}
+  <p class="empty">Keine Dokumenttypen gefunden.</p>
+  {% elif rows %}
   <form method="post" action="/settings/doctypes">
     <div class="table-wrap"><table class="list">
       <thead><tr><th>Dokumenttyp</th><th class="hide-sm">Dokumente</th><th>Auswerten als</th><th>Steuer</th></tr></thead>
