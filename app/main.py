@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import Depends, FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import case as case_, func, select
@@ -34,7 +34,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logging.getLogger("httpx").setLevel(logging.WARNING)
 log = logging.getLogger(__name__)
 BASE = Path(__file__).parent
-PUBLIC_PATHS = ("/login", "/static", "/api/webhook", "/calendar.ics", "/health")
+PUBLIC_PATHS = ("/login", "/static", "/favicon.ico", "/api/webhook", "/calendar.ics", "/health")
 
 
 def create_app(settings: Settings | None = None, start_worker: bool = True) -> FastAPI:
@@ -123,6 +123,10 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             raise HTTPException(status_code=403, detail="Ungültiges Token")
 
     # ------------------------------------------------------------------ Login
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    def favicon():
+        return FileResponse(BASE / "static" / "icons" / "favicon.ico", media_type="image/x-icon")
 
     @app.get("/login", response_class=HTMLResponse)
     def login_form(request: Request):

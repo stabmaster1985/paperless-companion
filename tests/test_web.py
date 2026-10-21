@@ -255,3 +255,12 @@ def test_app_settings_survive_restart(settings, mock_api):
     with TestClient(create_app(settings, start_worker=False)) as c:
         assert settings.firefly_dashboard_url == "http://dash"
         assert "http://dash" in c.get("/settings").text
+
+
+def test_icons(client):
+    page = client.get("/").text
+    assert 'rel="icon" href="/static/icons/icon.svg"' in page and 'rel="manifest"' in page
+    response = client.get("/favicon.ico")
+    assert response.status_code == 200 and response.headers["content-type"] == "image/x-icon"
+    assert client.get("/static/icons/icon-180.png").status_code == 200
+    assert client.get("/static/manifest.webmanifest").status_code == 200
