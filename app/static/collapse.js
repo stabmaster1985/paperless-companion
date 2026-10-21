@@ -40,3 +40,13 @@
     });
   }));
 })();
+
+// ?-Tooltips auch per Antippen/Klick öffnen (auf Handys gibt es kein Darüberfahren); Klick daneben schließt sie
+document.addEventListener('click', (e) => {
+  const tip = e.target.closest('.help');
+  document.querySelectorAll('.help.show').forEach((t) => { if (t !== tip) t.classList.remove('show'); });
+  if (tip) { e.preventDefault(); e.stopPropagation(); tip.classList.toggle('show'); }
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') document.querySelectorAll('.help.show').forEach((t) => t.classList.remove('show'));
+});

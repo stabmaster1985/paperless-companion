@@ -79,7 +79,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         return stamp.astimezone(ZoneInfo(settings.timezone)).strftime("%d.%m.%Y %H:%M")
 
     templates.env.filters["ts"] = fmt_ts
-    templates.env.globals.update(page_help=helptexts.page_help, TIPS=helptexts.TIPS)
+    templates.env.globals.update(page_help=helptexts.page_help, TIPS=helptexts.TIPS, asset_v=asset_version())
     templates.env.globals["tx_links"] = lambda group_id, day: payments.links(settings, group_id, day)
 
     def payment_of(doc: Document) -> dict | None:
@@ -99,6 +99,14 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     # Muss nach require_login registriert werden, damit request.session dort verfügbar ist
     app.add_middleware(SessionMiddleware, secret_key=settings.secret_key, max_age=60 * 60 * 24 * 30, same_site="lax")
     app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
+
+    @app.middleware("http")
+    async def static_revalidate(request: Request, call_next):
+        """CSS/JS bei jedem Aufruf kurz prüfen lassen (ETag), damit nach Updates nie alte Dateien verwendet werden."""
+        response = await call_next(request)
+        if request.url.path.startswith("/static/") and request.url.path.endswith((".css", ".js")):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
 
     def today() -> date:
         return datetime.now(ZoneInfo(settings.timezone)).date()
@@ -1242,6 +1250,16 @@ def extract_doc_id(payload: dict) -> int | None:
             if m := re.search(r"/documents/(\d+)", str(value)):
                 return int(m.group(1))
     return None
+
+
+def asset_version() -> str:
+    """Kurzer Hash über CSS/JS – ändert sich mit jedem Update und erzwingt so das Neuladen im Browser."""
+    import hashlib
+
+    digest = hashlib.sha1()
+    for path in sorted((BASE / "static").glob("*.[cj]s*")):
+        digest.update(path.read_bytes())
+    return digest.hexdigest()[:10]
 
 
 def field_badges(doc: Document, from_record: bool) -> dict:

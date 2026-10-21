@@ -276,3 +276,11 @@ def test_help_tooltips_and_collapsible(client):
     changes = client.get("/paperless-changes").text
     assert 'class="help"' in changes and 'data-tip="Werte für deine Paperless-Custom-Fields' in changes
     assert client.get("/static/collapse.js").status_code == 200
+
+
+def test_static_assets_are_versioned(client):
+    import re
+
+    page = client.get("/help").text
+    assert re.search(r'/static/style\.css\?v=[0-9a-f]{10}"', page) and re.search(r'/static/collapse\.js\?v=[0-9a-f]{10}"', page)
+    assert client.get("/static/style.css").headers["cache-control"] == "no-cache"
