@@ -306,18 +306,21 @@ def test_unresolved_tag_numbers_are_repaired_and_ignored(db, settings, mock_api)
 
     run_all(db, settings)
     with db() as s:
-        s.get(Document, 1).tags = ["#31", "30"]  # Tags waren nicht sichtbar (alt: „30“, neu: „#31“)
+        s.get(Document, 1).tags = ["#31", "30", "2021"]  # „#31“ neu, „30“ alter Stand, „2021“ echter Jahres-Tag
         for i in range(10, 13):
-            s.add(Document(id=i, title=f"Abschlag {i}", correspondent="Stadtwerke", tags=["#77"], extraction_state="skipped"))
+            s.add(Document(id=i, title=f"Abschlag {i}", correspondent="Stadtwerke", tags=["#77", "2022"],
+                           extraction_state="skipped"))
     with db() as s:
         assert pipeline.unresolved_tag_count(s)[0] == 4
         doc = s.get(Document, 1)
-        # Nummern werden weder vorgeschlagen noch ins Vokabular übernommen
-        assert metadata.history(s, doc)["tags"] == []
-        assert "#77" not in metadata.vocabulary(s, {"tags": {30: "Steuer"}})["tags"]
-        assert pipeline.repair_tag_names(s, {30: "Steuer", 31: "Haus"}) == 1
-        assert doc.tags == ["Haus", "Steuer"]
+        # Nummern werden weder vorgeschlagen noch ins Vokabular übernommen – Jahres-Tags schon
+        assert metadata.history(s, doc)["tags"] == ["2022"]
+        vocab = metadata.vocabulary(s, {"tags": {30: "Steuer", 2021: "2021", 2022: "2022"}})["tags"]
+        assert "#77" not in vocab and "2021" in vocab and "2022" in vocab
+        assert pipeline.repair_tag_names(s, {30: "Steuer", 31: "Haus", 40: "2021", 41: "2022"}) == 1
+        assert doc.tags == ["2021", "Haus", "Steuer"]
         assert pipeline.unresolved_tag_count(s) == (3, ["#77"])
+        assert s.get(Document, 10).tags == ["#77", "2022"]
 
 
 def test_notice_for_unresolved_tags(client):

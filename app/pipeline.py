@@ -308,30 +308,32 @@ def upsert_document(
     return doc
 
 
-UNRESOLVED_TAG = re.compile(r"#?(\d+)")
+UNRESOLVED_TAG = re.compile(r"#(\d+)")
 
 
 def is_unresolved_tag(name: str) -> bool:
-    """Tag, dessen Namen der Companion nicht lesen durfte („#12“, ältere Stände „12“)."""
+    """Tag, dessen Namen der Companion nicht lesen durfte („#12“). Reine Ziffern wie „2021“ sind echte Tags."""
     return bool(UNRESOLVED_TAG.fullmatch(name or ""))
 
 
 def repair_tag_names(session: Session, tag_names: dict[int, str]) -> int:
-    """Gespeicherte Tag-Nummern durch Namen ersetzen, sobald Paperless die Tags liefert (z.B. nach Rechte-Freigabe)."""
+    """Gespeicherte Tag-Nummern durch Namen ersetzen, sobald Paperless die Tags liefert (z.B. nach Rechte-Freigabe).
+
+    Ältere Stände speicherten unbekannte Tags als reine Ziffer („12“). Die werden nur ersetzt, wenn es keinen
+    echten Tag dieses Namens gibt – Jahres-Tags wie „2021“ bleiben also unverändert.
+    """
     if not tag_names:
         return 0
     known_names = {n.lower() for n in tag_names.values()}
     repaired = 0
     for doc in session.scalars(select(Document).where(Document.tags.is_not(None))):
         tags = doc.tags or []
-        if not any(is_unresolved_tag(t) for t in tags):
-            continue
         fixed = []
         for t in tags:
-            m = UNRESOLVED_TAG.fullmatch(t)
-            # „12“ ohne # nur ersetzen, wenn es keinen echten Tag namens „12“ gibt
-            if m and int(m.group(1)) in tag_names and (t.startswith("#") or t.lower() not in known_names):
-                fixed.append(tag_names[int(m.group(1))])
+            if m := UNRESOLVED_TAG.fullmatch(t):
+                fixed.append(tag_names.get(int(m.group(1)), t))
+            elif t.isdigit() and t.lower() not in known_names:
+                fixed.append(tag_names.get(int(t), f"#{t}"))  # alte Nummer: Name, sonst eindeutig als Nummer kennzeichnen
             else:
                 fixed.append(t)
         if fixed != tags:
