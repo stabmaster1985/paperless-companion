@@ -202,3 +202,13 @@ details.edit[open] { margin-bottom: .5rem; }
   .doc-list td, .doc-list th { padding: .45rem .35rem; }
 }
 .badge.method-rules_ai_deferred { background: var(--info-bg); color: var(--muted); }
+.activity-log { list-style: none; padding: 0; margin: .5rem 0 0; font-size: .88rem; max-height: 22rem; overflow-y: auto; }
+.activity-log li { padding: .3rem 0; border-top: 1px solid var(--border); overflow-wrap: anywhere; }
+.activity-log .when { color: var(--muted); font-variant-numeric: tabular-nums; margin-right: .5rem; }
+.activity-log .lvl-error, .activity-log .lvl-error a { color: var(--bad); }
+.activity-log .lvl-muted { color: var(--muted); }
+.activity-now p { margin: .3rem 0; }
+.live { font-size: .75rem; }
+.pulse { display: inline-block; width: .6rem; height: .6rem; border-radius: 50%; background: var(--accent); animation: pulse 1.2s infinite; }
+@keyframes pulse { 50% { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }

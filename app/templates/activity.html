@@ -1,0 +1,32 @@
+<div class="head">
+  <h2>Aktivität</h2>
+  <span class="muted live">aktualisiert sich selbst</span>
+</div>
+<div class="activity-now">
+  {% if worker.current_document %}
+    <p><span class="pulse"></span> <strong>{{ worker.current_task }}</strong> von <a href="/documents/{{ worker.current_document }}">Dokument #{{ worker.current_document }}</a>
+      läuft seit {{ running_for // 60 }}:{{ '%02d' % (running_for % 60) }} min</p>
+  {% else %}
+    <p class="muted">Gerade keine Analyse aktiv.</p>
+  {% endif %}
+  {% if llm_enabled %}
+    {% if ollama_loaded is none %}
+      <p class="muted">Ollama: nicht erreichbar</p>
+    {% elif ollama_loaded %}
+      <p>Ollama: {% for m in ollama_loaded %}<code>{{ m.name }}</code> im Speicher ({{ m.size_gb }} GB){{ ', ' if not loop.last }}{% endfor %}</p>
+    {% else %}
+      <p class="muted">Ollama: kein Modell im Speicher – wird bei Bedarf geladen und nach kurzer Pause wieder entladen.</p>
+    {% endif %}
+  {% endif %}
+  <p class="muted">Heute: {{ stats.analyses }} Analysen · {{ stats.ai_calls }} AI-Abfragen{% if stats.ai_calls %} (Ø {{ (stats.ai_seconds / stats.ai_calls)|round(1) }} s){% endif %}{% if stats.summaries %} · {{ stats.summaries }} Zusammenfassungen{% endif %}</p>
+</div>
+{% if activity %}
+<ul class="activity-log">
+  {% for a in activity %}
+  <li class="lvl-{{ a.level }}"><span class="when">{{ a.at }}</span>
+    {% if a.document_id %}<a href="/documents/{{ a.document_id }}">{{ a.text }}</a>{% else %}{{ a.text }}{% endif %}</li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="muted">Seit dem letzten Start ist noch nichts passiert. Neue Dokumente werden alle paar Minuten aus Paperless abgeholt.</p>
+{% endif %}

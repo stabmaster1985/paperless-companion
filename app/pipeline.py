@@ -3,6 +3,7 @@
 import hashlib
 import logging
 import re
+import time
 from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import select
@@ -315,7 +316,7 @@ def process_document(
     ollama: OllamaClient | None,
     settings: Settings,
     llm_allowed: bool = True,
-) -> None:
+) -> dict:
     data = paperless.get_document(doc.id)
     text = data.get("content") or ""
 
@@ -324,13 +325,19 @@ def process_document(
     else:
         kind, source = classify(doc, text, settings)
     sugg: dict = {}
+    # Was ist bei dieser Analyse passiert? (für die Aktivitätsanzeige)
+    info: dict = {"kind": kind, "ai": "not_needed", "ai_seconds": None, "ai_fields": [], "wanted": []}
     if kind != "other":
         sugg = EXTRACTORS[kind](text, doc.created)
         _fill_defaults(kind, doc, sugg)
         if kind == "invoice":
             _inject_paperless_fields(doc, sugg)
         wanted = _missing(kind, sugg)
+        info["wanted"] = wanted
+        if wanted and ollama is None:
+            info["ai"] = "disabled"
         if ollama is not None and wanted and not llm_allowed:
+            info["ai"] = "deferred"
             # Außerhalb des AI-Zeitfensters: nur Regeln, AI wird im nächsten Fenster nachgeholt
             sugg["_llm_error"] = {
                 "value": f"AI pausiert außerhalb der AI-Zeiten ({settings.llm_active_hours} Uhr)", "confidence": 0,
@@ -338,9 +345,11 @@ def process_document(
                 "attempts": 0, "deferred": True,
             }
         elif ollama is not None and wanted:
+            started = time.monotonic()
             try:
                 found = llm.extract(ollama, kind, text, wanted, settings.llm_max_chars)
             except OllamaError as exc:
+                info["ai"], info["ai_seconds"] = "failed", round(time.monotonic() - started, 1)
                 log.warning("LLM-Analyse für Dokument %s fehlgeschlagen: %s", doc.id, exc)
                 previous = (doc.suggestions or {}).get("_llm_error") or {}
                 sugg["_llm_error"] = {
@@ -349,9 +358,11 @@ def process_document(
                     "attempts": int(previous.get("attempts", 0)) + 1,
                 }
             else:
+                info["ai"], info["ai_seconds"] = "used", round(time.monotonic() - started, 1)
                 for name, value in found.items():
                     if _conf(sugg, name) < value["confidence"]:
                         sugg[name] = value
+                        info["ai_fields"].append(name)
 
     doc.kind, doc.kind_source = kind, source
     doc.suggestions = sugg
@@ -374,6 +385,8 @@ def process_document(
     else:
         doc.review_state = "pending"
         doc.auto_confirmed = False
+    info["review"] = doc.review_state
+    return info
 
 
 def apply_values(session: Session, doc: Document, kind: str, values: dict) -> None:

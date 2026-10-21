@@ -83,4 +83,5 @@ def mock_api():
         )
         router.patch(url__regex=rf"{PAPERLESS}/api/documents/\d+/").respond(json={})
         router.get(f"{OLLAMA}/api/tags").respond(json={"models": [{"name": "qwen2.5:3b"}]})
+        router.get(f"{OLLAMA}/api/ps").respond(json={"models": []})
         yield router

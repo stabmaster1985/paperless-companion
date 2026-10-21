@@ -40,6 +40,18 @@ class OllamaClient:
         wanted = self.model if ":" in self.model else f"{self.model}:latest"
         return {"reachable": True, "model_present": wanted in names, "models": names}
 
+    def loaded(self) -> list[dict] | None:
+        """Aktuell im Speicher geladene Modelle (None = Ollama nicht erreichbar)."""
+        try:
+            response = self._client.get("/api/ps", timeout=5)
+            response.raise_for_status()
+        except httpx.HTTPError:
+            return None
+        return [
+            {"name": m.get("name"), "size_gb": round((m.get("size") or 0) / 1e9, 1), "expires_at": m.get("expires_at")}
+            for m in response.json().get("models", [])
+        ]
+
     def extract_json(self, system: str, prompt: str, schema: dict) -> dict:
         payload = {
             "model": self.model,

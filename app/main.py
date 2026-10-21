@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import tempfile
+import time
 from contextlib import asynccontextmanager
 from datetime import date, datetime
 from pathlib import Path
@@ -413,14 +414,32 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         ).all())
         return render(
             request, "system.html", settings=settings, paperless_status=paperless_status,
-            ollama_status=ollama_status, firefly_status=firefly_status, worker=worker, counts=counts, msg=msg,
+            ollama_status=ollama_status, firefly_status=firefly_status, counts=counts, msg=msg,
             last_sync=pipeline.kv_get(session, "last_sync"), channels=notify.channels(settings),
             version=app.state.version.get(), llm_error_count=len(pipeline.documents_with_llm_error(session, True)),
             outdated_count=len(pipeline.outdated_documents(session)), analysis_version=pipeline.ANALYSIS_VERSION,
-            queue_paused=pipeline.kv_get(session, "queue_paused") == "1",
+            queue_paused=pipeline.kv_get(session, "queue_paused") == "1", **activity_context(),
             summaries_queued=session.scalar(select(func.count()).select_from(Document).where(Document.summary_state == "queued")),
             llm_now=settings.llm_allowed_at(datetime.now(ZoneInfo(settings.timezone)).hour),
         )
+
+    def activity_context() -> dict:
+        worker: Worker = app.state.worker
+        loaded = None
+        if (ollama := make_ollama(settings)) is not None:
+            loaded = ollama.loaded()
+            ollama.close()
+        running_for = None
+        if worker.current_since is not None:
+            running_for = int(time.monotonic() - worker.current_since)
+        return {
+            "worker": worker, "activity": list(worker.activity)[:20], "stats": worker.stats,
+            "ollama_loaded": loaded, "running_for": running_for, "llm_enabled": settings.llm_enabled,
+        }
+
+    @app.get("/system/activity", response_class=HTMLResponse)
+    def system_activity(request: Request):
+        return templates.TemplateResponse(request, "activity.html", activity_context())
 
     @app.post("/system/version-check")
     def system_version_check():

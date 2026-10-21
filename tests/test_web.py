@@ -110,3 +110,17 @@ def test_pause_resume_queue(client):
     assert client.app.state.worker.paused()
     client.post("/system/queue/resume")
     assert not client.app.state.worker.paused()
+
+
+def test_activity_log(client, mock_api):
+    worker = client.app.state.worker
+    info = {"kind": "invoice", "ai": "used", "ai_seconds": 42.5, "ai_fields": ["due_date"], "wanted": ["due_date", "iban"],
+            "review": "pending"}
+    worker.note(worker._describe("Stromrechnung", info, 43.0), document_id=1)
+    assert worker.stats["ai_calls"] == 1
+    mock_api.get("http://ollama.test/api/ps").respond(
+        json={"models": [{"name": "qwen2.5:3b", "size": 2_400_000_000, "expires_at": "2026-10-21T10:00:00Z"}]})
+    html = client.get("/system/activity").text
+    assert "Regeln + AI (42.5 s, 1 von 2 fehlenden Feldern gefunden) → Inbox" in html
+    assert "qwen2.5:3b</code> im Speicher (2.4 GB)" in html and "1 AI-Abfragen" in html
+    assert 'id="activity"' in client.get("/system").text
