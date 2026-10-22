@@ -1,4 +1,5 @@
 import hmac
+import json
 from collections import Counter
 import logging
 import os
@@ -21,7 +22,7 @@ from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import appsettings, cases, help as helptexts, learning, receipts, rules as rule_proposals, deadlines, events, fields, highlight, ics, metadata, notify, payments, pipeline, reminders, retention, selection, tax
+from app import appsettings, cases, help as helptexts, identifiers, learning, receipts, rules as rule_proposals, deadlines, events, fields, highlight, ics, metadata, notify, payments, pipeline, reminders, retention, selection, tax
 from app.config import Settings, get_settings
 from app.db import get_session, init_db, session_scope
 from app.models import Case, CaseDocument, CaseEntry, Contract, Document, Invoice, KeyValue, ReceiptCheck, RuleProposal, RetentionLog, RetentionRule, Warranty
@@ -79,6 +80,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         return stamp.astimezone(ZoneInfo(settings.timezone)).strftime("%d.%m.%Y %H:%M")
 
     templates.env.filters["ts"] = fmt_ts
+    templates.env.filters["term"] = identifiers.term_label
     templates.env.globals.update(page_help=helptexts.page_help, TIPS=helptexts.TIPS, asset_v=asset_version())
     templates.env.globals["tx_links"] = lambda group_id, day: payments.links(settings, group_id, day)
 
@@ -1096,7 +1098,9 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                    session: Session = Depends(get_session)):
         rule_proposals.refresh(session)
         session.flush()
-        all_proposals = session.scalars(select(RuleProposal).order_by(RuleProposal.trigger, RuleProposal.correspondent)).all()
+        order = list(rule_proposals.TRIGGERS)
+        all_proposals = sorted(session.scalars(select(RuleProposal)),
+                               key=lambda p: (order.index(p.trigger or "correspondent"), p.correspondent.lower()))
         proposals = [p for p in all_proposals if not trigger or (p.trigger or "correspondent") == trigger]
         if show == "open":
             proposals = [p for p in proposals if p.state in ("proposed", "approved")]
@@ -1123,13 +1127,32 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             request, "rules.html", msg=msg, show=show, trigger=trigger, proposals=proposals, counts=counts,
             trigger_counts=trigger_counts, STATES=rule_proposals.STATES, TRIGGERS=rule_proposals.TRIGGERS,
             previews=previews, outliers=outliers, rule_label=rule_proposals.label, MATCHING=rule_proposals.MATCHING,
-            payload=(lambda p: rule_proposals.api_payload(p, ids, objects)) if ids else None, objects=objects,
+            payload=(lambda p: rule_proposals.api_payload(p, ids, objects, settings.rules_review_tag)) if ids else None,
+            objects=objects, review_tag=settings.rules_review_tag, scan=identifiers.progress(session), scan_enabled=settings.text_scan_enabled,
+            text_regex=rule_proposals.text_regex, term_label=identifiers.term_label,
+            own_terms=sorted(identifiers.own_terms(session)), manual_own=set(json.loads(session.get(KeyValue, identifiers.OWN_KEY).value))
+            if session.get(KeyValue, identifiers.OWN_KEY) else set(),
             ids_error=ids_error, similar=rule_proposals.similar_names(session),
             profiles=learning.profiles(session), accuracy=learning.accuracy(session), LEARN_FIELDS=learning.FIELDS,
             tag_choices=tag_choices, doctype_choices=doctype_choices, MIN_DOCS=rule_proposals.MIN_DOCS,
             SHARE=int(rule_proposals.SHARE * 100), KEYWORD_SHARE=int(rule_proposals.KEYWORD_SHARE * 100),
             SOURCE_LABELS=pipeline.SOURCE_LABELS,
         )
+
+    @app.post("/rules/own-term")
+    def rules_own_term(own_term: str = Form(...), undo: str = Form(""), session: Session = Depends(get_session)):
+        """Merkmal als „eigen“ markieren (z.B. deine IBAN) – wird nie einem Absender zugeordnet."""
+        item = session.get(KeyValue, identifiers.OWN_KEY)
+        own = set(json.loads(item.value)) if item else set()
+        own = own - {own_term} if undo else own | {own_term}
+        identifiers.set_own_terms(session, identifiers.OWN_KEY, own)
+        if not undo:
+            for p in session.scalars(select(RuleProposal).where(RuleProposal.trigger == "content")):
+                if own_term in (p.match_terms or []):
+                    p.match_terms = [t for t in p.match_terms if t != own_term]
+        msg = f"„{identifiers.term_label(own_term)}“ " + (
+            "wird wieder berücksichtigt" if undo else "ist als eigenes Merkmal markiert und wird nie verwendet")
+        return RedirectResponse(f"/rules?trigger=content&msg={quote(msg)}#proposals", status_code=303)
 
     @app.post("/rules/learned")
     def rules_learned(name: str = Form(...), attr: str = Form(...), disabled: str = Form("0"),
@@ -1146,7 +1169,8 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         form = await request.form()
         action = form.get("action")
         if action == "save":
-            rule_proposals.update(proposal, [str(t) for t in form.getlist("tag")], str(form.get("document_type") or ""))
+            rule_proposals.update(proposal, [str(t) for t in form.getlist("tag")], str(form.get("document_type") or ""),
+                                  [str(t) for t in form.getlist("term")])
             msg = "Regel geändert – Auswirkung unten neu berechnet"
         elif action == "fix":
             ids = [int(i) for i in form.getlist("fix") if str(i).isdigit()]

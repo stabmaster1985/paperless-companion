@@ -44,6 +44,9 @@ class Document(Base):
     # Vorgemerkte Vorschläge, noch nicht in Paperless ("tag:Strom" -> {"value", "source", "new_tag"})
     meta_accepted: Mapped[dict | None] = mapped_column(JSON)
     meta_pending: Mapped[bool] = mapped_column(default=False, server_default="0")
+    # Textmerkmale des Absenders (IBAN, USt-IdNr., Domain, Kundennr.) – siehe app/identifiers.py
+    identifiers: Mapped[dict | None] = mapped_column(JSON)
+    identifiers_at: Mapped[datetime | None] = mapped_column(DateTime)
     page_count: Mapped[int | None] = mapped_column(Integer)
     original_file_name: Mapped[str | None] = mapped_column(String)
 
@@ -206,6 +209,8 @@ class RuleProposal(Base):
     # correspondent | document_type | keyword
     trigger: Mapped[str] = mapped_column(String, default="correspondent", server_default="correspondent")
     condition: Mapped[str | None] = mapped_column(String)  # Typ bzw. Stichwort (bei Korrespondent = correspondent)
+    # Nur bei „Korrespondent aus Text“: Merkmale wie "iban:DE89…", "domain:stadtwerke.de"
+    match_terms: Mapped[list | None] = mapped_column(JSON)
     tags: Mapped[list] = mapped_column(JSON, default=list)
     document_type: Mapped[str | None] = mapped_column(String)
     # Grundlage: {"docs": 12, "tags": {"Strom": 12}, "document_type": {"Rechnung": 11}}

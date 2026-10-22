@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select, update
 
-from app import metadata, payments, pipeline, receipts, reminders
+from app import identifiers, metadata, payments, pipeline, receipts, reminders
 from app.config import Settings
 from app.db import session_scope
 from app.models import Document
@@ -220,6 +220,9 @@ class Worker:
                 counts = payments.run(session, client, self.settings, datetime.now(self.tz).date())
             with session_scope() as session:
                 found = receipts.run(session, client, self.settings, datetime.now(self.tz).date())
+            with session_scope() as session:
+                # Eigene IBANs nie als Merkmal eines Absenders verwenden (Regeln „Korrespondent aus Text“)
+                identifiers.set_own_terms(session, identifiers.FIREFLY_OWN_KEY, [f"iban:{i}" for i in client.own_ibans()])
             if found["missing"]:
                 self.note(f"Belegprüfung: {found['checked']} Abbuchungen ab {self.settings.receipts_min_amount:.0f} € geprüft – "
                           f"{found['missing']} ohne Beleg, {found['candidate']} mit möglichem Beleg")
@@ -314,7 +317,27 @@ class Worker:
         if self._process_next(paperless, ollama):
             self._meta_turn = True
             return True
-        return self._summarize_next(paperless, ollama) or self._suggest_meta_next(paperless, ollama)
+        return (self._summarize_next(paperless, ollama) or self._suggest_meta_next(paperless, ollama)
+                or self._scan_identifiers(paperless))
+
+    def _scan_identifiers(self, paperless: PaperlessClient) -> bool:
+        """Leerlauf: Textmerkmale weiterer Archiv-Dokumente lesen (nur GET, gedrosselt, ohne AI)."""
+        if not self.settings.text_scan_enabled or self.paused() or not self.settings.paperless_token:
+            return False
+        try:
+            with session_scope() as session:
+                count = identifiers.scan(session, paperless, limit=10)
+                if count:
+                    p = identifiers.progress(session)
+        except PaperlessError as exc:
+            log.warning("Textmerkmale lesen fehlgeschlagen: %s", exc)
+            return False
+        if not count:
+            return False
+        if p["done"] == p["total"] or p["done"] % 200 < count:
+            self.note(f"Textmerkmale gelesen: {p['done']} von {p['total']} Dokumenten (für „Korrespondent aus Text“)", "muted")
+        self._stop.wait(2)  # Paperless schonen
+        return True
 
     def llm_allowed_now(self) -> bool:
         return self.settings.llm_allowed_at(datetime.now(self.tz).hour)

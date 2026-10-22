@@ -89,7 +89,10 @@ class Settings(BaseSettings):
     firefly_auto_accept: bool = False
     # Buchungen ohne Beleg: Abbuchungen ab diesem Betrag der letzten … Tage prüfen
     receipts_min_amount: float = 50.0
-    receipts_lookback_days: int = 90  # eindeutige Treffer (Betrag + Rechnungsnr./IBAN) direkt als bezahlt markieren
+    receipts_lookback_days: int = 90
+    # Regeln: Textmerkmale (IBAN, Domain …) im Hintergrund aus dem Archiv lesen; Tag, den vorgeschlagene Regeln zusätzlich setzen
+    text_scan_enabled: bool = True
+    rules_review_tag: str = ""  # eindeutige Treffer (Betrag + Rechnungsnr./IBAN) direkt als bezahlt markieren
 
     # Aufbewahrung
     retention_tag: str = "Löschkandidat"

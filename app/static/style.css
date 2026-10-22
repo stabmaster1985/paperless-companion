@@ -288,15 +288,13 @@ img.thumb { width: 56px; height: 72px; object-fit: cover; object-position: top; 
 .steps li { margin: .35rem 0; }
 .glossary dt { font-weight: 600; margin-top: .6rem; }
 .glossary dd { margin: .15rem 0 0; color: var(--muted); }
-/* Auf-/zuklappbare Kästen */
-.card.collapsible > h2:first-child, .card.collapsible > h3:first-child,
-.card.collapsible > h2, .card.collapsible > h3 { cursor: pointer; user-select: none; }
-.card.collapsible > h2::before, .card.collapsible > h3::before { content: "▾"; display: inline-block; width: 1em; color: var(--muted);
-  transition: transform .15s; }
-.card.collapsed > h2::before, .card.collapsed > h3::before { transform: rotate(-90deg); }
-.card.collapsed > :not(h2):not(h3) { display: none; }
-.card.collapsed > h2, .card.collapsed > h3 { margin-bottom: 0; }
-.card.collapsible > h2:focus-visible, .card.collapsible > h3:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+/* Auf-/zuklappbare Kästen (nur die erste Überschrift eines Kastens schaltet) */
+.card-toggle { cursor: pointer; user-select: none; }
+.card-toggle::before { content: "▾"; display: inline-block; width: 1em; color: var(--muted); transition: transform .15s; }
+.card.collapsed > .card-toggle::before { transform: rotate(-90deg); }
+.card.collapsed > :not(.card-toggle) { display: none; }
+.card.collapsed > .card-toggle { margin-bottom: 0; }
+.card-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 .card > h2:first-child, .card > h3:first-child { margin-top: 0; }
 .meta-filter .filter-legend { margin: .6rem 0 .2rem; font-size: .8rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
 .changes-list .tags { display: flex; flex-wrap: wrap; gap: .2rem; margin-top: .3rem; }
@@ -322,3 +320,35 @@ pre.code { background: var(--bg); padding: .6rem; border-radius: 6px; overflow-x
 .impact h4 .check { font-weight: 400; }
 .impact-list li { display: flex; flex-wrap: wrap; gap: .35rem; align-items: baseline; }
 .impact-list label.check { display: inline-flex; gap: .35rem; align-items: baseline; margin: 0; }
+/* Regeln: Farbe je Regelart, klare Blöcke */
+.t-content { --rule: #7c3aed; --rule-bg: #f5f0ff; }
+.t-correspondent { --rule: #17845f; --rule-bg: #edf8f3; }
+.t-document_type { --rule: #c2410c; --rule-bg: #fff4ec; }
+.t-keyword { --rule: #1d4ed8; --rule-bg: #eef3ff; }
+@media (prefers-color-scheme: dark) {
+  .t-content { --rule-bg: #2a2140; } .t-correspondent { --rule-bg: #16302a; }
+  .t-document_type { --rule-bg: #3a2418; } .t-keyword { --rule-bg: #1c2540; }
+}
+.rule-chain { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; margin: .25rem 0 .75rem; }
+.chain-step { border-left: 4px solid var(--rule); background: var(--rule-bg); padding: .2rem .6rem; border-radius: 4px; font-size: .85rem; }
+.chain-arrow { color: var(--muted); }
+.rule-group { margin: 1.25rem 0 .4rem; padding: .3rem .6rem; border-left: 5px solid var(--rule); background: var(--rule-bg); border-radius: 4px; font-size: 1rem; }
+details.rule { border: 1px solid var(--border); border-left: 5px solid var(--rule); border-radius: var(--radius); margin: .6rem 0; background: var(--surface); padding: 0; }
+details.rule > summary { cursor: pointer; display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; padding: .6rem .75rem; background: var(--rule-bg);
+  border-radius: var(--radius) var(--radius) 0 0; list-style: none; }
+details.rule > summary::-webkit-details-marker { display: none; }
+details.rule > summary::before { content: "▸"; color: var(--rule); transition: transform .15s; }
+details.rule[open] > summary::before { transform: rotate(90deg); }
+details.rule:not([open]) > summary { border-radius: var(--radius); }
+details.rule > form, details.rule > .howto { padding: .5rem .75rem .75rem; }
+details.rule > .howto { margin: 0 .75rem .75rem; }
+.rule-title { font-weight: 600; }
+.rule-what { color: var(--muted); font-size: .9rem; flex: 1 1 12rem; }
+.tabs a.tab-content, .tabs a.tab-correspondent, .tabs a.tab-document_type, .tabs a.tab-keyword { border-left: 4px solid var(--rule); }
+.tab-content { --rule: #7c3aed; } .tab-correspondent { --rule: #17845f; } .tab-document_type { --rule: #c2410c; } .tab-keyword { --rule: #1d4ed8; }
+.impact-sum { margin: .5rem 0; }
+.scan-progress { margin: .25rem 0; }
+code.copy { user-select: all; word-break: break-all; background: var(--bg); padding: .1rem .3rem; border-radius: 4px; }
+.tag-warn { border-color: #d97706; color: #b45309; }
+.own-btn { margin-left: .25rem; font-size: .75rem; }
+.own-terms .tag { margin: 0 .15rem; }

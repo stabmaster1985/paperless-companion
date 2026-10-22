@@ -44,6 +44,16 @@ class FireflyClient:
             raise FireflyError(str(exc)) from exc
         return response.json().get("data", {})
 
+    def own_ibans(self) -> list[str]:
+        """IBANs deiner eigenen Konten (Bestandskonten) – die sind nie ein Merkmal eines Absenders."""
+        try:
+            response = self._client.get("/api/v1/accounts", params={"type": "asset", "limit": 200})
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise FireflyError(f"Konten laden: {exc}") from exc
+        return sorted({(a.get("attributes", {}).get("iban") or "").replace(" ", "").upper()
+                       for a in response.json().get("data", [])} - {""})
+
     def link(self, group_id: str) -> str:
         return f"{self.base_url}/transactions/show/{group_id}"
 

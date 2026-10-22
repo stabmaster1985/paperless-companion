@@ -476,6 +476,9 @@ def process_document(
 ) -> dict:
     data = paperless.get_document(doc.id)
     text = data.get("content") or ""
+    from app import identifiers  # lokal, um Importzyklen zu vermeiden
+
+    identifiers.store(doc, text)  # Textmerkmale für Korrespondenten-Regeln, ohne Zusatzaufwand
 
     if doc.kind_source in ("manual", "fields"):
         kind, source = doc.kind, doc.kind_source

@@ -11,6 +11,7 @@
     if (!h || card.classList.contains('no-collapse')) return;
     const key = keyOf(h);
     card.classList.add('collapsible');
+    h.classList.add('card-toggle');
     h.setAttribute('role', 'button');
     h.setAttribute('tabindex', '0');
     h.title = 'Klicken zum Auf- oder Zuklappen';

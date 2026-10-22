@@ -279,3 +279,120 @@ def test_rules_page_fix_outliers(client):
     assert response.headers["location"].startswith("/rules?trigger=correspondent&msg=F%C3%BCr%201%20Dokumente")
     page = client.get("/paperless-changes").text
     assert "Vorgemerkt – wartet auf Übertragung" in page and "Regel</span>" in page
+
+
+# --------------------------------------------------------------------------- Korrespondent aus Text
+
+from app import identifiers  # noqa: E402
+
+TEXT_SW = "Stadtwerke Musterstadt GmbH · www.stadtwerke-musterstadt.de · IBAN DE89 3704 0044 0532 0130 00 · Kundennummer: 4711-0815"
+TEXT_OWN = "Mein Konto IBAN DE02120300000000202051"  # eigene IBAN steht bei vielen Absendern
+
+
+def test_extract_identifiers():
+    found = identifiers.extract(TEXT_SW + " USt-IdNr. DE 123 456 789 info@paypal.com")
+    assert found["iban"] == ["DE89370400440532013000"] and found["vat"] == ["DE123456789"]
+    assert found["domain"] == ["stadtwerke-musterstadt.de"] and found["number"] == ["4711-0815"]
+    import re
+    pattern = identifiers.regex_for("iban", "DE89370400440532013000")
+    assert re.search(pattern, "IBAN: DE89 3704 0044 0532 0130 00") and re.search(pattern, "DE89370400440532013000")
+
+
+def add_text_doc(s, doc_id, corr, text):
+    doc = Document(id=doc_id, title=f"Brief {doc_id}", correspondent=corr, tags=[], extraction_state="skipped")
+    identifiers.store(doc, text)
+    s.add(doc)
+
+
+def test_content_rule_and_outliers(db):
+    with db() as s:
+        for i in range(4):
+            add_text_doc(s, 800 + i, "Stadtwerke", TEXT_SW + " " + TEXT_OWN if i % 2 else TEXT_SW)
+        add_text_doc(s, 804, "Stadtwerke", "Ablesekarte ohne Merkmale")  # wird nicht erkannt
+        for i in range(3):
+            add_text_doc(s, 810 + i, "Versicherung", "Allianz " + TEXT_OWN + " www.allianz.de")
+        add_text_doc(s, 820, None, "Rechnung " + TEXT_SW)  # ohne Korrespondent -> würde erkannt
+        s.add(Document(id=821, title="noch nicht gelesen", tags=[], extraction_state="skipped"))
+    with db() as s:
+        found = rules.compute_text(rules.archive(s))
+        rule = found["text:Stadtwerke"]
+        # eigene IBAN kommt bei zwei Absendern vor -> nie ein Merkmal
+        assert "iban:DE02120300000000202051" not in rule["terms"]
+        assert list(rule["terms"])[0] == "iban:DE89370400440532013000" and rule["coverage"] == 4 and rule["docs"] == 5
+        rules.refresh(s)
+        p = s.query(RuleProposal).filter_by(correspondent="text:Stadtwerke").one()
+        assert p.trigger == "content" and rules.label(p) == "Korrespondent „Stadtwerke“ am Text erkennen"
+        pv = rules.preview(s, p)
+        assert pv["unchanged"] == 4 and [e["id"] for e in pv["changed"]] == [820] and [e["id"] for e in pv["missed"]] == [804]
+        assert rules.prefill_fixes(s, p, [820]) == 1
+    with db() as s:
+        doc = s.get(Document, 820)
+        assert doc.meta_accepted["correspondent"] == {"value": "Stadtwerke", "source": "rule", "new_tag": False,
+                                                      "at": doc.meta_accepted["correspondent"]["at"]}
+        p = s.query(RuleProposal).filter_by(correspondent="text:Stadtwerke").one()
+        payload = rules.api_payload(p, {"correspondents": {"stadtwerke": 10}, "tags": {}, "document_types": {}})
+        assert payload["PATCH"] == "/api/correspondents/10/" and payload["matching_algorithm"] == 4
+        assert payload["match"].startswith(r"DE89\s?3704")
+        # Merkmale abwählen
+        rules.update(p, [], None, ["domain:stadtwerke-musterstadt.de"])
+        assert p.match_terms == ["domain:stadtwerke-musterstadt.de"] and p.edited
+
+
+def test_identifier_scan_and_review_tag(db, settings, mock_api):
+    from app.paperless import PaperlessClient
+    from tests.conftest import PAPERLESS
+
+    run_all(db, settings)
+    with db() as s:
+        assert identifiers.progress(s) == {"total": 3, "done": 3}  # beim Analysieren schon gelesen
+        s.add(Document(id=50, title="Archiv", correspondent="Stadtwerke", tags=[], extraction_state="skipped"))
+    with db() as s:
+        assert identifiers.scan(s, PaperlessClient(PAPERLESS, "x"), limit=5) == 1
+        assert identifiers.progress(s)["done"] == 4
+    p = RuleProposal(correspondent="Stadtwerke", trigger="correspondent", condition="Stadtwerke", tags=["Haus"])
+    ids = {"correspondents": {"stadtwerke": 10}, "tags": {"haus": 31, "zu prüfen": 99}, "document_types": {}}
+    assert rules.api_payload(p, ids, review_tag="Zu prüfen")["actions"][0]["assign_tags"] == [31, 99]
+
+
+def test_rules_page_groups_and_colors(client):
+    with session_scope() as s:
+        for i in range(3):
+            add_text_doc(s, 900 + i, "Stadtwerke", TEXT_SW)
+            s.get(Document, 900 + i).tags = ["Haus"]
+        add_docs(s, "Stadtwerke", 30, ["Haus"], start=300)
+    page = client.get("/rules").text
+    assert '<h3 class="rule-group t-content">Korrespondent aus Text</h3>' in page
+    assert page.index("t-content") < page.index('class="rule-group t-correspondent"')
+    assert 'class="rule t-content"' in page and "Textmerkmale (IBAN, Domain, Kundennr.) gelesen" in page
+
+
+def test_own_identifiers_are_never_used(db, mock_api):
+    from app.firefly import FireflyClient
+
+    mock_api.get(f"{FIREFLY}/api/v1/accounts").respond(json={"data": [
+        {"attributes": {"iban": "DE02 1203 0000 0000 2020 51"}}, {"attributes": {"iban": None}}]})
+    assert FireflyClient(FIREFLY, "t").own_ibans() == ["DE02120300000000202051"]
+    with db() as s:
+        for i in range(3):  # eigene IBAN nur bei einem Absender -> wäre sonst ein Merkmal
+            add_text_doc(s, 960 + i, "Allianz", "Allianz " + TEXT_OWN)
+    with db() as s:
+        assert "text:Allianz" in rules.compute(s)
+        identifiers.set_own_terms(s, identifiers.FIREFLY_OWN_KEY, ["iban:DE02120300000000202051"])
+    with db() as s:
+        assert "text:Allianz" not in rules.compute(s)
+
+
+def test_mark_own_term_in_ui(client):
+    with session_scope() as s:
+        for i in range(3):
+            add_text_doc(s, 960 + i, "Allianz", "Allianz www.allianz.de " + TEXT_OWN)
+    client.get("/rules")
+    client.post("/rules/own-term", data={"own_term": "iban:DE02120300000000202051"})
+    with session_scope() as s:
+        p = s.query(RuleProposal).filter_by(correspondent="text:Allianz").one()
+        assert p.match_terms == ["domain:allianz.de"]
+    page = client.get("/rules?trigger=content").text
+    assert "Eigene Merkmale, die nie verwendet werden" in page and "IBAN DE02120300000000202051" in page
+    client.post("/rules/own-term", data={"own_term": "iban:DE02120300000000202051", "undo": "1"})
+    with session_scope() as s:
+        assert "iban:DE02120300000000202051" not in identifiers.own_terms(s)

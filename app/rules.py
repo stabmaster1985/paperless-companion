@@ -27,8 +27,13 @@ KEYWORD_SHARE = 0.85
 MAX_KEYWORDS = 25
 YEAR_TAG = re.compile(r"(19|20)\d\d")
 STATES = {"proposed": "Vorschlag", "approved": "Freigegeben", "created": "In Paperless angelegt", "dismissed": "Verworfen"}
-TRIGGERS = {"correspondent": "Korrespondent", "document_type": "Dokumenttyp", "keyword": "Stichwort im Titel"}
-PREFIX = {"correspondent": "", "document_type": "typ:", "keyword": "wort:"}
+# Reihenfolge = Reihenfolge der Anzeige: erst den Absender aus dem Text erkennen, dann folgt der Rest
+TRIGGERS = {"content": "Korrespondent aus Text", "correspondent": "Korrespondent", "document_type": "Dokumenttyp",
+            "keyword": "Stichwort im Titel"}
+PREFIX = {"content": "text:", "correspondent": "", "document_type": "typ:", "keyword": "wort:"}
+TEXT_MIN_DOCS = 3
+TEXT_SHARE = 0.6
+TERM_ORDER = {"iban": 0, "vat": 1, "domain": 2, "number": 3}
 WORD = re.compile(r"[a-zäöüß][a-zäöüß\-]{3,}")
 STOPWORDS = {
     "scan", "dokument", "dokumente", "seite", "seiten", "kopie", "datei", "neue", "neuer", "neues", "ihre", "ihren", "ihrer",
@@ -53,6 +58,8 @@ def key_of(trigger: str, condition: str) -> str:
 
 def label(p: RuleProposal) -> str:
     trigger = p.trigger or "correspondent"
+    if trigger == "content":
+        return f"Korrespondent „{p.condition}“ am Text erkennen"
     return f"Wenn {TRIGGERS[trigger]} {'enthält' if trigger == 'keyword' else '='} „{p.condition or p.correspondent}“"
 
 
@@ -62,16 +69,20 @@ def label(p: RuleProposal) -> str:
 def archive(session: Session) -> list[dict]:
     """Alle Dokumente mit wirksamem Stand (Paperless + Vorgemerktes)."""
     rows = session.execute(select(Document.id, Document.title, Document.tags, Document.correspondent,
-                                  Document.document_type, Document.meta_accepted))
+                                  Document.document_type, Document.meta_accepted, Document.identifiers, Document.identifiers_at))
     result = []
-    for doc_id, title, tags, corr, doctype, accepted in rows:
+    for doc_id, title, tags, corr, doctype, accepted, idents, scanned in rows:
         tags, corr, doctype = effective(tags, corr, doctype, accepted)
         title = (accepted or {}).get("title", {}).get("value", title)
-        result.append({"id": doc_id, "title": title or "", "tags": tags, "correspondent": corr, "document_type": doctype})
+        terms = {f"{kind}:{value}" for kind, values in (idents or {}).items() for value in values}
+        result.append({"id": doc_id, "title": title or "", "tags": tags, "correspondent": corr, "document_type": doctype,
+                       "terms": terms, "scanned": scanned is not None})
     return result
 
 
 def matches(trigger: str, condition: str, doc: dict) -> bool:
+    if trigger == "content":
+        return doc["correspondent"] == condition
     if trigger == "correspondent":
         return doc["correspondent"] == condition
     if trigger == "document_type":
@@ -120,6 +131,10 @@ def compute(session: Session, docs: list[dict] | None = None) -> dict[str, dict]
             result[key_of("document_type", doctype)] = {"trigger": "document_type", "condition": doctype, **found}
 
     # Stichworte: nur, wenn sie nicht ohnehin an einem Absender hängen (dann reicht die Absender-Regel)
+    from app.identifiers import own_terms
+
+    result.update(compute_text(docs, own_terms(session)))
+
     corr_names = {c.lower() for c in by_corr}
     keyword_rules = []
     for word, rows in by_word.items():
@@ -143,6 +158,42 @@ def compute(session: Session, docs: list[dict] | None = None) -> dict[str, dict]
     return result
 
 
+def compute_text(docs: list[dict], own: set[str] = frozenset()) -> dict[str, dict]:
+    """Merkmale (IBAN, USt-IdNr., Domain, Kundennr.), die (fast) nur bei Dokumenten EINES Korrespondenten vorkommen.
+
+    Eigene Merkmale (deine IBANs aus Firefly, von dir als „eigen“ markierte) werden nie verwendet.
+    """
+    scanned = [d for d in docs if d["scanned"]]
+    owners: dict[str, Counter] = {}  # Merkmal -> Korrespondenten (None = ohne)
+    for d in scanned:
+        for term in d["terms"] - own:
+            owners.setdefault(term, Counter())[d["correspondent"]] += 1
+    per_corr: dict[str, list[dict]] = {}
+    for d in scanned:
+        if d["correspondent"]:
+            per_corr.setdefault(d["correspondent"], []).append(d)
+    result = {}
+    for corr, rows in per_corr.items():
+        n = len(rows)
+        if n < TEXT_MIN_DOCS:
+            continue
+        candidates = []
+        for term, by_owner in owners.items():
+            own = by_owner.get(corr, 0)
+            foreign = sum(c for owner, c in by_owner.items() if owner not in (corr, None))
+            if own >= 2 and own / n >= TEXT_SHARE and foreign == 0:
+                candidates.append((TERM_ORDER.get(term.split(":")[0], 9), -own, term))
+        if not candidates:
+            continue
+        chosen = [t for _, _, t in sorted(candidates)[:4]]
+        coverage = sum(1 for d in rows if d["terms"] & set(chosen))
+        result[key_of("content", corr)] = {
+            "trigger": "content", "condition": corr, "docs": n, "coverage": coverage,
+            "terms": {t: owners[t][corr] for t in chosen}, "tags": {}, "document_type": {},
+        }
+    return result
+
+
 def refresh(session: Session) -> int:
     """Vorschläge anlegen/aktualisieren. Freigegebene, angelegte, verworfene und bearbeitete bleiben, wie sie sind."""
     found = compute(session)
@@ -150,7 +201,7 @@ def refresh(session: Session) -> int:
     new = 0
     for key, basis in found.items():
         p = existing.get(key)
-        info = {k: basis[k] for k in ("docs", "tags", "document_type")}
+        info = {k: v for k, v in basis.items() if k not in ("trigger", "condition")}
         if p is None:
             p = RuleProposal(correspondent=key, trigger=basis["trigger"], condition=basis["condition"], state="proposed")
             session.add(p)
@@ -161,6 +212,7 @@ def refresh(session: Session) -> int:
         p.trigger, p.condition, p.basis = basis["trigger"], basis["condition"], info
         p.tags = list(basis["tags"])
         p.document_type = next(iter(basis["document_type"]), None) if basis["trigger"] != "document_type" else None
+        p.match_terms = list(basis["terms"]) if basis["trigger"] == "content" else None
     for key, p in existing.items():
         if key not in found and p.state == "proposed" and not p.edited:
             session.delete(p)
@@ -174,6 +226,8 @@ def preview(session: Session, proposal: RuleProposal, docs: list[dict] | None = 
     """Was bewirkt die Regel bei den bisherigen passenden Dokumenten? Ausreißer = vermutlich falsch einsortiert."""
     trigger, condition = proposal.trigger or "correspondent", proposal.condition or proposal.correspondent
     docs = docs if docs is not None else archive(session)
+    if trigger == "content":
+        return _preview_text(proposal, condition, docs)
     unchanged, changed, conflicts = 0, [], []
     for d in docs:
         if not matches(trigger, condition, d):
@@ -194,6 +248,31 @@ def preview(session: Session, proposal: RuleProposal, docs: list[dict] | None = 
             "total": unchanged + len(changed) + len(conflicts)}
 
 
+def _preview_text(proposal: RuleProposal, corr: str, docs: list[dict]) -> dict:
+    """Korrespondent aus Text: Wie viele eigene Dokumente werden erkannt, welche ohne Korrespondent kämen dazu,
+    und träfe die Regel fälschlich Dokumente anderer Absender?"""
+    terms = set(proposal.match_terms or [])
+    unchanged, missed, changed, conflicts, scanned_own = 0, [], [], [], 0
+    for d in docs:
+        if not d["scanned"]:
+            continue
+        hit = bool(d["terms"] & terms)
+        entry = {"id": d["id"], "title": d["title"], "add": [], "correspondent": d["correspondent"],
+                 "set_corr": corr, "type_from": None, "type_to": None, "terms": sorted(d["terms"] & terms)}
+        if d["correspondent"] == corr:
+            scanned_own += 1
+            if hit:
+                unchanged += 1
+            else:
+                missed.append(entry)
+        elif hit and not d["correspondent"]:
+            changed.append(entry)
+        elif hit:
+            conflicts.append(entry)
+    return {"unchanged": unchanged, "changed": changed, "conflicts": conflicts, "missed": missed,
+            "own": scanned_own, "total": unchanged + len(missed) + len(changed) + len(conflicts)}
+
+
 def prefill_fixes(session: Session, proposal: RuleProposal, doc_ids: list[int]) -> int:
     """Für ausgewählte Ausreißer die fehlenden Tags/den Typ VORMERKEN (nur im Companion, Quelle „Regel“).
 
@@ -208,6 +287,9 @@ def prefill_fixes(session: Session, proposal: RuleProposal, doc_ids: list[int]) 
         if doc is None:
             continue
         accepted = dict(doc.meta_accepted or {})
+        if e.get("set_corr"):
+            accepted["correspondent"] = {"value": e["set_corr"], "source": "rule", "new_tag": False, "at": stamp}
+            _decide(session, doc, "correspondent", "correspondent", e["set_corr"])
         for tag in e["add"]:
             accepted[f"tag:{tag}"] = {"value": tag, "source": "rule", "new_tag": False, "at": stamp}
             _decide(session, doc, f"tag:{tag}", "tag", tag)
@@ -263,7 +345,9 @@ def similar_names(session: Session) -> dict[str, list[list[tuple[str, int]]]]:
 # --------------------------------------------------------------------------- bearbeiten und anlegen
 
 
-def update(proposal: RuleProposal, tags: list[str], document_type: str | None) -> None:
+def update(proposal: RuleProposal, tags: list[str], document_type: str | None, terms: list[str] | None = None) -> None:
+    if (proposal.trigger or "") == "content":
+        proposal.match_terms = list(dict.fromkeys(t for t in terms or [] if t))
     proposal.tags = list(dict.fromkeys(t for t in tags if t))
     proposal.document_type = document_type or None
     proposal.edited = True
@@ -277,7 +361,15 @@ def set_state(proposal: RuleProposal, state: str) -> None:
     proposal.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-def api_payload(proposal: RuleProposal, ids: dict[str, dict[str, int]], objects: dict | None = None) -> dict | list:
+def text_regex(terms: list[str]) -> str:
+    """Regulärer Ausdruck für die Paperless-Zuordnung am Korrespondenten (findet IBAN auch mit Leerzeichen)."""
+    from app.identifiers import regex_for
+
+    return "|".join(regex_for(*t.split(":", 1)) for t in terms)
+
+
+def api_payload(proposal: RuleProposal, ids: dict[str, dict[str, int]], objects: dict | None = None,
+                review_tag: str = "") -> dict | list:
     """Inhalt für die Paperless-API – nur zur Kontrolle bzw. zum späteren Anlegen. Das Schema kann je nach Version abweichen.
 
     Korrespondent/Dokumenttyp: Workflow (Auslöser 2 = „Dokument hinzugefügt“, Aktion 1 = „Zuweisung“).
@@ -285,6 +377,9 @@ def api_payload(proposal: RuleProposal, ids: dict[str, dict[str, int]], objects:
     """
     trigger = proposal.trigger or "correspondent"
     condition = proposal.condition or proposal.correspondent
+    if trigger == "content":
+        return {"PATCH": f"/api/correspondents/{ids['correspondents'].get(condition.lower())}/",
+                "match": text_regex(proposal.match_terms or []), "matching_algorithm": 4, "is_insensitive": True}
     if trigger == "keyword":
         changes = []
         for endpoint, names in (("tags", proposal.tags), ("document_types", [proposal.document_type] if proposal.document_type else [])):
@@ -295,7 +390,8 @@ def api_payload(proposal: RuleProposal, ids: dict[str, dict[str, int]], objects:
                     if current.get("matching_algorithm") == 1 else condition
                 changes.append({"PATCH": f"/api/{endpoint}/{obj_id}/", "match": words, "matching_algorithm": 1})
         return changes
-    action: dict = {"type": 1, "assign_tags": [ids["tags"][t.lower()] for t in proposal.tags if t.lower() in ids["tags"]]}
+    tags = [*proposal.tags, *([review_tag] if review_tag and review_tag not in proposal.tags else [])]
+    action: dict = {"type": 1, "assign_tags": [ids["tags"][t.lower()] for t in tags if t.lower() in ids["tags"]]}
     if proposal.document_type and proposal.document_type.lower() in ids["document_types"]:
         action["assign_document_type"] = ids["document_types"][proposal.document_type.lower()]
     filter_key = "filter_has_correspondent" if trigger == "correspondent" else "filter_has_document_type"

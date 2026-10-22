@@ -69,6 +69,10 @@ SECTIONS: list[tuple[str, list[tuple[str, str, str]]]] = [
         ("receipts_min_amount", "Belege prüfen ab Betrag (€)", "Buchungen ohne Beleg"),
         ("receipts_lookback_days", "Belege prüfen: letzte … Tage", ""),
     ]),
+    ("Regeln", [
+        ("text_scan_enabled", "Textmerkmale im Hintergrund lesen", "IBAN, Domain, Kundennr. – für „Korrespondent aus Text“; nur lesend, ohne AI"),
+        ("rules_review_tag", "Prüf-Tag in Regel-Vorschlägen", "z.B. „Zu prüfen“ – wird in jede Regel-Anleitung aufgenommen, leer = nicht"),
+    ]),
     ("Steuer und Aufbewahrung", [
         ("tax_tags", "Steuer-Tags", "kommagetrennt; Dokumenttypen unter „Dokumenttypen“"),
         ("retention_tag", "Tag für Löschkandidaten", ""),

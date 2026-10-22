@@ -215,6 +215,17 @@ nicht verändert. Geprüft wird stündlich zusammen mit dem Zahlungsabgleich.
   „Gelernt“). Das spart AI-Abfragen. Jede gelernte Regel lässt sich unter **Regeln** abschalten.
 - **Trefferquote:** Beim Bestätigen in der Inbox zählt die App je Quelle (Regel, AI, Gelernt …) und Feld,
   ob der Vorschlag stimmte.
+- **Korrespondent aus Text** (steht ganz oben – ein neues Dokument hat zunächst nur seinen Text): Die App liest
+  im Hintergrund, nur lesend und ohne AI, Textmerkmale aller Dokumente – IBAN, USt-IdNr., Web-/E-Mail-Domain,
+  Kunden-/Vertragsnummer – und speichert nur diese Merkmale. Kommen Merkmale bei mindestens 60 % der
+  Dokumente eines Absenders und bei keinem anderen vor, schlägt sie eine Zuordnung am Korrespondenten vor
+  (regulärer Ausdruck, IBAN auch mit Leerzeichen). Die Auswirkung zeigt, wie viele Dokumente erkannt
+  würden, welche **ohne Korrespondent** ihn bekämen (zum Korrigieren vormerken) und welche nicht erkannt werden.
+  Deine eigenen IBANs aus Firefly und mit „eigen?“ markierte Merkmale werden nie verwendet.
+  `TEXT_SCAN_ENABLED=false` schaltet das Lesen ab.
+- **Prüf-Tag:** Mit `RULES_REVIEW_TAG` (z.B. „Zu prüfen“) nimmt jede Regel-Anleitung diesen Tag mit auf –
+  neue Dokumente sind dann markiert, bis du sie angesehen und den Tag entfernt hast.
+- Jede Regelart hat eine eigene Farbe, jede Regel ist ein zuklappbarer Block.
 - **Regelvorschläge aus deinem Archiv** (inkl. Vorgemerktem, ohne Jahres-Tags und verworfene Tags):
   - *Korrespondent → Tags/Typ* und *Dokumenttyp → Tags*: ab 5 Dokumenten zu 90 % einheitlich → Paperless-Workflow
     („Dokument hinzugefügt“ + Filter „Hat Korrespondent“/„Hat Dokumenttyp“ → Zuweisung).
