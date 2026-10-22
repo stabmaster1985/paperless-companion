@@ -330,3 +330,18 @@ def test_notice_for_unresolved_tags(client):
     assert "1 Dokumente tragen Tags nur als Nummer (#55)" in page
     response = client.post("/settings/reindex", data={"back": "/paperless-changes"}, follow_redirects=False)
     assert response.headers["location"].startswith("/paperless-changes?msg=")
+
+
+def test_review_one_by_one(client):
+    page = client.get("/paperless-changes").text
+    assert "Einzeln durchgehen (1 Dokumente)" in page
+    page = client.get("/review").text
+    assert "Dokument 1 von 1" in page and 'name="title" value="Rechnung Waschmaschine September 2026"' in page
+    response = client.post("/review/3", data={"action": "accept", "item": ["tag:Haus", "title"], "title": "Rechnung Waschmaschine",
+                                              "dismiss_rest": "1"}, follow_redirects=False)
+    assert response.headers["location"].startswith("/review?after=3&msg=")
+    with session_scope() as s:
+        doc = s.get(Document, 3)
+        assert set(doc.meta_accepted) == {"tag:Haus", "title"} and doc.meta_accepted["title"]["value"] == "Rechnung Waschmaschine"
+        assert "tag:Elektronik" in doc.meta_dismissed
+    assert "Keine offenen Vorschläge" in client.get("/review?after=3").text

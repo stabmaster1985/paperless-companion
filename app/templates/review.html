@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% from "macros.html" import doclink, help %}
+{% block title %}Vorschläge durchgehen – Paperless Companion{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+<div class="head">
+  <h1>Vorschläge durchgehen</h1>
+  <a class="button small" href="/paperless-changes?{{ query }}#metadata">Zur Liste</a>
+</div>
+{% if msg %}<div class="notice ok">{{ msg }}</div>{% endif %}
+{% if not current %}
+  <p class="empty">Keine offenen Vorschläge{{ ' für diesen Filter' if query }}. <a href="/paperless-changes#metadata">Zurück zu „Für Paperless“</a></p>
+{% else %}
+{% set doc, items = current %}
+<div class="review-progress" aria-label="Fortschritt">
+  <div class="bar"><span style="width: {{ (100 * position / total)|round|int }}%"></span></div>
+  <small class="muted">Dokument {{ position }} von {{ total }}{% if query %} (gefiltert){% endif %} ·
+    Tasten: <kbd>V</kbd> vormerken, <kbd>X</kbd> verwerfen, <kbd>S</kbd> überspringen</small>
+</div>
+<div class="review-layout">
+  <aside class="viewer card">
+    <details class="viewer-toggle" open>
+      <summary>Vorschau <a class="tab-link" href="/documents/{{ doc.id }}/preview" target="_blank" rel="noopener">in neuem Tab ↗</a></summary>
+      <iframe src="/documents/{{ doc.id }}/preview#view=FitH" title="Vorschau von {{ doc.title }}" loading="lazy"></iframe>
+    </details>
+  </aside>
+  <div class="review-main">
+    <form method="post" action="/review/{{ doc.id }}" id="review-form" class="card review-card">
+      {% for k, v in flt.items() if v %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+      <header class="review-head">
+        <a href="/documents/{{ doc.id }}#metadata"><strong>{{ doc.title or ('#' ~ doc.id) }}</strong></a> {{ doclink(doc.id) }}
+        <div class="doc-meta">{{ doc.correspondent or 'ohne Korrespondent' }}{% if doc.document_type %} · {{ doc.document_type }}{% endif %}{% if doc.created %} · {{ doc.created|d }}{% endif %}</div>
+        <div class="tags">{% for t in doc.tags or [] %}<span class="tag">{{ t }}</span>{% else %}<small class="muted">keine Tags</small>{% endfor %}</div>
+      </header>
+      <div class="sugg-list">
+        {% for it in items %}
+        {% set kind = 'tag' if it.key.startswith('tag:') else it.key %}
+        <label class="sugg-row k-{{ kind }}">
+          <input type="checkbox" name="item" value="{{ it.key }}" {{ 'checked' if it.useful }}>
+          <span class="kind-pill">{{ it.label }}</span>
+          <span class="change">
+            {% if it.current %}<span class="old">{{ it.current }}</span> → {% elif kind == 'tag' %}+ {% endif %}
+            {% if kind == 'title' %}<input name="title" value="{{ it.new }}" aria-label="Neuer Titel" class="title-edit">
+            {% else %}<strong>{{ it.new }}</strong>{% endif %}
+            {% if it.new_tag %}<small class="soon">neuer Tag</small>{% endif %}
+          </span>
+          <span class="when"><span class="badge src-{{ it.source }}">{{ META_SOURCES.get(it.source, it.source) }}</span></span>
+        </label>
+        {% endfor %}
+      </div>
+      <label class="check small-check dismiss-rest"><input type="checkbox" name="dismiss_rest" value="1"> nicht ausgewählte dabei verwerfen</label>
+      <div class="review-actions">
+        <button name="action" value="accept" class="primary big" accesskey="v" title="{{ TIPS.vormerken }} (Taste V)">✓ Vormerken</button>
+        <button name="action" value="dismiss" class="big" title="Ausgewählte verwerfen (Taste X)">✕ Verwerfen</button>
+        <button name="action" value="skip" class="big link" title="Später entscheiden (Taste S)">Überspringen →</button>
+      </div>
+      <p class="hint">Vormerken speichert nur im Companion. Übertragen nach Paperless unter „Für Paperless → Vorgemerkt“.</p>
+    </form>
+  </div>
+</div>
+<script>
+document.addEventListener('keydown', (e) => {
+  if (e.target.matches('input[type=text], input:not([type]), textarea') || e.ctrlKey || e.metaKey || e.altKey) return;
+  const map = { v: 'accept', x: 'dismiss', s: 'skip', ArrowRight: 'skip' };
+  const action = map[e.key] || map[e.key.toLowerCase()];
+  if (!action) return;
+  e.preventDefault();
+  document.querySelector(`#review-form button[value="${action}"]`).click();
+});
+</script>
+{% endif %}
+{% endblock %}

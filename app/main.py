@@ -1289,6 +1289,43 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         query = meta_query(flt)
         return RedirectResponse(f"/paperless-changes?{query}{'&' if query else ''}msg={quote(msg)}#metadata", status_code=303)
 
+    # ------------------------------------------------------------------ Vorschläge einzeln durchgehen
+
+    @app.get("/review", response_class=HTMLResponse)
+    def review_page(request: Request, after: int = 0, msg: str = "", session: Session = Depends(get_session)):
+        flt = {k: str(request.query_params.get(k) or "").strip() for k in metadata.FILTER_KEYS}
+        rows = metadata.pending_rows(session, "open", **flt)
+        nxt = next(((d, items) for d, items in rows if d.id > after), None) or (rows[0] if rows and after else None)
+        position = [d.id for d, _ in rows].index(nxt[0].id) + 1 if nxt else 0
+        return render(request, "review.html", current=nxt, total=len(rows), position=position, msg=msg,
+                      flt=flt, query=meta_query(flt), META_SOURCES=metadata.SOURCES)
+
+    @app.post("/review/{doc_id}")
+    async def review_action(doc_id: int, request: Request, session: Session = Depends(get_session)):
+        form = await request.form()
+        flt = {k: str(form.get(k) or "") for k in metadata.FILTER_KEYS}
+        doc = session.get(Document, doc_id)
+        if doc is None:
+            raise HTTPException(404)
+        action = form.get("action")
+        keys = [str(k) for k in form.getlist("item")]
+        open_keys = [i["key"] for i in metadata.pending(doc, everything=True) if i["state"] == "open"]
+        if action == "accept":
+            n = metadata.accept(session, doc, keys, str(form.get("title") or ""))
+            msg = f"{n} vorgemerkt"
+            if form.get("dismiss_rest"):
+                rest = [k for k in open_keys if k not in keys]
+                msg += f", {metadata.dismiss(session, doc, rest)} verworfen" if rest else ""
+        elif action == "dismiss":
+            msg = f"{metadata.dismiss(session, doc, keys or open_keys)} verworfen"
+        elif action == "skip":
+            msg = "übersprungen"
+        else:
+            raise HTTPException(400)
+        query = meta_query(flt)
+        return RedirectResponse(f"/review?{query}{'&' if query else ''}after={doc_id}&msg={quote(f'„{doc.title}“: {msg}')}",
+                                status_code=303)
+
     def meta_query(flt: dict) -> str:
         from urllib.parse import urlencode
 

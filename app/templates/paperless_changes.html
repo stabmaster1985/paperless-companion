@@ -195,6 +195,7 @@
 
 <section class="card section-open">
 <h3>Offene Vorschläge ({{ meta_open_count }}{{ ', gefiltert' if mf_active }}) {{ help("Noch nicht entschieden. Vormerken oder verwerfen – beides bleibt im Companion.") }}</h3>
+{% if meta_open %}<p><a class="button primary small" href="/review?{{ meta_query }}" title="Ein Dokument nach dem anderen mit Vorschau – gut am Handy">▶ Einzeln durchgehen ({{ meta_open|length }} Dokumente)</a></p>{% endif %}
 <p class="muted">Hier stehen fehlende Tags, Titel nur, wenn der jetzige nichtssagend ist (z.B. „Scan_0012“), und Korrespondent/Dokumenttyp nur,
   wenn sie in Paperless fehlen. Abweichungen bei gepflegten Werten siehst du auf der Dokumentseite.</p>
 {% if meta_open %}

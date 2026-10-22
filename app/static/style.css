@@ -415,3 +415,23 @@ code.copy { user-select: all; word-break: break-all; background: var(--bg); padd
 .trial-box { border: 1px dashed var(--border); border-radius: var(--radius); padding: .4rem .7rem; margin: .5rem 0; }
 .trial-box h4 { margin: .2rem 0; }
 .existing-list li { margin: .35rem 0; }
+
+/* Vorschläge einzeln durchgehen */
+.review-progress { margin: .25rem 0 .75rem; }
+.review-progress .bar { height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; border: 1px solid var(--border); }
+.review-progress .bar span { display: block; height: 100%; background: var(--accent); }
+.review-card { padding: 0; overflow: hidden; }
+.review-head { padding: .7rem .8rem; background: var(--bg); border-bottom: 1px solid var(--border); }
+.review-head .tags { display: flex; flex-wrap: wrap; gap: .2rem; margin-top: .3rem; }
+.title-edit { width: 100%; min-width: 12rem; }
+.dismiss-rest { margin: .5rem .8rem 0; }
+.review-actions { display: flex; flex-wrap: wrap; gap: .5rem; padding: .75rem .8rem; }
+.review-actions .big { padding: .65rem 1.1rem; font-size: 1rem; }
+.review-card .hint { padding: 0 .8rem .8rem; }
+.viewer-toggle > summary { cursor: pointer; display: flex; justify-content: space-between; margin-bottom: .4rem; }
+kbd { border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 0 .3rem; font-size: .75rem; background: var(--surface); }
+@media (max-width: 640px) {
+  .review-actions { position: sticky; bottom: 0; background: var(--surface); border-top: 1px solid var(--border); }
+  .review-actions .big { flex: 1 1 30%; padding: .7rem .4rem; }
+  .viewer iframe { height: 45vh; }
+}
