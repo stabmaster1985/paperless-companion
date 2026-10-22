@@ -101,6 +101,10 @@
       {% if p.edited %}<span class="tag" title="Von dir angepasst">angepasst</span>{% endif %}
       {% set n_out = pv.changed|length + pv.conflicts|length %}
       {% if n_out %}<span class="tag tag-warn" title="Dokumente, die vom Muster abweichen">{{ n_out }} Ausreißer</span>{% endif %}
+      {% set cov = coverage.get(p.id) %}
+      {% if cov %}<span class="tag cov-{{ cov.state }}" title="{{ cov.note }}">{{ {'covered': 'in Paperless vorhanden', 'partial': 'teilweise in Paperless', 'conflict': 'Konflikt mit Paperless'}[cov.state] }}</span>{% endif %}
+      {% set tr = trials.get(p.id) %}
+      {% if tr %}<span class="tag trial {{ 'trial-bad' if tr.wrong else ('trial-ok' if tr.correct else '') }}" title="Testbetrieb seit der Freigabe">Test: {{ tr.correct }}/{{ tr.total - tr.open }} richtig{% if tr.open %} · {{ tr.open }} offen{% endif %}</span>{% endif %}
     </summary>
     <form method="post" action="/rules/proposals/{{ p.id }}">
       <input type="hidden" name="back" value="show={{ show }}{{ '&trigger=' ~ trigger if trigger }}">
@@ -135,6 +139,19 @@
         {% endif %}
         {% endif %}
       </div>
+
+      {% if cov %}<p class="cov-note cov-{{ cov.state }}"><small><strong>Paperless:</strong> {{ cov.note }}</small></p>{% endif %}
+      {% if tr %}
+      <div class="trial-box">
+        <h4>Testbetrieb {{ help("Seit der Freigabe prüft die App die Regel an jedem neuen Dokument, ohne Paperless zu ändern: Hätte sie richtig gelegen? „Offen“ = noch nicht durchgesehen.") }}</h4>
+        {% if tr.total %}
+        <p>{{ tr.total }} neue Dokumente, bei denen die Regel gegriffen hätte: <strong>{{ tr.correct }} richtig</strong>,
+          <span class="{{ 'bad' if tr.wrong }}">{{ tr.wrong|length }} falsch</span>, {{ tr.open }} noch offen.</p>
+        {% if tr.wrong %}<ul class="plain impact-list">{% for e in tr.wrong[:20] %}<li><a href="/documents/{{ e.id }}">{{ e.title or ('#' ~ e.id) }}</a> {{ doclink(e.id) }}
+          <small class="bad">{{ e.problems|join(', ') }}</small></li>{% endfor %}</ul>{% endif %}
+        {% else %}<p class="muted">Seit der Freigabe ({{ p.approved_at|ts }}) ist noch kein passendes neues Dokument gekommen.</p>{% endif %}
+      </div>
+      {% endif %}
 
       <div class="impact">
         <p class="impact-sum">
@@ -243,6 +260,34 @@
     {% for t in own_terms %}<span class="tag">{{ term_label(t) }}</span>{% if t in manual_own %}<form method="post" action="/rules/own-term" class="inline">
       <input type="hidden" name="own_term" value="{{ t }}"><input type="hidden" name="undo" value="1"><button class="link small" title="Wieder berücksichtigen">×</button></form>{% endif %}
     {% endfor %}</small></p>
+  {% endif %}
+</section>
+
+<section class="card" id="existing">
+  <h2>In Paperless vorhanden {{ help("Nur gelesen: Workflows und Zuordnungen aus deinem Paperless. Vorschläge, die dort schon umgesetzt sind, werden markiert; freigegebene Regeln, die die App dort findet, gelten automatisch als angelegt.") }}</h2>
+  {% if ids_error %}<div class="notice warn"><small>{{ ids_error }}</small></div>{% endif %}
+  <h4>Workflows ({{ pl_workflows|length }})</h4>
+  {% if pl_workflows %}
+  <ul class="plain existing-list">
+    {% for w in pl_workflows %}
+    <li class="{{ 'muted' if not w.enabled }}"><strong>{{ w.name }}</strong>{% if not w.enabled %} <span class="tag">aus</span>{% endif %}<br>
+      <small>wenn {% for k, v in w.conditions %}{{ k }} = „{{ v }}“{{ ' und ' if not loop.last }}{% else %}(ohne Filter){% endfor %}
+      → {% if w.tags %}Tags {{ w.tags|join(', ') }}{% endif %}{% if w.document_type %}{{ ', ' if w.tags }}Typ {{ w.document_type }}{% endif %}{% if w.correspondent %}{{ ', ' if w.tags or w.document_type }}Korrespondent {{ w.correspondent }}{% endif %}</small></li>
+    {% endfor %}
+  </ul>
+  {% else %}<p class="muted">Keine Workflows gefunden{% if ids_error %} (oder keine Leserechte){% endif %}.</p>{% endif %}
+  {% set auto = pl_matchings|selectattr('algorithm', 'equalto', 6)|list %}
+  <h4>Zuordnungen ({{ pl_matchings|length }}){% if auto %} – davon {{ auto|length }} automatisch lernend{% endif %}</h4>
+  {% if auto %}<p class="muted"><small>„Automatisch (lernend)“ rät anhand bisheriger Dokumente – bei wenigen oder uneinheitlichen Dokumenten oft daneben.
+    Wo die App eine Regel vorschlägt, ist eine feste Zuordnung meist zuverlässiger.</small></p>{% endif %}
+  {% if pl_matchings %}
+  <details><summary>Alle anzeigen</summary>
+    <div class="table-wrap"><table class="list">
+      <thead><tr><th>Art</th><th>Name</th><th>Zuordnung</th></tr></thead>
+      <tbody>{% for m in pl_matchings %}<tr><td>{{ m.kind }}</td><td>{{ m.name }}</td>
+        <td><span class="{{ 'tag tag-warn' if m.algorithm == 6 }}">{{ m.algorithm_label }}</span>{% if m.match %} <code>{{ m.match }}</code>{% endif %}</td></tr>{% endfor %}</tbody>
+    </table></div>
+  </details>
   {% endif %}
 </section>
 

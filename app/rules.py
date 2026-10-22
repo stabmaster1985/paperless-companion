@@ -354,11 +354,67 @@ def update(proposal: RuleProposal, tags: list[str], document_type: str | None, t
     proposal.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-def set_state(proposal: RuleProposal, state: str) -> None:
+def set_state(proposal: RuleProposal, state: str, session: Session | None = None) -> None:
     if state not in STATES:
         raise ValueError(state)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    if state == "approved" and session is not None and proposal.baseline_doc_id is None:
+        # Testbetrieb startet: geprüft werden alle Dokumente, die ab jetzt neu dazukommen
+        from sqlalchemy import func
+
+        proposal.baseline_doc_id = session.scalar(select(func.max(Document.id))) or 0
+        proposal.approved_at = now
+    if state == "proposed":
+        proposal.baseline_doc_id, proposal.approved_at = None, None
     proposal.state = state
-    proposal.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    proposal.updated_at = now
+
+
+# --------------------------------------------------------------------------- Testbetrieb
+
+
+def predicts(proposal: RuleProposal, d: dict) -> dict | None:
+    """Was würde die Regel bei diesem Dokument setzen? None = Regel greift nicht."""
+    trigger = proposal.trigger or "correspondent"
+    if trigger == "content":
+        return {"correspondent": proposal.condition} if d["terms"] & set(proposal.match_terms or []) else None
+    if not matches(trigger, proposal.condition or proposal.correspondent, d):
+        return None
+    return {"tags": list(proposal.tags or []), "document_type": proposal.document_type}
+
+
+def trial(session: Session, proposal: RuleProposal, docs: list[dict]) -> dict | None:
+    """Testbetrieb: Hätte die Regel bei den seit der Freigabe neu hinzugekommenen Dokumenten richtig gelegen?
+
+    Richtig = was die Regel gesetzt hätte, entspricht dem jetzigen Stand (Paperless + Vorgemerktes).
+    Offen = das Dokument ist noch nicht durchgesehen (Analyse läuft oder Vorschläge dazu sind unentschieden).
+    """
+    from app.metadata import pending
+
+    if proposal.baseline_doc_id is None or proposal.state not in ("approved", "created"):
+        return None
+    result = {"total": 0, "correct": 0, "open": 0, "wrong": []}
+    for d in docs:
+        if d["id"] <= proposal.baseline_doc_id or (pred := predicts(proposal, d)) is None:
+            continue
+        result["total"] += 1
+        doc = session.get(Document, d["id"])
+        relevant = {f"tag:{t}" for t in pred.get("tags") or []} | {k for k in ("correspondent", "document_type") if pred.get(k)}
+        undecided = {i["key"] for i in pending(doc) if i["state"] == "open"} & relevant
+        if doc.extraction_state in ("queued", "running") or doc.meta_state in ("queued", "running") or undecided:
+            result["open"] += 1
+            continue
+        have = {t.lower() for t in d["tags"]}
+        problems = [f"Tag {t} fehlt" for t in pred.get("tags") or [] if t.lower() not in have]
+        if pred.get("document_type") and d["document_type"] != pred["document_type"]:
+            problems.append(f"Typ ist {d['document_type'] or 'leer'}")
+        if pred.get("correspondent") and d["correspondent"] != pred["correspondent"]:
+            problems.append(f"Korrespondent ist {d['correspondent'] or 'leer'}")
+        if problems:
+            result["wrong"].append({"id": d["id"], "title": d["title"], "problems": problems})
+        else:
+            result["correct"] += 1
+    return result
 
 
 def text_regex(terms: list[str]) -> str:

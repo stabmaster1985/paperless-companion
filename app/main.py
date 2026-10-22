@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import appsettings, cases, help as helptexts, identifiers, learning, receipts, rules as rule_proposals, deadlines, events, fields, highlight, ics, metadata, notify, payments, pipeline, reminders, retention, selection, tax
+from app import appsettings, cases, help as helptexts, identifiers, learning, paperless_rules, receipts, rules as rule_proposals, deadlines, events, fields, highlight, ics, metadata, notify, payments, pipeline, reminders, retention, selection, tax
 from app.config import Settings, get_settings
 from app.db import get_session, init_db, session_scope
 from app.models import Case, CaseDocument, CaseEntry, Contract, Document, Invoice, KeyValue, ReceiptCheck, RuleProposal, RetentionLog, RetentionRule, Warranty
@@ -1098,6 +1098,20 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                    session: Session = Depends(get_session)):
         rule_proposals.refresh(session)
         session.flush()
+        # Bestehende Regeln in Paperless (nur lesend) – für „schon vorhanden“, Konflikte und die Anleitungen
+        paperless = make_paperless(settings, timeout=15)
+        try:
+            existing = paperless_rules.load(paperless)
+        finally:
+            paperless.close()
+        coverage = {p.id: paperless_rules.coverage(p, existing) for p in session.scalars(select(RuleProposal))}
+        auto_created = 0
+        for p in session.scalars(select(RuleProposal).where(RuleProposal.state == "approved")):
+            if (coverage.get(p.id) or {}).get("state") == "covered":
+                rule_proposals.set_state(p, "created", session)  # in Paperless gefunden -> erledigt
+                auto_created += 1
+        if auto_created:
+            msg = (msg + " · " if msg else "") + f"{auto_created} freigegebene Regeln in Paperless gefunden und als angelegt markiert"
         order = list(rule_proposals.TRIGGERS)
         all_proposals = sorted(session.scalars(select(RuleProposal)),
                                key=lambda p: (order.index(p.trigger or "correspondent"), p.correspondent.lower()))
@@ -1111,23 +1125,19 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         docs = rule_proposals.archive(session)
         previews = {p.id: rule_proposals.preview(session, p, docs) for p in proposals}
         outliers = sum(len(pv["changed"]) + len(pv["conflicts"]) for pv in previews.values())
-        ids, objects, ids_error = None, None, None
-        if any(p.state == "approved" for p in proposals):
-            paperless = make_paperless(settings, timeout=15)
-            try:
-                objects = {e: {o["name"].lower(): o for o in paperless.objects(e)} for e in ("tags", "correspondents", "document_types")}
-                ids = {e: {name: o["id"] for name, o in objs.items()} for e, objs in objects.items()}
-            except PaperlessError as exc:
-                ids_error = str(exc)
-            finally:
-                paperless.close()
+        objects = {e: {o["name"].lower(): o for o in existing["objects"].get(e, [])} for e in paperless_rules.ENDPOINTS}
+        ids = {e: {name: o["id"] for name, o in objs.items()} for e, objs in objects.items()}
+        ids_error = "; ".join(existing["errors"]) or None
+        trials = {p.id: rule_proposals.trial(session, p, docs) for p in proposals}
         tag_choices = sorted({t for d in docs for t in d["tags"] if not pipeline.is_unresolved_tag(t)}, key=str.lower)
         doctype_choices = sorted({d["document_type"] for d in docs if d["document_type"]}, key=str.lower)
         return render(
             request, "rules.html", msg=msg, show=show, trigger=trigger, proposals=proposals, counts=counts,
             trigger_counts=trigger_counts, STATES=rule_proposals.STATES, TRIGGERS=rule_proposals.TRIGGERS,
             previews=previews, outliers=outliers, rule_label=rule_proposals.label, MATCHING=rule_proposals.MATCHING,
-            payload=(lambda p: rule_proposals.api_payload(p, ids, objects, settings.rules_review_tag)) if ids else None,
+            payload=(lambda p: rule_proposals.api_payload(p, ids, objects, settings.rules_review_tag)) if ids["correspondents"] or ids["tags"] else None,
+            coverage=coverage, trials=trials, pl_workflows=paperless_rules.workflows(existing),
+            pl_matchings=paperless_rules.matchings(existing),
             objects=objects, review_tag=settings.rules_review_tag, scan=identifiers.progress(session), scan_enabled=settings.text_scan_enabled,
             text_regex=rule_proposals.text_regex, term_label=identifiers.term_label,
             own_terms=sorted(identifiers.own_terms(session)), manual_own=set(json.loads(session.get(KeyValue, identifiers.OWN_KEY).value))
@@ -1180,8 +1190,8 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         elif action in ("approved", "dismissed", "created", "proposed"):
             if action == "proposed":
                 proposal.edited = False  # zurück auf den berechneten Vorschlag
-            rule_proposals.set_state(proposal, action)
-            msg = {"approved": "Freigegeben – unten steht, wie du die Regel in Paperless anlegst",
+            rule_proposals.set_state(proposal, action, session)
+            msg = {"approved": "Freigegeben – Testbetrieb läuft ab jetzt mit jedem neuen Dokument; unten steht, wie du die Regel in Paperless anlegst",
                    "dismissed": "Verworfen", "created": "Als in Paperless angelegt markiert",
                    "proposed": "Zurück auf Vorschlag"}[action]
         else:

@@ -73,6 +73,7 @@ def mock_api():
             {"id": 20, "name": "Rechnung"}, {"id": 21, "name": "Vertrag"},
         ]))
         router.get(f"{PAPERLESS}/api/tags/").respond(json=page([{"id": 30, "name": "Steuer"}, {"id": 31, "name": "Haus"}]))
+        router.get(f"{PAPERLESS}/api/workflows/").respond(json=page([]))
         router.get(f"{PAPERLESS}/api/documents/").respond(json=page(list(DOCS.values())))
         for doc_id, doc in DOCS.items():
             router.get(f"{PAPERLESS}/api/documents/{doc_id}/").respond(json=doc)

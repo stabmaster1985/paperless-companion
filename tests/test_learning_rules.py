@@ -396,3 +396,79 @@ def test_mark_own_term_in_ui(client):
     client.post("/rules/own-term", data={"own_term": "iban:DE02120300000000202051", "undo": "1"})
     with session_scope() as s:
         assert "iban:DE02120300000000202051" not in identifiers.own_terms(s)
+
+
+# --------------------------------------------------------------------------- Testbetrieb und bestehende Paperless-Regeln
+
+from app import paperless_rules  # noqa: E402
+
+
+def test_trial_after_approval(db):
+    with db() as s:
+        add_docs(s, "Stadtwerke", 6, ["Haus"], start=300)
+    with db() as s:
+        rules.refresh(s)
+        p = s.query(RuleProposal).filter_by(correspondent="Stadtwerke").one()
+        rules.set_state(p, "approved", s)
+        assert p.baseline_doc_id == 305
+        assert rules.trial(s, p, rules.archive(s)) == {"total": 0, "correct": 0, "open": 0, "wrong": []}
+        # Neue Dokumente nach der Freigabe: eines richtig, eines falsch, eines noch offen
+        s.add(Document(id=400, title="neu 1", correspondent="Stadtwerke", document_type="Rechnung", tags=["Haus"],
+                       extraction_state="done"))
+        s.add(Document(id=401, title="neu 2", correspondent="Stadtwerke", document_type="Rechnung", tags=["Strom"],
+                       extraction_state="done"))
+        s.add(Document(id=402, title="neu 3", correspondent="Stadtwerke", tags=[], extraction_state="queued"))
+        s.add(Document(id=403, title="anderer", correspondent="Telekom", tags=[], extraction_state="done"))
+    with db() as s:
+        p = s.query(RuleProposal).filter_by(correspondent="Stadtwerke").one()
+        tr = rules.trial(s, p, rules.archive(s))
+        assert tr["total"] == 3 and tr["correct"] == 1 and tr["open"] == 1
+        assert tr["wrong"] == [{"id": 401, "title": "neu 2", "problems": ["Tag Haus fehlt"]}]
+        rules.set_state(p, "proposed", s)
+        assert p.baseline_doc_id is None and rules.trial(s, p, rules.archive(s)) is None
+
+
+def test_existing_paperless_rules_coverage():
+    data = {
+        "objects": {
+            "tags": [{"id": 31, "name": "Haus", "matching_algorithm": 6}, {"id": 5, "name": "Versicherung", "matching_algorithm": 1,
+                                                                            "match": "police versicherung"}],
+            "correspondents": [{"id": 10, "name": "Stadtwerke", "matching_algorithm": 4, "match": r"DE89\s?3704\s?0044\s?0532\s?0130\s?00"}],
+            "document_types": [{"id": 20, "name": "Rechnung", "matching_algorithm": 0}],
+        },
+        "workflows": [{"name": "Strom", "enabled": True, "triggers": [{"type": 2, "filter_has_correspondent": 10}],
+                       "actions": [{"type": 1, "assign_tags": [31], "assign_document_type": 20}]}],
+        "errors": [],
+    }
+    wf = paperless_rules.workflows(data)
+    assert wf[0]["conditions"] == [("Korrespondent", "Stadtwerke")] and wf[0]["tags"] == ["Haus"] and wf[0]["document_type"] == "Rechnung"
+    assert paperless_rules.matchings(data)[0]["algorithm_label"] == "automatisch (lernend)"
+    covered = RuleProposal(correspondent="Stadtwerke", trigger="correspondent", condition="Stadtwerke", tags=["Haus"],
+                           document_type="Rechnung")
+    assert paperless_rules.coverage(covered, data)["state"] == "covered"
+    partial = RuleProposal(correspondent="Stadtwerke", trigger="correspondent", condition="Stadtwerke", tags=["Haus", "Strom"])
+    assert paperless_rules.coverage(partial, data)["state"] == "partial"
+    conflict = RuleProposal(correspondent="Stadtwerke", trigger="correspondent", condition="Stadtwerke", tags=[], document_type="Brief")
+    assert paperless_rules.coverage(conflict, data)["state"] == "conflict"
+    text = RuleProposal(correspondent="text:Stadtwerke", trigger="content", condition="Stadtwerke",
+                        match_terms=["iban:DE89370400440532013000"])
+    assert paperless_rules.coverage(text, data)["state"] == "covered"
+    kw = RuleProposal(correspondent="wort:versicherung", trigger="keyword", condition="versicherung", tags=["Versicherung"])
+    assert paperless_rules.coverage(kw, data)["state"] == "covered"
+
+
+def test_rules_page_auto_marks_created(client, mock_api):
+    from tests.conftest import PAPERLESS, page
+
+    mock_api.get(f"{PAPERLESS}/api/workflows/").respond(json=page([
+        {"name": "Haus-Regel", "enabled": True, "triggers": [{"type": 2, "filter_has_correspondent": 10}],
+         "actions": [{"type": 1, "assign_tags": [31], "assign_document_type": 20}]}]))
+    with session_scope() as s:
+        add_docs(s, "Stadtwerke", 30, ["Haus"], start=300)
+    client.get("/rules")
+    with session_scope() as s:
+        pid = s.query(RuleProposal).filter_by(correspondent="Stadtwerke").one().id
+    response = client.post(f"/rules/proposals/{pid}", data={"action": "approved"})  # folgt der Weiterleitung
+    assert "als angelegt markiert" in response.text and "Haus-Regel" in response.text
+    with session_scope() as s:
+        assert s.get(RuleProposal, pid).state == "created"

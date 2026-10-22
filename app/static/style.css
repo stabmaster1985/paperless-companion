@@ -405,3 +405,13 @@ code.copy { user-select: all; word-break: break-all; background: var(--bg); padd
   .sticky-actions button { padding: .4rem .5rem; font-size: .85rem; }
   .sticky-actions .sep { display: none; }
 }
+
+.cov-covered { border-color: #17845f; color: #17845f; }
+.cov-partial { border-color: #d97706; color: #b45309; }
+.cov-conflict { border-color: #b91c1c; color: #b91c1c; }
+.cov-note { margin: .25rem 0; }
+.trial-ok { border-color: #17845f; color: #17845f; }
+.trial-bad { border-color: #b91c1c; color: #b91c1c; }
+.trial-box { border: 1px dashed var(--border); border-radius: var(--radius); padding: .4rem .7rem; margin: .5rem 0; }
+.trial-box h4 { margin: .2rem 0; }
+.existing-list li { margin: .35rem 0; }

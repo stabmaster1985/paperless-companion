@@ -211,6 +211,9 @@ class RuleProposal(Base):
     condition: Mapped[str | None] = mapped_column(String)  # Typ bzw. Stichwort (bei Korrespondent = correspondent)
     # Nur bei „Korrespondent aus Text“: Merkmale wie "iban:DE89…", "domain:stadtwerke.de"
     match_terms: Mapped[list | None] = mapped_column(JSON)
+    # Testbetrieb: ab Freigabe wird die Regel an jedem neueren Dokument (Paperless-ID > baseline) geprüft
+    baseline_doc_id: Mapped[int | None] = mapped_column(Integer)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime)
     tags: Mapped[list] = mapped_column(JSON, default=list)
     document_type: Mapped[str | None] = mapped_column(String)
     # Grundlage: {"docs": 12, "tags": {"Strom": 12}, "document_type": {"Rechnung": 11}}
