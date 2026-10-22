@@ -221,7 +221,7 @@ nicht verändert. Geprüft wird stündlich zusammen mit dem Zahlungsabgleich.
   Dokumente eines Absenders und bei keinem anderen vor, schlägt sie eine Zuordnung am Korrespondenten vor
   (regulärer Ausdruck, IBAN auch mit Leerzeichen). Die Auswirkung zeigt, wie viele Dokumente erkannt
   würden, welche **ohne Korrespondent** ihn bekämen (zum Korrigieren vormerken) und welche nicht erkannt werden.
-  Deine eigenen IBANs aus Firefly und mit „eigen?“ markierte Merkmale werden nie verwendet.
+  Deine eigenen IBANs aus Firefly und mit „gehört mir – ignorieren“ markierte Merkmale werden nie verwendet.
   `TEXT_SCAN_ENABLED=false` schaltet das Lesen ab.
 - **Prüf-Tag:** Mit `RULES_REVIEW_TAG` (z.B. „Zu prüfen“) nimmt jede Regel-Anleitung diesen Tag mit auf –
   neue Dokumente sind dann markiert, bis du sie angesehen und den Tag entfernt hast.

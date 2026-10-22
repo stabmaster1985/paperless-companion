@@ -1196,6 +1196,9 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             raise HTTPException(404)
         form = await request.form()
         action = form.get("action")
+        if form.get("own_term") and not action:
+            # Manche Browser ignorieren „formaction“ – dann landet „gehört mir“ hier
+            return rules_own_term(str(form.get("own_term")), "", session)
         if action == "save":
             rule_proposals.update(proposal, [str(t) for t in form.getlist("tag")], str(form.get("document_type") or ""),
                                   [str(t) for t in form.getlist("term")])
@@ -1213,7 +1216,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                    "dismissed": "Verworfen", "created": "Als in Paperless angelegt markiert",
                    "proposed": "Zurück auf Vorschlag"}[action]
         else:
-            raise HTTPException(400)
+            msg = "Keine Aktion erkannt – bitte erneut versuchen"
         back = str(form.get("back") or "")
         query = back if back.startswith("show=") or back.startswith("trigger=") else ""
         return RedirectResponse(f"/rules?{query}{'&' if query else ''}msg={quote(msg)}#rule-{proposal_id}", status_code=303)

@@ -472,3 +472,19 @@ def test_rules_page_auto_marks_created(client, mock_api):
     assert "als angelegt markiert" in response.text and "Haus-Regel" in response.text
     with session_scope() as s:
         assert s.get(RuleProposal, pid).state == "created"
+
+
+def test_own_term_via_rule_form_fallback(client):
+    """Ignoriert ein Browser „formaction“, landet „gehört mir“ beim Regel-Formular – das muss trotzdem klappen."""
+    with session_scope() as s:
+        for i in range(3):
+            add_text_doc(s, 960 + i, "Allianz", "Allianz www.allianz.de " + TEXT_OWN)
+    page = client.get("/rules?trigger=content").text
+    assert "gehört mir – ignorieren" in page and "eigen?" not in page
+    with session_scope() as s:
+        pid = s.query(RuleProposal).filter_by(correspondent="text:Allianz").one().id
+    response = client.post(f"/rules/proposals/{pid}", data={"own_term": "iban:DE02120300000000202051",
+                                                             "term": ["iban:DE02120300000000202051", "domain:allianz.de"]})
+    assert response.status_code == 200 and "ist als eigenes Merkmal markiert" in response.text
+    response = client.post(f"/rules/proposals/{pid}", data={})
+    assert response.status_code == 200 and "Keine Aktion erkannt" in response.text

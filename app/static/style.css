@@ -573,3 +573,5 @@ table.list tbody tr.overdue:hover, table.list tbody tr.overdue { background: var
   .tx-receipt .link-form input { flex: 1; width: auto; font-size: 16px; }
 }
 .tx-receipt > .tag { align-self: flex-start; }
+.term-chip { display: inline-flex; flex-wrap: wrap; align-items: center; gap: .1rem .5rem; }
+.term-chip label.check { margin: 0; }

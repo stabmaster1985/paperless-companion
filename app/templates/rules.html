@@ -112,10 +112,13 @@
         {% if trig == 'content' %}
         <div><span class="muted">erkennen an:</span>
           {% for t in ((p.basis.terms.keys()|list) if p.basis and p.basis.terms else []) + ((p.match_terms or [])|reject('in', p.basis.terms if p.basis and p.basis.terms else {})|list) %}
-          <label class="check chip"><input type="checkbox" name="term" value="{{ t }}" {{ 'checked' if t in (p.match_terms or []) }} {{ 'disabled' if p.state != 'proposed' }}>
-            {{ term_label(t) }}{% if p.basis and p.basis.terms and t in p.basis.terms %} <small class="muted">{{ p.basis.terms[t] }}/{{ p.basis.docs }}</small>{% endif %}
-            <button class="link small own-btn" name="own_term" value="{{ t }}" formaction="/rules/own-term"
-              title="Das ist dein eigenes Merkmal (z.B. deine IBAN) – nie für Regeln verwenden">eigen?</button></label>
+          <span class="chip term-chip">
+            <label class="check"><input type="checkbox" name="term" value="{{ t }}" {{ 'checked' if t in (p.match_terms or []) }} {{ 'disabled' if p.state != 'proposed' }}>
+              {{ term_label(t) }}{% if p.basis and p.basis.terms and t in p.basis.terms %} <small class="muted">{{ p.basis.terms[t] }}/{{ p.basis.docs }}</small>{% endif %}</label>
+            <button type="submit" class="link small own-btn" name="own_term" value="{{ t }}" formaction="/rules/own-term"
+              onclick="return confirm('„{{ term_label(t) }}“ ist dein eigenes Merkmal (z.B. deine IBAN)?\n\nEs wird dann nie für Regeln verwendet. Zurücknehmen geht unten unter „Eigene Merkmale“.')"
+              title="Das ist dein eigenes Merkmal (z.B. deine IBAN oder Mail-Domain) – nie für Regeln verwenden">gehört mir – ignorieren</button>
+          </span>
           {% endfor %}
         </div>
         <p class="muted"><small>Erkennt {{ pv.unchanged }} von {{ pv.own }} gelesenen Dokumenten von „{{ p.condition }}“; die Merkmale kommen bei keinem anderen Absender vor.</small></p>
@@ -256,7 +259,7 @@
   <p class="empty">Keine Vorschläge in dieser Ansicht.{% if show == 'open' %} Es braucht mindestens {{ MIN_DOCS }} Dokumente mit einheitlichen Tags oder Typ{% if trigger == 'content' %} bzw. gelesene Textmerkmale von mindestens 3 Dokumenten eines Absenders{% endif %}.{% endif %}</p>
   {% endfor %}
   {% if own_terms and trigger in ('', 'content') %}
-  <p class="muted own-terms"><small>Eigene Merkmale, die nie verwendet werden {{ help("Deine IBANs aus Firefly werden automatisch erkannt; weitere hast du mit „eigen?“ markiert.") }}:
+  <p class="muted own-terms"><small>Eigene Merkmale, die nie verwendet werden {{ help("Deine IBANs aus Firefly werden automatisch erkannt; weitere hast du mit „gehört mir – ignorieren“ markiert.") }}:
     {% for t in own_terms %}<span class="tag">{{ term_label(t) }}</span>{% if t in manual_own %}<form method="post" action="/rules/own-term" class="inline">
       <input type="hidden" name="own_term" value="{{ t }}"><input type="hidden" name="undo" value="1"><button class="link small" title="Wieder berücksichtigen">×</button></form>{% endif %}
     {% endfor %}</small></p>

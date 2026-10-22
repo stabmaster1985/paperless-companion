@@ -66,7 +66,7 @@ PAGES: dict[str, tuple[str, list[str]]] = {
         "<strong>Trefferquote:</strong> wie oft die Vorschläge je Quelle beim Bestätigen stimmten.",
         "<strong>Korrespondent aus Text</strong> (wichtigster Schritt, ein neues Dokument hat nur seinen Text): Die App liest im "
         "Hintergrund Merkmale wie IBAN, USt-IdNr., Domain und Kundennummer und schlägt vor, den Korrespondenten in Paperless daran "
-        "zu erkennen. Deine eigenen IBANs (aus Firefly) und mit „eigen?“ markierte Merkmale werden nie verwendet.",
+        "zu erkennen. Deine eigenen IBANs (aus Firefly) und mit „gehört mir – ignorieren“ markierte Merkmale werden nie verwendet.",
         "<strong>Vorschläge für Paperless-Regeln:</strong> Die App sucht Muster in deinem Archiv – Absender → Tags/Typ, "
         "Dokumenttyp → Tags und Stichwort im Titel → Tags/Typ. Du passt die Regel an und gibst sie frei; angelegt wird sie von dir "
         "in Paperless (Anleitung steht dabei). Der Companion schreibt nichts.",
