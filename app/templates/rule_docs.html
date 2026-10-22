@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% from "macros.html" import doclink %}
+{% block title %}Dokumente zur Regel – Paperless Companion{% endblock %}
+{% block content %}
+<div class="head">
+  <h1>Dokumente zur Regel</h1>
+  <a class="button small" href="/rules#rule-{{ p.id }}">← Zur Regel</a>
+</div>
+<p class="rule-ref t-{{ trig }}"><strong>{{ rule_label(p) }}</strong>
+  <span class="muted">{% if trig == 'content' %}an {{ (p.match_terms or [])|map('term')|join(', ') }}
+  {% else %}→ {{ p.tags|join(', ') }}{{ ', ' if p.tags and p.document_type }}{{ ('Typ ' ~ p.document_type) if p.document_type else '' }}{% endif %}</span></p>
+
+<nav class="tabs" aria-label="Gruppe">
+  {% for key, label, entries in groups %}
+  <a href="/rules/{{ p.id }}/docs?group={{ key }}" class="grp-{{ key }} {{ 'active' if current == key }}">{{ label }} ({{ entries|length }})</a>
+  {% endfor %}
+</nav>
+<p class="muted"><small>
+  {% if current == 'matched' %}Diese Dokumente tragen schon, was die Regel setzen würde – hier prüfst du, ob die Regel wirklich zu ihnen passt.
+  {% elif current == 'changed' %}Diese Dokumente erfüllen die Bedingung, sind aber anders abgelegt – vermutlich falsch oder unvollständig einsortiert.
+  {% elif current == 'conflicts' %}Hier würde die Regel einen gepflegten Wert überschreiben – genau prüfen, ob die Regel oder das Dokument falsch ist.
+  {% else %}Dokumente dieses Absenders, die die Regel nicht erkennt (keines der Merkmale im Text).{% endif %}
+  Antippen öffnet die Vorschau.</small></p>
+
+{% if items %}
+<div class="rule-doc-list">
+  {% for e in items %}
+  <details class="rule-doc grp-{{ current }}">
+    <summary>
+      <img class="thumb" src="/documents/{{ e.id }}/preview?kind=thumb" alt="" loading="lazy">
+      <span class="rule-doc-body">
+        <strong>{{ e.title or ('#' ~ e.id) }}</strong>
+        <span class="doc-meta">{{ e.correspondent or 'ohne Korrespondent' }}{% if e.document_type %} · {{ e.document_type }}{% endif %} · #{{ e.id }}</span>
+        <span class="tags">{% for t in e.tags %}<span class="tag {{ 'tag-ok' if t in p.tags }}">{{ t }}</span>{% else %}<small class="muted">keine Tags</small>{% endfor %}</span>
+        {% if e.add or e.type_to or e.terms %}<small class="rule-doc-diff">
+          {% if e.terms %}enthält {{ e.terms|map('term')|join(', ') }}{% endif %}
+          {% if e.add %}fehlt: {{ e.add|join(', ') }}{% endif %}{% if e.type_to %}{{ ' · ' if e.add }}Typ {{ e.type_from or 'leer' }} → {{ e.type_to }}{% endif %}</small>{% endif %}
+      </span>
+    </summary>
+    <div class="rule-doc-preview">
+      <iframe data-src="/documents/{{ e.id }}/preview#view=FitH" title="Vorschau {{ e.title }}"></iframe>
+      <div class="actions">
+        <a class="button small" href="/documents/{{ e.id }}">Im Companion öffnen</a>
+        {{ doclink(e.id) }} <small class="muted">in Paperless</small>
+      </div>
+    </div>
+  </details>
+  {% endfor %}
+</div>
+<script>
+// Vorschau erst beim Aufklappen laden (spart Datenvolumen am Handy)
+document.querySelectorAll('details.rule-doc').forEach((d) => d.addEventListener('toggle', () => {
+  const f = d.querySelector('iframe[data-src]');
+  if (d.open && f && !f.src) f.src = f.dataset.src;
+}));
+</script>
+{% else %}
+<p class="empty">Keine Dokumente in dieser Gruppe.</p>
+{% endif %}
+{% endblock %}

@@ -575,3 +575,21 @@ table.list tbody tr.overdue:hover, table.list tbody tr.overdue { background: var
 .tx-receipt > .tag { align-self: flex-start; }
 .term-chip { display: inline-flex; flex-wrap: wrap; align-items: center; gap: .1rem .5rem; }
 .term-chip label.check { margin: 0; }
+
+/* Dokumente zu einer Regel */
+.rule-ref { border-left: 5px solid var(--rule); background: var(--rule-bg); padding: .45rem .7rem; border-radius: 4px; }
+.grp-matched { --grp: #17845f; } .grp-changed { --grp: #d97706; } .grp-conflicts { --grp: #b91c1c; } .grp-missed { --grp: #64748b; }
+.tabs a.grp-matched, .tabs a.grp-changed, .tabs a.grp-conflicts, .tabs a.grp-missed { border-left: 4px solid var(--grp); }
+.rule-doc-list { display: flex; flex-direction: column; gap: .5rem; }
+.rule-doc { background: var(--surface); border: 1px solid var(--border); border-left: 5px solid var(--grp); border-radius: var(--radius); }
+.rule-doc > summary { display: grid; grid-template-columns: auto 1fr; gap: .75rem; align-items: center; padding: .55rem .75rem; cursor: pointer; list-style: none; }
+.rule-doc > summary::-webkit-details-marker { display: none; }
+.rule-doc[open] > summary { border-bottom: 1px solid var(--border); }
+.rule-doc .thumb { width: 44px; height: 58px; object-fit: cover; border-radius: 4px; border: 1px solid var(--border); background: var(--bg); }
+.rule-doc-body { display: flex; flex-direction: column; gap: .2rem; min-width: 0; overflow-wrap: anywhere; }
+.rule-doc-body .tags { display: flex; flex-wrap: wrap; gap: .2rem; }
+.rule-doc-diff { color: var(--grp); }
+.rule-doc-preview { padding: .5rem .75rem .75rem; }
+.rule-doc-preview iframe { width: 100%; height: 70vh; border: 0; border-radius: 4px; background: var(--bg); }
+.impact-sum a { font-weight: 600; }
+@media (max-width: 640px) { .rule-doc-preview iframe { height: 55vh; } }

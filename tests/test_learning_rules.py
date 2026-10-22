@@ -488,3 +488,24 @@ def test_own_term_via_rule_form_fallback(client):
     assert response.status_code == 200 and "ist als eigenes Merkmal markiert" in response.text
     response = client.post(f"/rules/proposals/{pid}", data={})
     assert response.status_code == 200 and "Keine Aktion erkannt" in response.text
+
+
+def test_rule_documents_page(client):
+    with session_scope() as s:
+        add_docs(s, "Stadtwerke", 30, ["Haus"], start=300)
+        s.get(Document, 300).tags = []
+        for i in range(3):
+            add_text_doc(s, 900 + i, "Stadtwerke", TEXT_SW)
+    client.get("/rules")
+    with session_scope() as s:
+        pid = s.query(RuleProposal).filter_by(correspondent="Stadtwerke").one().id
+        tid = s.query(RuleProposal).filter_by(correspondent="text:Stadtwerke").one().id
+    page = client.get("/rules").text
+    assert f'href="/rules/{pid}/docs?group=matched"' in page and "Alle Dokumente ansehen" in page
+    page = client.get(f"/rules/{pid}/docs?group=matched").text
+    assert "Schon passend (" in page and "Stadtwerke 1" in page and 'data-src="/documents/301/preview' in page
+    page = client.get(f"/rules/{pid}/docs?group=changed").text
+    assert "Brief 900" in page and "Typ leer → Rechnung" in page
+    page = client.get(f"/rules/{tid}/docs").text
+    assert "Erkannt (3)" in page and "Nicht erkannt" in page
+    assert client.get("/rules/9999/docs").status_code == 404

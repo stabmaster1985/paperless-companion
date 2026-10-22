@@ -228,7 +228,7 @@ def preview(session: Session, proposal: RuleProposal, docs: list[dict] | None = 
     docs = docs if docs is not None else archive(session)
     if trigger == "content":
         return _preview_text(proposal, condition, docs)
-    unchanged, changed, conflicts = 0, [], []
+    matched, changed, conflicts = [], [], []
     for d in docs:
         if not matches(trigger, condition, d):
             continue
@@ -236,41 +236,43 @@ def preview(session: Session, proposal: RuleProposal, docs: list[dict] | None = 
         have = {t.lower() for t in d["tags"]}
         add = [t for t in proposal.tags if t.lower() not in have]
         type_change = bool(proposal.document_type) and (d["document_type"] or "") != proposal.document_type
-        if not add and not type_change:
-            unchanged += 1
-            continue
         entry = {"id": d["id"], "title": d["title"], "add": add, "correspondent": d["correspondent"],
+                 "tags": d["tags"], "document_type": d["document_type"],
                  "type_from": d["document_type"] if type_change else None,
                  "type_to": proposal.document_type if type_change else None}
+        if not add and not type_change:
+            matched.append(entry)
+            continue
         clash = any(t.lower() in rejected for t in add) or (type_change and d["document_type"])
         (conflicts if clash else changed).append(entry)
-    return {"unchanged": unchanged, "changed": changed, "conflicts": conflicts,
-            "total": unchanged + len(changed) + len(conflicts)}
+    return {"unchanged": len(matched), "matched": matched, "changed": changed, "conflicts": conflicts,
+            "total": len(matched) + len(changed) + len(conflicts)}
 
 
 def _preview_text(proposal: RuleProposal, corr: str, docs: list[dict]) -> dict:
     """Korrespondent aus Text: Wie viele eigene Dokumente werden erkannt, welche ohne Korrespondent kämen dazu,
     und träfe die Regel fälschlich Dokumente anderer Absender?"""
     terms = set(proposal.match_terms or [])
-    unchanged, missed, changed, conflicts, scanned_own = 0, [], [], [], 0
+    matched, missed, changed, conflicts, scanned_own = [], [], [], [], 0
     for d in docs:
         if not d["scanned"]:
             continue
         hit = bool(d["terms"] & terms)
         entry = {"id": d["id"], "title": d["title"], "add": [], "correspondent": d["correspondent"],
+                 "tags": d["tags"], "document_type": d["document_type"],
                  "set_corr": corr, "type_from": None, "type_to": None, "terms": sorted(d["terms"] & terms)}
         if d["correspondent"] == corr:
             scanned_own += 1
             if hit:
-                unchanged += 1
+                matched.append(entry)
             else:
                 missed.append(entry)
         elif hit and not d["correspondent"]:
             changed.append(entry)
         elif hit:
             conflicts.append(entry)
-    return {"unchanged": unchanged, "changed": changed, "conflicts": conflicts, "missed": missed,
-            "own": scanned_own, "total": unchanged + len(missed) + len(changed) + len(conflicts)}
+    return {"unchanged": len(matched), "matched": matched, "changed": changed, "conflicts": conflicts, "missed": missed,
+            "own": scanned_own, "total": len(matched) + len(missed) + len(changed) + len(conflicts)}
 
 
 def prefill_fixes(session: Session, proposal: RuleProposal, doc_ids: list[int]) -> int:

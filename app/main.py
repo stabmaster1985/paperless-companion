@@ -1167,6 +1167,26 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             SOURCE_LABELS=pipeline.SOURCE_LABELS,
         )
 
+    @app.get("/rules/{proposal_id}/docs", response_class=HTMLResponse)
+    def rule_docs(request: Request, proposal_id: int, group: str = "", session: Session = Depends(get_session)):
+        """Alle Dokumente, die eine Regel betrifft – zum Nachprüfen, am Handy wie am PC."""
+        proposal = session.get(RuleProposal, proposal_id)
+        if proposal is None:
+            raise HTTPException(404)
+        pv = rule_proposals.preview(session, proposal)
+        trig = proposal.trigger or "correspondent"
+        groups = [
+            ("matched", "Erkannt" if trig == "content" else "Schon passend", pv["matched"]),
+            ("changed", "Ohne Korrespondent – würde erkannt" if trig == "content" else "Abweichend", pv["changed"]),
+            ("conflicts", "Anderer Absender" if trig == "content" else "Widersprüche", pv["conflicts"]),
+        ]
+        if trig == "content":
+            groups.append(("missed", "Nicht erkannt", pv["missed"]))
+        current = group if group in {g[0] for g in groups} else next((g[0] for g in groups if g[2]), "matched")
+        return render(request, "rule_docs.html", p=proposal, trig=trig, groups=groups, current=current,
+                      items=dict((k, v) for k, _, v in groups)[current], rule_label=rule_proposals.label,
+                      term_label=identifiers.term_label)
+
     @app.post("/rules/own-term")
     def rules_own_term(own_term: str = Form(...), undo: str = Form(""), session: Session = Depends(get_session)):
         """Merkmal als „eigen“ markieren (z.B. deine IBAN) – wird nie einem Absender zugeordnet."""

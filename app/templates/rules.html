@@ -158,11 +158,15 @@
 
       <div class="impact">
         <p class="impact-sum">
-          {% if trig == 'content' %}Gelesene Dokumente: {{ pv.unchanged }} von „{{ p.condition }}“ erkannt,
-            <strong>{{ pv.changed|length }} ohne Korrespondent</strong> würden „{{ p.condition }}“ bekommen,
-            <span class="{{ 'bad' if pv.conflicts }}">{{ pv.conflicts|length }} anderer Absender</span>, {{ pv.missed|length }} nicht erkannt
-          {% else %}Bisherige {{ pv.total }} passende Dokumente: {{ pv.unchanged }} schon so abgelegt,
-            <strong>{{ pv.changed|length }} abweichend</strong>, <span class="{{ 'bad' if pv.conflicts }}">{{ pv.conflicts|length }} Widersprüche</span>{% endif %}</p>
+          {% set base = '/rules/' ~ p.id ~ '/docs?group=' %}
+          {% if trig == 'content' %}Gelesene Dokumente: <a href="{{ base }}matched" title="Ansehen">{{ pv.unchanged }} von „{{ p.condition }}“ erkannt</a>,
+            <a href="{{ base }}changed"><strong>{{ pv.changed|length }} ohne Korrespondent</strong></a> würden „{{ p.condition }}“ bekommen,
+            <a href="{{ base }}conflicts" class="{{ 'bad' if pv.conflicts }}">{{ pv.conflicts|length }} anderer Absender</a>,
+            <a href="{{ base }}missed">{{ pv.missed|length }} nicht erkannt</a>
+          {% else %}Bisherige {{ pv.total }} passende Dokumente: <a href="{{ base }}matched" title="Ansehen">{{ pv.unchanged }} schon so abgelegt</a>,
+            <a href="{{ base }}changed"><strong>{{ pv.changed|length }} abweichend</strong></a>,
+            <a href="{{ base }}conflicts" class="{{ 'bad' if pv.conflicts }}">{{ pv.conflicts|length }} Widersprüche</a>{% endif %}
+          · <a class="button small" href="{{ base }}">Alle Dokumente ansehen</a></p>
         {% set groups = [('Anderer Absender – bitte prüfen' if trig == 'content' else 'Widersprüche', pv.conflicts, false),
                          ('Ohne Korrespondent – würde erkannt' if trig == 'content' else 'Abweichend', pv.changed, true)] %}
         {% for label, items, checked in groups if items %}
