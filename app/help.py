@@ -70,6 +70,9 @@ PAGES: dict[str, tuple[str, list[str]]] = {
         "<strong>Vorschläge für Paperless-Regeln:</strong> Die App sucht Muster in deinem Archiv – Absender → Tags/Typ, "
         "Dokumenttyp → Tags und Stichwort im Titel → Tags/Typ. Du passt die Regel an und gibst sie frei; angelegt wird sie von dir "
         "in Paperless (Anleitung steht dabei). Der Companion schreibt nichts.",
+        "<strong>Testbetrieb:</strong> Ab der Freigabe prüft die App jede Regel an neuen Dokumenten (ohne Paperless zu ändern) "
+        "und zeigt, wie oft sie richtig gelegen hätte. <strong>In Paperless vorhanden</strong> zeigt deine Workflows und Zuordnungen; "
+        "freigegebene Regeln, die dort gefunden werden, gelten automatisch als angelegt.",
         "<strong>Ausreißer:</strong> Dokumente, die ein Muster erfüllen, aber anders abgelegt sind – vermutlich falsch einsortiert. "
         "Auswählen und „zum Korrigieren vormerken“; übertragen wird wie immer erst unter „Für Paperless“.",
         "<strong>Ähnliche Namen:</strong> fast gleich geschriebene Tags, Korrespondenten oder Typen, die vermutlich doppelt angelegt sind.",
@@ -81,6 +84,12 @@ PAGES: dict[str, tuple[str, list[str]]] = {
         "(nur im Companion, die App lernt daraus) → <em>übertragen</em> (erst jetzt nach Paperless). "
         "Mit dem Filter bearbeitest du z.B. erst alle Tags oder einen bestimmten Tag auf einmal.",
         "„Wie gut sind die Vorschläge?“ zeigt, wie oft du übernommen, geändert oder verworfen hast.",
+    ]),
+    "/review": ("Vorschläge durchgehen", [
+        "Ein Dokument nach dem anderen: links die Vorschau, rechts die offenen Vorschläge. Häkchen setzen oder entfernen, "
+        "den Titel bei Bedarf ändern und „Vormerken“ – oder „Verwerfen“ bzw. „Überspringen“. Danach kommt das nächste Dokument.",
+        "Tasten: V vormerken, X verwerfen, S überspringen. Filter aus „Für Paperless“ (z.B. nur Tags) gelten auch hier.",
+        "Nur im Companion – übertragen wird erst unter „Für Paperless → Vorgemerkt“.",
     ]),
     "/settings": ("Einstellungen", [
         "<strong>Dokumenttypen:</strong> Welche Paperless-Typen als Rechnung, Vertrag oder Garantie ausgewertet werden und welche steuerrelevant sind.",

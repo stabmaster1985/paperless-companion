@@ -237,6 +237,19 @@ nicht verändert. Geprüft wird stündlich zusammen mit dem Zahlungsabgleich.
   Auswählen → „zum Korrigieren vormerken“ → erscheinen unter *Für Paperless → Vorgemerkt* (Quelle „Regel“).
 - **Ähnliche Namen:** fast gleich geschriebene Tags/Korrespondenten/Typen (z.B. „Kfz“/„KFZ“), die vermutlich doppelt angelegt sind.
 
+### Bedienung
+
+- **Menü** in Erledigen / Überblick / Archiv / System; am Handy eine feste Leiste unten (Übersicht, Inbox,
+  Für Paperless, Belege, Mehr).
+- **Startseite** mit Kacheln „Heute zu tun“: Inbox, offene und vorgemerkte Vorschläge, fehlende Belege,
+  Regel-Vorschläge, nächste Frist.
+- **Vorschläge durchgehen** (`/review`): ein Dokument nach dem anderen mit Vorschau, Tasten V/X/S.
+- **Prüfseite:** Strg/Cmd+Enter bestätigt (und öffnet das nächste), Esc führt zur Inbox; am Handy lässt
+  sich die Vorschau ausblenden, die Knöpfe bleiben unten sichtbar.
+- **Regeln im Testbetrieb:** Ab der Freigabe prüft die App jede Regel an neuen Dokumenten und zeigt richtig/falsch.
+  Bestehende Workflows und Zuordnungen werden aus Paperless gelesen; umgesetzte Vorschläge sind markiert,
+  gefundene freigegebene Regeln gelten automatisch als angelegt.
+
 ### Hilfe in der App
 
 Oben auf jeder Seite klappt „ⓘ So funktioniert …“ eine kurze Erklärung auf; **Hilfe** im Menü

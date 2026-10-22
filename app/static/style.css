@@ -494,3 +494,56 @@ kbd { border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 
 @media (max-width: 640px) { .tiles { grid-template-columns: 1fr 1fr; gap: .5rem; } .tile { padding: .65rem .75rem; } .tile-num { font-size: 1.4rem; } }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 @media (max-width: 640px) { .more-sheet .pill { position: static; font-size: .7rem; margin-left: .3rem; } }
+
+/* Inbox als Karten, Dokumentseite am Handy */
+.k-invoice { --kind: #0e7490; --kind-bg: #ecf8fb; }
+.k-contract { --kind: #7c3aed; --kind-bg: #f5f0ff; }
+.k-warranty { --kind: #c2410c; --kind-bg: #fff4ec; }
+.k-other { --kind: #64748b; --kind-bg: #f1f5f9; }
+@media (prefers-color-scheme: dark) {
+  .k-invoice { --kind-bg: #13303a; } .k-contract { --kind-bg: #2a2140; } .k-warranty { --kind-bg: #3a2418; } .k-other { --kind-bg: #222a33; }
+}
+.doc-cards { display: flex; flex-direction: column; gap: .5rem; margin: .75rem 0; }
+.doc-card { display: grid; grid-template-columns: auto 1fr auto; gap: .75rem; align-items: center; padding: .55rem .75rem;
+  background: var(--surface); border: 1px solid var(--border); border-left: 5px solid var(--kind); border-radius: var(--radius); color: var(--text); }
+.doc-card:hover { text-decoration: none; background: var(--kind-bg); }
+.doc-card .thumb { width: 44px; height: 58px; object-fit: cover; border-radius: 4px; border: 1px solid var(--border); background: var(--bg); }
+.doc-card-body { display: flex; flex-direction: column; gap: .15rem; min-width: 0; overflow-wrap: anywhere; }
+.doc-card-go { color: var(--accent); font-size: .9rem; white-space: nowrap; }
+.viewer.collapsed .viewer-pane { display: none; }
+.viewer.collapsed { padding-bottom: 0; }
+.viewer-hide { margin-left: .25rem; }
+.kbd-hint { margin-left: auto; }
+@media (max-width: 640px) {
+  .doc-card-go { display: none; }
+  .confirm-actions { position: sticky; bottom: 3.6rem; z-index: 5; background: var(--surface); padding: .55rem 0; border-top: 1px solid var(--border); }
+  .confirm-actions button { flex: 1 1 45%; }
+  .kbd-hint { display: none; }
+  .field input, .field select, .field textarea { font-size: 16px; padding: .55rem .6rem; }  /* kein Zoom auf iOS, bessere Treffer */
+  .viewer iframe { height: 50vh; }
+}
+@media (min-width: 641px) { .viewer-hide { display: none; } }
+/* Dunkelmodus: helle Sonderfarben abdunkeln */
+@media (prefers-color-scheme: dark) {
+  .badge.src-firefly { background: #2c2142; color: #c4a8ff; }
+  .badge.src-learned { background: #1c2a40; color: #9cc3ff; }
+  .tag-warn { border-color: #f0a93a; color: #f0a93a; }
+  .cov-covered, .trial-ok { border-color: #4cc795; color: #4cc795; }
+  .cov-conflict, .trial-bad { border-color: #ff7b6e; color: #ff7b6e; }
+  .chain-step, .kind-pill { color: var(--text); }
+}
+
+/* Einheitlich: Bereichsfarbe an der Überschrift, ruhige Tabellen */
+main > h1, main > .head h1 { border-left: 5px solid var(--page, var(--accent)); padding-left: .55rem; }
+.area-inbox, .area-invoices { --page: #0e7490; }
+.area-contracts { --page: #7c3aed; }
+.area-warranties { --page: #c2410c; }
+.area-receipts { --page: #b91c1c; }
+.area-paperless-changes, .area-review { --page: #17845f; }
+.area-rules { --page: #7c3aed; }
+.area-documents, .area-cases { --page: #1d4ed8; }
+.area-tax, .area-retention { --page: #b45309; }
+.area-settings, .area-system, .area-help { --page: #64748b; }
+table.list tbody tr:hover { background: var(--bg); }
+table.list tbody tr:nth-child(even) { background: color-mix(in srgb, var(--bg) 45%, transparent); }
+table.list tbody tr.overdue:hover, table.list tbody tr.overdue { background: var(--bad-bg); }

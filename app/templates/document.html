@@ -47,6 +47,7 @@
     <button type="button" class="tab active" data-tab="pdf" role="tab">Dokument</button>
     <button type="button" class="tab" data-tab="text" role="tab">Text{% if text_found %} ({{ text_found|length }} Treffer){% endif %}</button>
     <a class="tab-link" href="/documents/{{ doc.id }}/preview" target="_blank" rel="noopener">in neuem Tab ↗</a>
+    <button type="button" class="tab viewer-hide" id="viewer-hide" aria-pressed="false" title="Vorschau ein-/ausblenden (am Handy mehr Platz für die Felder)">Vorschau ausblenden</button>
   </nav>
   <div class="viewer-pane" data-pane="pdf">
     <iframe src="/documents/{{ doc.id }}/preview#view=FitH" title="Vorschau von {{ doc.title }}" loading="lazy"></iframe>
@@ -156,7 +157,7 @@ document.querySelectorAll('#viewer .tab[data-tab]').forEach((tab) => tab.addEven
   </div>
   {% endif %}
 
-  <div class="actions">
+  <div class="actions confirm-actions">
     {% if doc.review_state == 'pending' %}
       {% if pending_left %}
       <button type="submit" name="after" value="next" class="primary">Bestätigen &amp; nächstes ({{ pending_left }})</button>
@@ -167,8 +168,32 @@ document.querySelectorAll('#viewer .tab[data-tab]').forEach((tab) => tab.addEven
     {% else %}
       <button type="submit" class="primary">Speichern</button>
     {% endif %}
+    <small class="muted kbd-hint"><kbd>Strg</kbd>+<kbd>Enter</kbd> {{ 'bestätigen & nächstes' if doc.review_state == 'pending' and pending_left else ('bestätigen' if doc.review_state == 'pending' else 'speichern') }}{% if doc.review_state == 'pending' %} · <kbd>Esc</kbd> zur Inbox{% endif %}</small>
   </div>
 </form>
+<script>
+// Tastenkürzel: Strg/Cmd+Enter = bestätigen (& nächstes), Esc = zurück zur Inbox
+document.addEventListener('keydown', (e) => {
+  const form = document.querySelector('form[action$="/confirm"]');
+  if (!form) return;
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    (form.querySelector('button[name=after][value=next]') || form.querySelector('button.primary')).click();
+  } else if (e.key === 'Escape' && {{ 'true' if doc.review_state == 'pending' else 'false' }} && !e.target.matches('input, textarea, select')) {
+    location.href = '/inbox';
+  }
+});
+// Vorschau ein-/ausblenden, im Browser gemerkt
+(() => {
+  const viewer = document.getElementById('viewer'), btn = document.getElementById('viewer-hide');
+  if (!viewer || !btn) return;
+  const set = (hidden) => { viewer.classList.toggle('collapsed', hidden); btn.textContent = hidden ? 'Vorschau anzeigen' : 'Vorschau ausblenden';
+    btn.setAttribute('aria-pressed', String(hidden)); };
+  try { set(localStorage.getItem('viewer-hidden') === '1'); } catch (e) {}
+  btn.addEventListener('click', () => { const hidden = !viewer.classList.contains('collapsed'); set(hidden);
+    try { localStorage.setItem('viewer-hidden', hidden ? '1' : '0'); } catch (e) {} });
+})();
+</script>
 {% endif %}
 
 <section class="card" id="metadata">

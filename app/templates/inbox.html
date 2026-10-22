@@ -7,21 +7,19 @@
 {% if msg %}<div class="notice ok">{{ msg }}</div>{% endif %}
 {% if docs %}
 <div class="actions"><a class="button primary" href="/documents/{{ docs[0].id }}">Prüfung starten ({{ docs|length }})</a></div>
-<div class="table-wrap"><table class="list">
-  <thead><tr><th class="thumb-col"></th><th>Dokument</th><th>Art</th><th class="hide-sm">Korrespondent</th><th class="hide-sm">Datum</th><th></th></tr></thead>
-  <tbody>
+<div class="doc-cards">
   {% for doc in docs %}
-    <tr>
-      <td class="thumb-col"><a href="/documents/{{ doc.id }}"><img class="thumb" src="/documents/{{ doc.id }}/preview?kind=thumb" alt="" loading="lazy"></a></td>
-      <td><a href="/documents/{{ doc.id }}">{{ doc.title or ('#' ~ doc.id) }}</a> {{ doclink(doc.id) }}</td>
-      <td><span class="tag">{{ KINDS[doc.kind] }}</span></td>
-      <td class="hide-sm">{{ doc.correspondent or '–' }}</td>
-      <td class="hide-sm">{{ doc.created|d }}</td>
-      <td><a class="button small" href="/documents/{{ doc.id }}">Prüfen</a></td>
-    </tr>
+  <a class="doc-card k-{{ doc.kind }}" href="/documents/{{ doc.id }}">
+    <img class="thumb" src="/documents/{{ doc.id }}/preview?kind=thumb" alt="" loading="lazy">
+    <span class="doc-card-body">
+      <strong>{{ doc.title or ('#' ~ doc.id) }}</strong>
+      <span class="doc-meta">{{ doc.correspondent or 'ohne Korrespondent' }} · {{ doc.created|d }}</span>
+      <span><span class="kind-pill">{{ KINDS[doc.kind] }}</span></span>
+    </span>
+    <span class="doc-card-go" aria-hidden="true">Prüfen →</span>
+  </a>
   {% endfor %}
-  </tbody>
-</table></div>
+</div>
 {% else %}
 <p class="empty">Alles erledigt – nichts zu prüfen.</p>
 {% endif %}

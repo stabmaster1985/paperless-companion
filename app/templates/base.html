@@ -59,7 +59,7 @@
     </div>
   </details>
 </nav>
-<main class="{% block main_class %}{% endblock %}">
+<main class="{% block main_class %}{% endblock %} area-{{ request.url.path.split('/')[1] or 'home' }}">
 {% set ph = page_help(request.url.path) %}
 {% if ph %}
 <details class="page-help" id="page-help">
