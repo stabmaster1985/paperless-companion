@@ -86,7 +86,10 @@ class Settings(BaseSettings):
     # Optional: Adresse deines Firefly-Dashboards (firefly-dashboard), für Links zur Kontrolle von Buchungen
     firefly_dashboard_url: str = ""
     firefly_lookback_days: int = 120
-    firefly_auto_accept: bool = False  # eindeutige Treffer (Betrag + Rechnungsnr./IBAN) direkt als bezahlt markieren
+    firefly_auto_accept: bool = False
+    # Buchungen ohne Beleg: Abbuchungen ab diesem Betrag der letzten … Tage prüfen
+    receipts_min_amount: float = 50.0
+    receipts_lookback_days: int = 90  # eindeutige Treffer (Betrag + Rechnungsnr./IBAN) direkt als bezahlt markieren
 
     # Aufbewahrung
     retention_tag: str = "Löschkandidat"

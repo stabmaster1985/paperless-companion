@@ -25,6 +25,8 @@
     <a href="/tax" class="{{ 'active' if path.startswith('/tax') }}">Steuer</a>
     <a href="/retention" class="{{ 'active' if path.startswith('/retention') }}">Aufbewahrung</a>
     <a href="/documents" class="{{ 'active' if path.startswith('/documents') }}">Dokumente</a>
+    <a href="/receipts" class="{{ 'active' if path.startswith('/receipts') }}" title="Firefly-Abbuchungen ohne Beleg in Paperless">Belege</a>
+    <a href="/rules" class="{{ 'active' if path.startswith('/rules') }}" title="Gelerntes und Vorschläge für Paperless-Regeln">Regeln</a>
     <a href="/paperless-changes" class="{{ 'active' if path.startswith('/paperless-changes') }}">Für Paperless{% if outgoing_count %} <span class="pill">{{ outgoing_count }}</span>{% endif %}</a>
     <a href="/settings" class="{{ 'active' if path.startswith('/settings') }}">Einstellungen</a>
     <a href="/system" class="{{ 'active' if path.startswith('/system') }}">System{% if update_available %} <span class="pill" title="Update verfügbar">Update</span>{% endif %}</a>

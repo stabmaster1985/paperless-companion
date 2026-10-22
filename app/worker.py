@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select, update
 
-from app import metadata, payments, pipeline, reminders
+from app import metadata, payments, pipeline, receipts, reminders
 from app.config import Settings
 from app.db import session_scope
 from app.models import Document
@@ -218,6 +218,11 @@ class Worker:
         try:
             with session_scope() as session:
                 counts = payments.run(session, client, self.settings, datetime.now(self.tz).date())
+            with session_scope() as session:
+                found = receipts.run(session, client, self.settings, datetime.now(self.tz).date())
+            if found["missing"]:
+                self.note(f"Belegprüfung: {found['checked']} Abbuchungen ab {self.settings.receipts_min_amount:.0f} € geprüft – "
+                          f"{found['missing']} ohne Beleg, {found['candidate']} mit möglichem Beleg")
             if counts["open"] or counts["pending"]:
                 log.info("Zahlungsabgleich: %s", counts)
                 found = counts["suggested"] + counts["accepted"]
@@ -392,6 +397,8 @@ class Worker:
             detail = "keine Rechnung/Vertrag/Garantie erkannt"
         else:
             detail = "Regeln haben alles gefunden, AI nicht nötig"
+        if info.get("learned"):
+            detail += f"; gelernt: {len(info['learned'])} Felder vom Absender übernommen"
         review = {"pending": " → Inbox", "confirmed": " → automatisch erfasst"}.get(info.get("review"), "")
         return f"„{title}“ ({kind}): {detail}{review} · {seconds:.1f} s"
 

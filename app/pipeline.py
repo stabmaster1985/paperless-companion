@@ -86,6 +86,7 @@ def parse_values(kind: str, raw: dict) -> dict:
 
 SOURCE_LABELS = {
     "rule": "Regel", "llm": "AI", "paperless": "Paperless", "firefly": "Firefly", "default": "Standard", "manual": "manuell",
+    "learned": "Gelernt",
 }
 
 
@@ -488,6 +489,9 @@ def process_document(
         _fill_defaults(kind, doc, sugg)
         if kind == "invoice":
             _inject_paperless_fields(doc, sugg)
+        from app import learning  # lokal, um Importzyklen zu vermeiden
+
+        info["learned"] = learning.apply(session, doc, kind, sugg, AUTO_THRESHOLD)
         wanted = _missing(kind, sugg)
         info["wanted"] = wanted
         if wanted and ollama is None:

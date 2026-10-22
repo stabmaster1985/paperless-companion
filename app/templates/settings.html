@@ -106,6 +106,8 @@
             {% if value %}<label class="check small-check"><input type="checkbox" name="clear:{{ name }}" value="1"> leeren</label>{% endif %}
           {% elif k == 'int' %}
             <input type="number" name="{{ name }}" value="{{ value }}">
+          {% elif k == 'float' %}
+            <input type="number" step="0.01" name="{{ name }}" value="{{ value }}">
           {% else %}
             <input name="{{ name }}" value="{{ value }}">
           {% endif %}

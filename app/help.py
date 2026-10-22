@@ -53,6 +53,21 @@ PAGES: dict[str, tuple[str, list[str]]] = {
         "solange du sie nicht auswählst – so bleibt die CPU frei.",
         "Mit den Filtern (auch Paperless-IDs wie „12, 15-20“) wählst du gezielt aus und lässt sie analysieren oder Metadaten vorschlagen.",
     ]),
+    "/receipts": ("Belege", [
+        "Abbuchungen aus Firefly III, zu denen kein Dokument in Paperless zugeordnet ist – so merkst du rechtzeitig, "
+        "wenn ein Kassenbon oder eine Rechnung fehlt (Garantie, Steuer).",
+        "„Möglicher Beleg“ heißt: Es gibt eine Rechnung mit gleichem Betrag oder ein Dokument desselben Absenders aus den Tagen um die Buchung. "
+        "Mit „Das ist der Beleg“ bestätigst du die Zuordnung. „Kein Beleg nötig“ und „immer ausblenden“ räumen die Liste auf.",
+        "Alles bleibt im Companion; Paperless und Firefly werden nicht verändert.",
+    ]),
+    "/rules": ("Regeln", [
+        "<strong>Gelernte Felder:</strong> Aus deinen bestätigten Rechnungen lernt die App je Absender Zahlungsart, IBAN und Zahlungsziel "
+        "und belegt neue Rechnungen damit vor (Kennzeichen „Gelernt“). Jede gelernte Regel lässt sich abschalten.",
+        "<strong>Trefferquote:</strong> wie oft die Vorschläge je Quelle beim Bestätigen stimmten.",
+        "<strong>Vorschläge für Paperless-Regeln:</strong> Tragen fast alle Dokumente eines Absenders dieselben Tags/denselben Typ, "
+        "schlägt die App einen Paperless-Workflow vor. Du passt ihn an, siehst die Auswirkung auf deine bisherigen Dokumente "
+        "und gibst ihn frei. Angelegt wird er von dir in Paperless – der Companion schreibt nichts.",
+    ]),
     "/paperless-changes": ("Für Paperless", [
         "Der Companion schreibt nie ungefragt nach Paperless. Hier sammelt sich alles, was er vorschlägt.",
         "<strong>Custom Fields:</strong> Werte wie Betrag oder Fälligkeit – auswählen und „übernehmen“.",

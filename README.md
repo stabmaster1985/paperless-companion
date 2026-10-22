@@ -199,6 +199,28 @@ FIELD_SUMMARY=Zusammenfassung KI
   *Text* fassen in Paperless nur 128 Zeichen, die Zusammenfassung wird passend gekürzt.
   Sie wird im Companion gespeichert und unter „Für Paperless“ zur Übernahme angeboten.
 
+### Belege: Buchungen ohne Beleg
+
+Unter **Belege** prüft der Companion die Firefly-Abbuchungen ab `RECEIPTS_MIN_AMOUNT` (Standard 50 €)
+der letzten `RECEIPTS_LOOKBACK_DAYS` Tage: Ist ein Dokument in Paperless zugeordnet (über den
+Zahlungsabgleich oder von dir)? Sonst sucht er einen *möglichen Beleg* (Rechnung mit gleichem Betrag in
+zeitlicher Nähe, Dokument desselben Absenders um das Buchungsdatum). Du ordnest zu, markierst „kein Beleg
+nötig“ oder blendest Empfänger dauerhaft aus. Alles bleibt im Companion; Firefly und Paperless werden
+nicht verändert. Geprüft wird stündlich zusammen mit dem Zahlungsabgleich.
+
+### Regeln: Gelerntes und Vorschläge für Paperless
+
+- **Gelernte Felder:** Aus mindestens zwei von dir bestätigten Rechnungen eines Absenders lernt die App
+  Zahlungsart, IBAN und Zahlungsziel (≥ 80 % gleich) und belegt neue Rechnungen damit vor (Herkunft
+  „Gelernt“). Das spart AI-Abfragen. Jede gelernte Regel lässt sich unter **Regeln** abschalten.
+- **Trefferquote:** Beim Bestätigen in der Inbox zählt die App je Quelle (Regel, AI, Gelernt …) und Feld,
+  ob der Vorschlag stimmte.
+- **Regelvorschläge:** Tragen mindestens 5 Dokumente eines Absenders zu 90 % dieselben Tags/denselben
+  Typ (inkl. Vorgemerktem, ohne Jahres-Tags und verworfene Tags), schlägt die App einen Paperless-Workflow
+  vor. Du passt ihn an, siehst, was er bei deinen bisherigen Dokumenten bewirkt hätte (schon passend,
+  würde ergänzen, Widerspruch), und gibst ihn frei. Danach zeigt die App die Klick-Anleitung und den
+  API-Inhalt; anlegen tust du die Regel selbst in Paperless. Der Companion schreibt nichts.
+
 ### Hilfe in der App
 
 Oben auf jeder Seite klappt „ⓘ So funktioniert …“ eine kurze Erklärung auf; **Hilfe** im Menü

@@ -92,6 +92,7 @@ table.list { width: 100%; border-collapse: collapse; background: var(--surface);
 .badge { font-size: .72rem; font-weight: 500; padding: 0 .35rem; border-radius: 4px; background: var(--ok-bg); color: var(--ok); margin-left: .25rem; }
 .badge.low { background: var(--warn-bg); color: var(--warn); }
 .badge.src-paperless, .badge.src-default { background: var(--bg); color: var(--muted); }
+.badge.src-learned { background: #e6f2ff; color: #1f4f8a; }
 
 .notice { padding: .6rem .8rem; border-radius: var(--radius); background: var(--info-bg); margin: .75rem 0; }
 .notice.warn { background: var(--warn-bg); }
@@ -299,3 +300,21 @@ img.thumb { width: 56px; height: 72px; object-fit: cover; object-position: top; 
 .card > h2:first-child, .card > h3:first-child { margin-top: 0; }
 .meta-filter .filter-legend { margin: .6rem 0 .2rem; font-size: .8rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
 .changes-list .tags { display: flex; flex-wrap: wrap; gap: .2rem; margin-top: .3rem; }
+/* Belege und Regeln */
+.receipts-list .col-date { width: 6.5rem; }
+.receipts-list .col-amount { width: 6.5rem; }
+.receipts-list .col-receipt { width: 40%; }
+.receipts-list .cand { margin-bottom: .35rem; }
+.receipts-list .link-form input { width: 7rem; }
+.row-actions { margin-top: .3rem; }
+.learned-row.off { opacity: .5; text-decoration: line-through; }
+.learned-row.off form { text-decoration: none; }
+.rule { border: 1px solid var(--border); border-radius: var(--radius); padding: .75rem; margin: .75rem 0; background: var(--surface); }
+.rule header { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-bottom: .5rem; }
+.rule-body > div { margin: .35rem 0; display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; }
+.chip { border: 1px solid var(--border); border-radius: 999px; padding: .1rem .55rem; background: var(--bg); }
+.impact summary { cursor: pointer; margin: .5rem 0; }
+.impact-list li { margin: .2rem 0; }
+.howto { margin-top: .75rem; padding: .6rem .8rem; background: var(--info-bg); border-radius: var(--radius); }
+pre.code { background: var(--bg); padding: .6rem; border-radius: 6px; overflow-x: auto; font-size: .8rem; }
+.rule-body select { width: auto; max-width: 100%; }

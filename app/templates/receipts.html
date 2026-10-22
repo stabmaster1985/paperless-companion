@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% from "macros.html" import doclink, txlinks, help %}
+{% block content %}
+<div class="head">
+  <h1>Belege</h1>
+  {% if settings.firefly_enabled %}<form method="post" action="/receipts/run" class="inline"><button class="small">Jetzt prüfen</button></form>{% endif %}
+</div>
+{% if msg %}<div class="notice">{{ msg }}</div>{% endif %}
+<p class="muted">Abbuchungen aus Firefly III ab {{ '%.0f'|format(settings.receipts_min_amount) }} € der letzten {{ settings.receipts_lookback_days }} Tage,
+  zu denen kein Dokument in Paperless zugeordnet ist. Alles hier bleibt im Companion – in Paperless und Firefly ändert sich nichts.
+  Betrag und Zeitraum stellst du unter <a href="/settings#app-settings">Einstellungen → Firefly III</a> ein.</p>
+{% if not settings.firefly_enabled %}
+<div class="notice warn">Firefly III ist nicht eingerichtet. Trage Adresse und Token unter <a href="/settings#app-settings">Einstellungen</a> ein.</div>
+{% endif %}
+
+{% set c = overview.counts %}
+<nav class="tabs">
+  <a href="/receipts?state=open" class="{{ 'active' if state == 'open' }}">Offen ({{ c.missing + c.candidate }})</a>
+  {% for key, label in STATES.items() %}
+  <a href="/receipts?state={{ key }}" class="{{ 'active' if state == key }}">{{ label }} ({{ c.get(key, 0) }})</a>
+  {% endfor %}
+</nav>
+{% if c.missing %}<p><strong>{{ c.missing }}</strong> Abbuchungen ohne Beleg, zusammen {{ overview.missing_sum|eur }}.</p>{% endif %}
+
+{% if rows %}
+<div class="table-wrap"><table class="list changes-list receipts-list">
+  <colgroup><col class="col-date"><col><col class="col-amount"><col class="col-receipt"></colgroup>
+  <thead><tr><th>Datum</th><th>Empfänger / Verwendungszweck</th><th>Betrag</th><th>Beleg {{ help("Möglicher Beleg: Rechnung mit gleichem Betrag in zeitlicher Nähe oder ein Dokument desselben Absenders aus den Tagen um die Buchung.") }}</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr id="tx-{{ r.id }}">
+      <td class="nowrap">{{ r.tx_date|d }}</td>
+      <td><strong>{{ r.counterparty or 'unbekannt' }}</strong><br><small class="muted">{{ r.description }}</small>
+        <div><small>Buchung prüfen:{{ txlinks(r.tx_group_id, r.tx_date) }}</small></div></td>
+      <td class="nowrap">{{ r.amount|eur }}</td>
+      <td>
+        {% if r.state == 'linked' %}
+          <span class="tag tag-ok">zugeordnet</span>
+          {% if r.document_id %}<a href="/documents/{{ r.document_id }}">{{ titles.get(r.document_id) or ('#' ~ r.document_id) }}</a> {{ doclink(r.document_id) }}{% endif %}
+          {% if r.note %}<br><small class="muted">{{ r.note }}</small>{% endif %}
+        {% elif r.state == 'ignored' %}
+          <span class="tag">kein Beleg nötig</span>{% if r.note %} <small class="muted">{{ r.note }}</small>{% endif %}
+        {% else %}
+          {% for cand in r.candidates or [] %}
+          <form method="post" action="/receipts/{{ r.id }}/link" class="cand">
+            <input type="hidden" name="doc_id" value="{{ cand.id }}"><input type="hidden" name="state" value="{{ state }}">
+            <a href="/documents/{{ cand.id }}">{{ cand.title or ('#' ~ cand.id) }}</a> {{ doclink(cand.id) }}
+            <small class="muted">({{ cand.reason }})</small>
+            <button class="small" title="Diese Buchung dem Dokument zuordnen (nur im Companion)">Das ist der Beleg</button>
+          </form>
+          {% else %}<span class="tag tag-overdue">Beleg fehlt</span>{% endfor %}
+          <form method="post" action="/receipts/{{ r.id }}/link" class="inline link-form">
+            <input type="hidden" name="state" value="{{ state }}">
+            <input name="doc_id" placeholder="Paperless-ID" size="8" aria-label="Paperless-ID des Belegs">
+            <button class="small">Zuordnen</button>
+          </form>
+        {% endif %}
+        <div class="row-actions">
+          {% if r.state in ('missing', 'candidate') %}
+          <form method="post" action="/receipts/{{ r.id }}/ignore" class="inline"><input type="hidden" name="state" value="{{ state }}">
+            <button class="small link" title="Für diese Buchung brauchst du keinen Beleg (z.B. Bargeld, Lebensmittel)">kein Beleg nötig</button></form>
+          {% if r.counterparty %}
+          <form method="post" action="/receipts/{{ r.id }}/ignore-counterparty" class="inline"><input type="hidden" name="state" value="{{ state }}">
+            <button class="small link" title="Alle Buchungen an diesen Empfänger künftig ausblenden">„{{ r.counterparty[:30] }}“ immer ausblenden</button></form>
+          {% endif %}
+          {% elif r.decided or r.state == 'ignored' %}
+          <form method="post" action="/receipts/{{ r.id }}/reopen" class="inline"><input type="hidden" name="state" value="{{ state }}">
+            <button class="small link">wieder öffnen</button></form>
+          {% endif %}
+        </div>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% else %}
+<p class="empty">{% if state == 'open' %}Keine offenen Buchungen – alles belegt oder noch nicht geprüft.{% else %}Keine Buchungen in dieser Ansicht.{% endif %}</p>
+{% endif %}
+
+<section class="card">
+  <h2>Ausgeblendete Empfänger ({{ ignored|length }})</h2>
+  {% if ignored %}
+  <ul class="plain">
+    {% for name in ignored %}
+    <li>{{ name }} <form method="post" action="/receipts-unignore" class="inline"><input type="hidden" name="name" value="{{ name }}"><button class="small link">wieder prüfen</button></form></li>
+    {% endfor %}
+  </ul>
+  {% else %}<p class="muted">Noch keine. Nutze „immer ausblenden“ z.B. für Supermarkt, Tankstelle oder Bargeldabhebungen.</p>{% endif %}
+</section>
+{% endblock %}

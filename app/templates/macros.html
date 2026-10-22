@@ -1,7 +1,8 @@
 {% set SOURCE_TITLES = {
   'rule': 'aus dem Dokumenttext erkannt (Regel)', 'llm': 'vom lokalen KI-Modell erkannt', 'paperless': 'aus deinen Paperless-Feldern',
-  'firefly': 'aus der Bankbuchung in Firefly', 'default': 'Standardwert', 'manual': 'von dir eingegeben oder geändert'} %}
-{% set SOURCE_NAMES = {'rule': 'Regel', 'llm': 'AI', 'paperless': 'Paperless', 'firefly': 'Firefly', 'default': 'Standard', 'manual': 'manuell'} %}
+  'firefly': 'aus der Bankbuchung in Firefly', 'default': 'Standardwert', 'manual': 'von dir eingegeben oder geändert',
+  'learned': 'gelernt aus deinen bestätigten Rechnungen dieses Absenders (siehe Regeln)'} %}
+{% set SOURCE_NAMES = {'rule': 'Regel', 'llm': 'AI', 'paperless': 'Paperless', 'firefly': 'Firefly', 'default': 'Standard', 'manual': 'manuell', 'learned': 'Gelernt'} %}
 
 {% macro badge(name, src) -%}
   {%- set s = src.get(name) -%}
@@ -10,7 +11,7 @@
     {%- set title = SOURCE_TITLES.get(s.source, s.source) ~ (' – von dir bestätigt' if s.confirmed and s.source != 'manual' else '') -%}
     <span class="badge src-{{ s.source }} {{ 'low' if s.confidence is not none and s.confidence < 0.8 and not s.confirmed }}" title="{{ title }}">
       {{- label -}}
-      {%- if s.confidence is not none and s.source in ('rule', 'llm', 'firefly') and not s.confirmed %} {{ (s.confidence * 100)|round|int }} %{% endif -%}
+      {%- if s.confidence is not none and s.source in ('rule', 'llm', 'firefly', 'learned') and not s.confirmed %} {{ (s.confidence * 100)|round|int }} %{% endif -%}
       {%- if s.confirmed and s.source != 'manual' %} ✓{% endif -%}
     </span>
   {%- endif -%}

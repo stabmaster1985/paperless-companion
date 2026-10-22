@@ -21,10 +21,10 @@ from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import appsettings, cases, help as helptexts, deadlines, events, fields, highlight, ics, metadata, notify, payments, pipeline, reminders, retention, selection, tax
+from app import appsettings, cases, help as helptexts, learning, receipts, rules as rule_proposals, deadlines, events, fields, highlight, ics, metadata, notify, payments, pipeline, reminders, retention, selection, tax
 from app.config import Settings, get_settings
 from app.db import get_session, init_db, session_scope
-from app.models import Case, CaseDocument, CaseEntry, Contract, Document, Invoice, KeyValue, RetentionLog, RetentionRule, Warranty
+from app.models import Case, CaseDocument, CaseEntry, Contract, Document, Invoice, KeyValue, ReceiptCheck, RuleProposal, RetentionLog, RetentionRule, Warranty
 from app.firefly import FireflyError
 from app.paperless import PaperlessError
 from app.version import Version
@@ -344,7 +344,10 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         form = dict(await request.form())
         before = form_values(doc)[0] if doc.review_state == "confirmed" else {}
         before_sources = dict(doc.field_sources or {})
+        first_confirmation = doc.review_state == "pending"
         values = pipeline.parse_values(doc.kind, form)
+        if first_confirmation:
+            learning.record_accuracy(session, doc, doc.kind, values)  # stimmten die Vorschläge?
         pipeline.apply_values(session, doc, doc.kind, values)
         pipeline.record_confirmation(doc, doc.kind, values, before, before_sources)
         doc.review_state = "confirmed"
@@ -1021,6 +1024,130 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             paperless.close()
 
     # ------------------------------------------------------------------ Für Paperless (nur mit Zustimmung)
+
+    # ------------------------------------------------------------------ Belege (Buchungen ohne Beleg)
+
+    @app.get("/receipts", response_class=HTMLResponse)
+    def receipts_page(request: Request, state: str = "open", msg: str = "", session: Session = Depends(get_session)):
+        query = select(ReceiptCheck).order_by(ReceiptCheck.tx_date.desc())
+        if state == "open":
+            query = query.where(ReceiptCheck.state.in_(("missing", "candidate")))
+        elif state in receipts.STATES:
+            query = query.where(ReceiptCheck.state == state)
+        rows = session.scalars(query).all()
+        titles = {d.id: d.title for d in session.scalars(select(Document).where(
+            Document.id.in_([r.document_id for r in rows if r.document_id] or [-1])))}
+        return render(request, "receipts.html", rows=rows, state=state, msg=msg, STATES=receipts.STATES,
+                      overview=receipts.overview(session), ignored=receipts.ignored_counterparties(session),
+                      titles=titles, settings=settings)
+
+    @app.post("/receipts/run")
+    def receipts_run(session: Session = Depends(get_session)):
+        client = make_firefly(settings)
+        if client is None:
+            return RedirectResponse(f"/receipts?msg={quote('Firefly ist nicht eingerichtet (Einstellungen → Firefly III)')}", status_code=303)
+        try:
+            found = receipts.run(session, client, settings, today())
+            msg = (f"{found['checked']} Abbuchungen geprüft: {found['missing']} ohne Beleg, "
+                   f"{found['candidate']} mit möglichem Beleg, {found['linked']} zugeordnet")
+        except FireflyError as exc:
+            msg = f"Firefly nicht erreichbar: {exc}"
+        finally:
+            client.close()
+        return RedirectResponse(f"/receipts?msg={quote(msg)}", status_code=303)
+
+    @app.post("/receipts/{row_id}/{action}")
+    def receipts_action(row_id: int, action: str, doc_id: str = Form(""), state: str = Form("open"),
+                        session: Session = Depends(get_session)):
+        row = session.get(ReceiptCheck, row_id)
+        if row is None:
+            raise HTTPException(404)
+        if action == "link":
+            ids = selection.parse_ids(doc_id)
+            msg = "Beleg zugeordnet (nur im Companion)" if ids and receipts.link(session, row, ids[0]) \
+                else "Dokument nicht gefunden – Paperless-ID prüfen (ggf. Archiv-Index neu einlesen)"
+        elif action == "ignore":
+            receipts.ignore(row)
+            msg = "Als „kein Beleg nötig“ markiert"
+        elif action == "ignore-counterparty":
+            receipts.set_ignored_counterparties(session, [*receipts.ignored_counterparties(session), row.counterparty])
+            for other in session.scalars(select(ReceiptCheck).where(ReceiptCheck.decided.is_(False))):
+                if other.counterparty.lower() == row.counterparty.lower():
+                    other.state, other.note = "ignored", "Empfänger ausgeblendet"
+            msg = f"„{row.counterparty}“ wird künftig ausgeblendet"
+        elif action == "reopen":
+            receipts.reopen(row)
+            msg = "Wieder offen"
+        else:
+            raise HTTPException(400)
+        return RedirectResponse(f"/receipts?state={quote(state)}&msg={quote(msg)}", status_code=303)
+
+    @app.post("/receipts-unignore")
+    def receipts_unignore(name: str = Form(...), session: Session = Depends(get_session)):
+        receipts.set_ignored_counterparties(session, [n for n in receipts.ignored_counterparties(session) if n != name])
+        for row in session.scalars(select(ReceiptCheck).where(ReceiptCheck.decided.is_(False), ReceiptCheck.state == "ignored")):
+            receipts.reopen(row)
+        return RedirectResponse(f"/receipts?msg={quote(f'„{name}“ wird wieder geprüft (beim nächsten Lauf)')}", status_code=303)
+
+    # ------------------------------------------------------------------ Regeln: Gelerntes und Vorschläge für Paperless
+
+    @app.get("/rules", response_class=HTMLResponse)
+    def rules_page(request: Request, msg: str = "", show: str = "open", session: Session = Depends(get_session)):
+        rule_proposals.refresh(session)
+        proposals = session.scalars(select(RuleProposal).order_by(RuleProposal.correspondent)).all()
+        if show == "open":
+            proposals = [p for p in proposals if p.state in ("proposed", "approved")]
+        elif show in rule_proposals.STATES:
+            proposals = [p for p in proposals if p.state == show]
+        counts = Counter(p.state for p in session.scalars(select(RuleProposal)))
+        ids, ids_error = None, None
+        if any(p.state == "approved" for p in proposals):
+            paperless = make_paperless(settings, timeout=15)
+            try:
+                ids = {e: {n.lower(): i for i, n in paperless.names(e).items()} for e in ("tags", "correspondents", "document_types")}
+            except PaperlessError as exc:
+                ids_error = str(exc)
+            finally:
+                paperless.close()
+        tag_choices = sorted({t for tags in session.scalars(select(Document.tags)) for t in tags or []
+                              if not pipeline.is_unresolved_tag(t)}, key=str.lower)
+        doctype_choices = sorted({d for d in session.scalars(select(Document.document_type).distinct()) if d}, key=str.lower)
+        return render(
+            request, "rules.html", msg=msg, show=show, proposals=proposals, counts=counts, STATES=rule_proposals.STATES,
+            preview=lambda p: rule_proposals.preview(session, p),
+            payload=(lambda p: rule_proposals.api_payload(p, ids)) if ids else None, ids_error=ids_error,
+            profiles=learning.profiles(session), accuracy=learning.accuracy(session), LEARN_FIELDS=learning.FIELDS,
+            tag_choices=tag_choices, doctype_choices=doctype_choices, MIN_DOCS=rule_proposals.MIN_DOCS,
+            SHARE=int(rule_proposals.SHARE * 100), SOURCE_LABELS=pipeline.SOURCE_LABELS,
+        )
+
+    @app.post("/rules/learned")
+    def rules_learned(name: str = Form(...), attr: str = Form(...), disabled: str = Form("0"),
+                      session: Session = Depends(get_session)):
+        learning.set_disabled(session, name, attr, disabled == "1")
+        msg = f"„{learning.FIELDS.get(attr, attr)}“ für {name} " + ("abgeschaltet" if disabled == "1" else "wieder aktiv")
+        return RedirectResponse(f"/rules?msg={quote(msg)}#learned", status_code=303)
+
+    @app.post("/rules/proposals/{proposal_id}")
+    async def rules_proposal(proposal_id: int, request: Request, session: Session = Depends(get_session)):
+        proposal = session.get(RuleProposal, proposal_id)
+        if proposal is None:
+            raise HTTPException(404)
+        form = await request.form()
+        action = form.get("action")
+        if action == "save":
+            rule_proposals.update(proposal, [str(t) for t in form.getlist("tag")], str(form.get("document_type") or ""))
+            msg = "Regel geändert – Auswirkung unten neu berechnet"
+        elif action in ("approved", "dismissed", "created", "proposed"):
+            if action == "proposed":
+                proposal.edited = False  # zurück auf den berechneten Vorschlag
+            rule_proposals.set_state(proposal, action)
+            msg = {"approved": "Freigegeben – unten steht, wie du die Regel in Paperless anlegst",
+                   "dismissed": "Verworfen", "created": "Als in Paperless angelegt markiert",
+                   "proposed": "Zurück auf Vorschlag"}[action]
+        else:
+            raise HTTPException(400)
+        return RedirectResponse(f"/rules?msg={quote(msg)}#rule-{proposal_id}", status_code=303)
 
     @app.get("/paperless-changes", response_class=HTMLResponse)
     def paperless_changes(request: Request, msg: str = "", session: Session = Depends(get_session)):

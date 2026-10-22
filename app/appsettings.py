@@ -66,6 +66,8 @@ SECTIONS: list[tuple[str, list[tuple[str, str, str]]]] = [
         ("firefly_dashboard_url", "Firefly-Dashboard-Adresse", "für Links zur Kontrolle von Buchungen"),
         ("firefly_lookback_days", "Buchungen der letzten … Tage prüfen", ""),
         ("firefly_auto_accept", "Eindeutige Treffer direkt als bezahlt markieren", ""),
+        ("receipts_min_amount", "Belege prüfen ab Betrag (€)", "Buchungen ohne Beleg"),
+        ("receipts_lookback_days", "Belege prüfen: letzte … Tage", ""),
     ]),
     ("Steuer und Aufbewahrung", [
         ("tax_tags", "Steuer-Tags", "kommagetrennt; Dokumenttypen unter „Dokumenttypen“"),
@@ -112,6 +114,8 @@ def kind(name: str) -> str:
         return "bool"
     if annotation is int:
         return "int"
+    if annotation is float:
+        return "float"
     if typing.get_origin(annotation) is typing.Literal:
         return "choice"
     return "secret" if name in SECRETS else "text"

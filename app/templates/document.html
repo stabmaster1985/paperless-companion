@@ -97,6 +97,7 @@ document.querySelectorAll('#viewer .tab[data-tab]').forEach((tab) => tab.addEven
     <span class="badge src-llm">AI</span> lokales Modell ·
     <span class="badge src-paperless">Paperless</span> deine Felder ·
     <span class="badge src-firefly">Firefly</span> Bankbuchung ·
+    <span class="badge src-learned">Gelernt</span> wie bei früheren Rechnungen ·
     <span class="badge src-manual">manuell</span> von dir eingegeben · ✓ = von dir bestätigt</p>
   <input type="hidden" name="next" value="{{ '/inbox' if doc.review_state == 'pending' else '/documents/' ~ doc.id }}">
 

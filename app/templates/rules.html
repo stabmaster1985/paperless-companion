@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% from "macros.html" import doclink, help %}
+{% block content %}
+<h1>Regeln</h1>
+{% if msg %}<div class="notice">{{ msg }}</div>{% endif %}
+<p class="muted">Was der Companion aus deinen Entscheidungen gelernt hat – und welche Regeln sich daraus für Paperless anbieten.
+  Nichts davon wird automatisch in Paperless angelegt.</p>
+
+<section class="card" id="learned">
+  <h2>Gelernte Felder {{ help("Aus mindestens zwei bestätigten Rechnungen eines Absenders mit (fast) immer gleichem Wert. Neue Rechnungen dieses Absenders werden damit vorbelegt (Herkunft „Gelernt“) – das spart AI-Abfragen. Du prüfst wie immer in der Inbox.") }}</h2>
+  {% if profiles %}
+  <div class="table-wrap"><table class="list changes-list">
+    <colgroup><col class="col-doc"><col><col class="col-stand"></colgroup>
+    <thead><tr><th>Absender</th><th>Gelernt</th><th>Grundlage</th></tr></thead>
+    <tbody>
+    {% for name, p in profiles.items() %}
+      <tr>
+        <td><strong>{{ name }}</strong><br><small class="muted">{{ p.count }} bestätigte Rechnungen</small></td>
+        <td>
+          {% for attr, e in p.fields.items() %}
+          <div class="learned-row {{ 'off' if e.disabled }}">
+            {{ LEARN_FIELDS[attr] }}: <strong>{% if attr == 'payment_method' %}{{ 'Lastschrift' if e.value == 'debit' else ('Überweisung' if e.value == 'transfer' else e.value) }}{% elif attr == 'due_days' %}{{ e.value }} Tage nach Rechnungsdatum{% else %}{{ e.value }}{% endif %}</strong>
+            <small class="muted">({{ e.basis }})</small>
+            <form method="post" action="/rules/learned" class="inline">
+              <input type="hidden" name="name" value="{{ name }}"><input type="hidden" name="attr" value="{{ attr }}">
+              <input type="hidden" name="disabled" value="{{ '0' if e.disabled else '1' }}">
+              <button class="small link" title="{{ 'Wieder verwenden' if e.disabled else 'Nicht mehr zum Vorbelegen verwenden' }}">{{ 'einschalten' if e.disabled else 'abschalten' }}</button>
+            </form>
+          </div>
+          {% endfor %}
+        </td>
+        <td><small class="muted">mind. 80 % gleich</small></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}
+  <p class="muted">Noch nichts gelernt. Sobald du mindestens zwei Rechnungen desselben Absenders mit gleicher Zahlungsart, IBAN oder gleichem Zahlungsziel bestätigt hast, erscheint es hier.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Wie gut ist die Erkennung? {{ help("Beim Bestätigen in der Inbox zählt die App je Quelle und Feld, ob der Vorschlag stimmte. Hohe Werte bei „Regel“ und „Gelernt“ heißen: Die AI wird dort kaum gebraucht.") }}</h2>
+  {% if accuracy %}
+  <div class="table-wrap"><table class="list">
+    <thead><tr><th>Quelle</th><th>Feld</th><th>richtig</th><th>Trefferquote</th></tr></thead>
+    <tbody>
+    {% for r in accuracy %}
+      <tr><td><span class="badge src-{{ r.source }}">{{ SOURCE_LABELS.get(r.source, r.source) }}</span></td><td>{{ r.field }}</td>
+        <td>{{ r.correct }} von {{ r.total }}</td><td><strong>{{ r.rate }} %</strong></td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}<p class="muted">Noch keine Daten – gezählt wird ab jetzt bei jeder Bestätigung in der Inbox.</p>{% endif %}
+</section>
+
+<section class="card" id="proposals">
+  <h2>Vorschläge für Paperless-Regeln {{ help("Wenn mindestens " ~ MIN_DOCS ~ " Dokumente eines Absenders zu " ~ SHARE ~ " % dieselben Tags oder denselben Dokumenttyp tragen (inkl. Vorgemerktem), schlägt die App eine Paperless-Regel (Workflow) vor. Jahres-Tags und verworfene Tags werden nicht vorgeschlagen.") }}</h2>
+  <p class="muted">Ablauf: Vorschlag prüfen und bei Bedarf anpassen → Auswirkung auf deine bisherigen Dokumente ansehen → <strong>freigeben</strong> →
+    die Regel nach der Anleitung selbst in Paperless anlegen → als „angelegt“ markieren. Der Companion schreibt nichts nach Paperless.</p>
+  <nav class="tabs">
+    <a href="/rules?show=open#proposals" class="{{ 'active' if show == 'open' }}">Offen ({{ counts.get('proposed', 0) + counts.get('approved', 0) }})</a>
+    {% for key, label in STATES.items() %}<a href="/rules?show={{ key }}#proposals" class="{{ 'active' if show == key }}">{{ label }} ({{ counts.get(key, 0) }})</a>{% endfor %}
+  </nav>
+  {% if ids_error %}<div class="notice warn">Namen konnten nicht aus Paperless gelesen werden: {{ ids_error }}</div>{% endif %}
+  {% for p in proposals %}
+  {% set pv = preview(p) %}
+  <article class="rule" id="rule-{{ p.id }}">
+    <header>
+      <strong>Wenn Korrespondent = „{{ p.correspondent }}“</strong>
+      <span class="tag {{ 'tag-ok' if p.state in ('approved', 'created') }}">{{ STATES[p.state] }}</span>
+      {% if p.edited %}<span class="tag" title="Von dir angepasst">angepasst</span>{% endif %}
+      <small class="muted">Grundlage: {{ p.basis.docs if p.basis else '?' }} Dokumente</small>
+    </header>
+    <form method="post" action="/rules/proposals/{{ p.id }}">
+      <div class="rule-body">
+        <div><span class="muted">dann Tags setzen:</span>
+          {% for t in (p.basis.tags.keys()|list if p.basis else []) + (p.tags|reject('in', p.basis.tags if p.basis else {})|list) %}
+          <label class="check chip"><input type="checkbox" name="tag" value="{{ t }}" {{ 'checked' if t in p.tags }} {{ 'disabled' if p.state != 'proposed' }}>
+            {{ t }}{% if p.basis and t in p.basis.tags %} <small class="muted">{{ p.basis.tags[t] }}/{{ p.basis.docs }}</small>{% endif %}</label>
+          {% endfor %}
+          {% if p.state == 'proposed' %}
+          <select name="tag" aria-label="Weiteren Tag hinzufügen"><option value="">+ Tag hinzufügen</option>
+            {% for t in tag_choices if t not in p.tags %}<option>{{ t }}</option>{% endfor %}</select>
+          {% endif %}
+        </div>
+        <div><span class="muted">und Dokumenttyp:</span>
+          <select name="document_type" {{ 'disabled' if p.state != 'proposed' }}><option value="">– nicht setzen –</option>
+            {% for d in doctype_choices %}<option {{ 'selected' if d == p.document_type }}>{{ d }}</option>{% endfor %}</select>
+          {% if p.basis and p.basis.document_type %}<small class="muted">({% for d, n in p.basis.document_type.items() %}{{ d }} {{ n }}/{{ p.basis.docs }}{% endfor %})</small>{% endif %}
+        </div>
+      </div>
+
+      <details class="impact" {{ 'open' if pv.conflicts }}>
+        <summary>Auswirkung auf deine {{ pv.total }} bisherigen Dokumente: {{ pv.unchanged }} schon passend, {{ pv.changed|length }} würden ergänzt,
+          <span class="{{ 'bad' if pv.conflicts }}">{{ pv.conflicts|length }} Widersprüche</span></summary>
+        <p class="muted">Eine Paperless-Regel mit Auslöser „Dokument hinzugefügt“ gilt nur für <strong>neue</strong> Dokumente. Diese Liste zeigt, was sie bei deinen
+          bisherigen Dokumenten bewirkt hätte – so siehst du, ob sie passt. Widerspruch = ein Tag, den du für diesen Absender verworfen hast, oder ein anderer Dokumenttyp.</p>
+        {% for label, items in [('Widersprüche', pv.conflicts), ('Würden ergänzt', pv.changed)] if items %}
+        <h4>{{ label }}</h4>
+        <ul class="plain impact-list">
+          {% for e in items[:25] %}
+          <li><a href="/documents/{{ e.id }}">{{ e.title or ('#' ~ e.id) }}</a> {{ doclink(e.id) }}
+            {% if e.add %} – Tags + {{ e.add|join(', ') }}{% endif %}
+            {% if e.type_to %} – Typ {{ e.type_from or 'leer' }} → {{ e.type_to }}{% endif %}</li>
+          {% endfor %}
+          {% if items|length > 25 %}<li class="muted">… und {{ items|length - 25 }} weitere</li>{% endif %}
+        </ul>
+        {% endfor %}
+      </details>
+
+      <div class="actions">
+        {% if p.state == 'proposed' %}
+        <button name="action" value="save" class="small" title="Auswahl übernehmen und Auswirkung neu berechnen">Änderungen speichern</button>
+        <button name="action" value="approved" class="small primary" title="Regel zum Anlegen freigeben – es wird nichts in Paperless geschrieben">Freigeben</button>
+        <button name="action" value="dismissed" class="small">Verwerfen</button>
+        {% if p.edited %}<button name="action" value="proposed" class="small link" title="Eigene Änderungen verwerfen">auf Vorschlag zurücksetzen</button>{% endif %}
+        {% elif p.state == 'approved' %}
+        <button name="action" value="created" class="small primary" title="Du hast die Regel in Paperless angelegt">In Paperless angelegt</button>
+        <button name="action" value="proposed" class="small">Zurück zum Bearbeiten</button>
+        {% else %}
+        <button name="action" value="proposed" class="small">Wieder als Vorschlag</button>
+        {% endif %}
+      </div>
+    </form>
+
+    {% if p.state == 'approved' %}
+    <div class="howto">
+      <h4>So legst du die Regel in Paperless an</h4>
+      <ol>
+        <li>In Paperless <strong>Workflows</strong> öffnen → <strong>Workflow hinzufügen</strong>, Name z.B. „Companion: {{ p.correspondent }}“.</li>
+        <li><strong>Auslöser</strong>: „Dokument hinzugefügt“, Filter <strong>Hat Korrespondent</strong> = „{{ p.correspondent }}“.</li>
+        <li><strong>Aktion</strong>: „Zuweisung“ →
+          {% if p.tags %}Tags: <strong>{{ p.tags|join(', ') }}</strong>{% endif %}{% if p.tags and p.document_type %}, {% endif %}
+          {% if p.document_type %}Dokumenttyp: <strong>{{ p.document_type }}</strong>{% endif %}.</li>
+        <li>Speichern, dann hier „In Paperless angelegt“ klicken.</li>
+      </ol>
+      {% if payload %}
+      <details><summary>Technischer Inhalt für die Paperless-API (zur Kontrolle)</summary>
+        <pre class="code">{{ payload(p)|tojson(indent=2) }}</pre>
+        <p class="muted"><small>POST /api/workflows/ – Auslöser 2 = „Dokument hinzugefügt“, Aktion 1 = „Zuweisung“. Das Schema kann je nach Paperless-Version abweichen.</small></p>
+      </details>
+      {% endif %}
+    </div>
+    {% endif %}
+  </article>
+  {% else %}
+  <p class="empty">Keine Vorschläge in dieser Ansicht.{% if show == 'open' %} Es braucht mindestens {{ MIN_DOCS }} Dokumente eines Absenders mit einheitlichen Tags oder Typ.{% endif %}</p>
+  {% endfor %}
+</section>
+{% endblock %}

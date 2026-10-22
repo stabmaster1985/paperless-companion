@@ -173,6 +173,46 @@ class MetaDecision(Base):
     transferred_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
+class ReceiptCheck(Base):
+    """Firefly-Abbuchung: Gibt es dazu einen Beleg in Paperless? (nur im Companion)"""
+
+    __tablename__ = "receipt_checks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    tx_id: Mapped[str] = mapped_column(String, unique=True)
+    tx_group_id: Mapped[str] = mapped_column(String)
+    tx_date: Mapped[date] = mapped_column(Date)
+    amount: Mapped[float] = mapped_column(Float)
+    counterparty: Mapped[str] = mapped_column(String, default="")
+    description: Mapped[str] = mapped_column(String, default="")
+    # missing | candidate | linked | ignored
+    state: Mapped[str] = mapped_column(String, default="missing")
+    # von dir entschieden (zugeordnet/ignoriert) -> wird bei neuen Läufen nicht überschrieben
+    decided: Mapped[bool] = mapped_column(default=False, server_default="0")
+    document_id: Mapped[int | None] = mapped_column(Integer)
+    candidates: Mapped[list | None] = mapped_column(JSON)  # [{"id": 12, "title": ..., "reason": ...}]
+    note: Mapped[str | None] = mapped_column(String)
+    checked_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class RuleProposal(Base):
+    """Vorschlag für eine Paperless-Regel (Workflow) – wird nur angezeigt, nie automatisch angelegt."""
+
+    __tablename__ = "rule_proposals"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    correspondent: Mapped[str] = mapped_column(String, unique=True)
+    tags: Mapped[list] = mapped_column(JSON, default=list)
+    document_type: Mapped[str | None] = mapped_column(String)
+    # Grundlage: {"docs": 12, "tags": {"Strom": 12}, "document_type": {"Rechnung": 11}}
+    basis: Mapped[dict | None] = mapped_column(JSON)
+    # proposed | approved | dismissed | created (von dir in Paperless angelegt)
+    state: Mapped[str] = mapped_column(String, default="proposed")
+    edited: Mapped[bool] = mapped_column(default=False, server_default="0")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
 class KeyValue(Base):
     __tablename__ = "kv"
 
