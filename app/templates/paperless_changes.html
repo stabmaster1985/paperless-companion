@@ -22,36 +22,41 @@
 {% endif %}
 
 
-<section class="card">
+<section class="card section-fields">
 <h2>Custom Fields {{ help("Werte für deine Paperless-Custom-Fields (Betrag, Fällig am …) aus bestätigten Dokumenten und deinen Eingaben. Erst „übernehmen“ schreibt sie nach Paperless.") }}</h2>
 <p class="muted">{% if last.fields %}Jüngster offener Vorschlag: <strong>{{ last.fields|ts }}</strong> · {% endif %}letzte Analyse eines Dokuments: {{ last.analysis|ts }}</p>
 {% if rows %}
-<form method="post" action="/paperless-changes" id="changes-form">
-  <div class="table-wrap"><table class="list changes-list">
-    <colgroup><col class="col-check"><col class="col-doc"><col class="col-what"><col class="col-current"><col class="col-new"><col class="col-stand"></colgroup>
-    <thead><tr>
-      <th><input type="checkbox" aria-label="Alle auswählen" onclick="document.querySelectorAll('#changes-form input[name=change]').forEach(c => c.checked = this.checked)"></th>
-      <th>Dokument</th><th>Feld</th><th>Paperless jetzt</th><th>Vorschlag</th><th class="hide-sm" title="{{ TIPS.stand }}">Stand</th>
-    </tr></thead>
-    <tbody>
-    {% for doc, changes in rows %}
+<form method="post" action="/paperless-changes" id="changes-form" class="block-form">
+  <div class="sel-bar">
+    <label class="check"><input type="checkbox" onclick="document.querySelectorAll('#changes-form input[name=change]').forEach(c => c.checked = this.checked); countSel('changes-form')"> alle auswählen</label>
+    <small class="muted">{{ rows|length }} Dokumente</small>
+  </div>
+  {% for doc, changes in rows %}
+  <article class="docblock k-field-block">
+    <header>
+      <input type="checkbox" class="doc-all" aria-label="Alle Felder dieses Dokuments auswählen"
+        onclick="this.closest('.docblock').querySelectorAll('input[name=change]').forEach(c => c.checked = this.checked); countSel('changes-form')">
+      <div class="doc-head">
+        <a href="/documents/{{ doc.id }}">{{ doc.title or ('#' ~ doc.id) }}</a> {{ doclink(doc.id) }}
+        <div class="doc-meta">{{ doc.correspondent or 'ohne Korrespondent' }}{% if doc.document_type %} · {{ doc.document_type }}{% endif %}</div>
+      </div>
+    </header>
+    <div class="sugg-list">
       {% for role, current, new in changes %}
-      <tr>
-        <td><input type="checkbox" name="change" value="{{ doc.id }}:{{ role }}"></td>
-        <td>{% if loop.first %}<a href="/documents/{{ doc.id }}">{{ doc.title or ('#' ~ doc.id) }}</a> {{ doclink(doc.id) }}<br><small>{{ doc.correspondent or '' }}</small>{% endif %}</td>
-        <td>{{ names.get(role, role) }}</td>
-        <td>{{ show(role, current) }}</td>
-        <td><strong>{{ show(role, new) }}</strong></td>
-        {% set info = change_info(doc, role) %}
-        <td class="hide-sm"><small><span class="nowrap">{{ info.at|ts }}</span>{% if info.source %}<br><span class="muted">{{ SOURCE_LABELS.get(info.source, info.source) }}</span>{% endif %}
-          {%- if info.source == 'firefly' %}{% set pay = payment_of(doc) %}{% if pay %}<br>{{ txlinks(pay.group_id, pay.date) }}{% endif %}{% endif %}
-          {%- if doc.analyzed_at and info.at and info.at[:16] != doc.analyzed_at.isoformat()[:16] %}<br><span class="muted">analysiert {{ doc.analyzed_at|ts }}</span>{% endif %}</small></td>
-      </tr>
+      {% set info = change_info(doc, role) %}
+      <label class="sugg-row k-field">
+        <input type="checkbox" name="change" value="{{ doc.id }}:{{ role }}" onchange="countSel('changes-form')">
+        <span class="kind-pill">{{ names.get(role, role) }}</span>
+        <span class="change">{% if current is not none %}<span class="old">{{ show(role, current) }}</span> → {% endif %}<strong>{{ show(role, new) }}</strong></span>
+        <span class="when" title="{{ TIPS.stand }}">{% if info.source %}<span class="badge src-{{ info.source }}">{{ SOURCE_LABELS.get(info.source, info.source) }}</span> {% endif %}<span class="nowrap">{{ info.at|ts }}</span>
+          {%- if info.source == 'firefly' %}{% set pay = payment_of(doc) %}{% if pay %} {{ txlinks(pay.group_id, pay.date) }}{% endif %}{% endif %}</span>
+      </label>
       {% endfor %}
-    {% endfor %}
-    </tbody>
-  </table></div>
-  <div class="actions">
+    </div>
+  </article>
+  {% endfor %}
+  <div class="actions sticky-actions">
+    <span class="sel-count" data-for="changes-form"></span>
     <button name="action" value="approve" class="primary" title="{{ TIPS.uebernehmen }}" onclick="return confirm('Ausgewählte Änderungen jetzt in Paperless schreiben?')">Ausgewählte in Paperless übernehmen</button>
     <button name="action" value="dismiss" title="{{ TIPS.verwerfen }}">Ausgewählte verwerfen</button>
   </div>
@@ -63,32 +68,43 @@
 </section>
 
 {% macro meta_table(form_id, rows) %}
-  <div class="table-wrap"><table class="list changes-list">
-    <colgroup><col class="col-check"><col class="col-doc"><col class="col-what"><col class="col-current"><col class="col-new"><col class="col-stand"></colgroup>
-    <thead><tr>
-      <th><input type="checkbox" aria-label="Alle auswählen" onclick="document.querySelectorAll('#{{ form_id }} input[name=item]').forEach(c => c.checked = this.checked)"></th>
-      <th>Dokument</th><th>Was</th><th>Paperless jetzt</th><th>{{ 'Vorgemerkt' if form_id == 'meta-accepted' else 'Vorschlag' }}</th><th class="hide-sm" title="{{ TIPS.stand }}">Stand</th>
-    </tr></thead>
-    <tbody>
-    {% for doc, items in rows %}
+  <div class="sel-bar">
+    <label class="check"><input type="checkbox" onclick="document.querySelectorAll('#{{ form_id }} input[name=item]').forEach(c => c.checked = this.checked); countSel('{{ form_id }}')"> alle auswählen</label>
+    <small class="muted">{{ rows|length }} Dokumente</small>
+  </div>
+  {% for doc, items in rows %}
+  <article class="docblock">
+    <header>
+      <input type="checkbox" class="doc-all" aria-label="Alle Vorschläge dieses Dokuments auswählen"
+        onclick="this.closest('.docblock').querySelectorAll('input[name=item]').forEach(c => c.checked = this.checked); countSel('{{ form_id }}')">
+      <div class="doc-head">
+        <a href="/documents/{{ doc.id }}#metadata">{{ doc.title or ('#' ~ doc.id) }}</a> {{ doclink(doc.id) }}
+        <div class="doc-meta">{{ doc.correspondent or 'ohne Korrespondent' }}{% if doc.document_type %} · {{ doc.document_type }}{% endif %}</div>
+        <div class="tags">{% for t in doc.tags or [] %}<span class="tag" title="Tag in Paperless">{{ t }}</span>{% else %}<small class="muted">keine Tags</small>{% endfor %}</div>
+      </div>
+    </header>
+    <div class="sugg-list">
       {% for it in items %}
-      <tr>
-        <td><input type="checkbox" name="item" value="{{ doc.id }}:{{ it.key }}"></td>
-        <td>{% if loop.first %}<a href="/documents/{{ doc.id }}#metadata">{{ doc.title or ('#' ~ doc.id) }}</a> {{ doclink(doc.id) }}<br><small>{{ doc.correspondent or '' }}{% if doc.document_type %} · {{ doc.document_type }}{% endif %}</small>
-          <div class="tags">{% for t in doc.tags or [] %}<span class="tag" title="Tag in Paperless">{{ t }}</span>{% else %}<small class="muted">keine Tags</small>{% endfor %}</div>{% endif %}</td>
-        <td>{{ it.label }}{% if it.new_tag %} <small class="soon" title="{{ TIPS.neuer_tag }}">neuer Tag</small>{% endif %}</td>
-        <td>{{ it.current or '' }}{% if not it.current %}<span class="muted">{{ 'fehlt' if it.key.startswith('tag:') else 'leer' }}</span>{% endif %}</td>
-        <td><strong>{{ it.new }}</strong> <span class="badge src-{{ it.source }}" title="{{ TIPS.get(it.source, '') }}">{{ META_SOURCES.get(it.source, it.source) }}</span></td>
-        <td class="hide-sm"><small>{% if it.state == 'accepted' %}vorgemerkt <span class="nowrap">{{ it.at|ts }}</span>{% if it.suggested_at %}<br><span class="muted">Vorschlag <span class="nowrap">{{ it.suggested_at|ts }}</span></span>{% endif %}
-          {%- else %}Vorschlag <span class="nowrap">{{ it.at|ts }}</span>{% endif %}</small></td>
-      </tr>
+      {% set kind = 'tag' if it.key.startswith('tag:') else it.key %}
+      <label class="sugg-row k-{{ kind }}">
+        <input type="checkbox" name="item" value="{{ doc.id }}:{{ it.key }}" onchange="countSel('{{ form_id }}')">
+        <span class="kind-pill">{{ it.label }}</span>
+        <span class="change">{% if it.current %}<span class="old">{{ it.current }}</span> → {% elif kind == 'tag' %}+ {% endif %}<strong>{{ it.new }}</strong>
+          {% if it.new_tag %}<small class="soon" title="{{ TIPS.neuer_tag }}">neuer Tag</small>{% endif %}</span>
+        <span class="when"><span class="badge src-{{ it.source }}" title="{{ TIPS.get(it.source, '') }}">{{ META_SOURCES.get(it.source, it.source) }}</span>
+          {% if it.state == 'accepted' %}vorgemerkt <span class="nowrap">{{ it.at|ts }}</span>{% if it.suggested_at %} · <span class="muted">Vorschlag <span class="nowrap">{{ it.suggested_at|ts }}</span></span>{% endif %}
+          {%- else %}Vorschlag <span class="nowrap">{{ it.at|ts }}</span>{% endif %}</span>
+      </label>
       {% endfor %}
-    {% endfor %}
-    </tbody>
-  </table></div>
+    </div>
+  </article>
+  {% endfor %}
 {% endmacro %}
 
 <h2 id="metadata">Titel, Tags, Korrespondent, Dokumenttyp</h2>
+<p class="kind-legend"><span class="kind-pill k-title">Titel</span> <span class="kind-pill k-tag">Tag</span>
+  <span class="kind-pill k-correspondent">Korrespondent</span> <span class="kind-pill k-document_type">Dokumenttyp</span>
+  <small class="muted">· Tipp: ganze Zeile antippen zum Auswählen, Kästchen am Dokument wählt alle seine Vorschläge</small></p>
 <p class="muted">Vorschläge aus dem lokalen Modell (<span class="badge src-llm">AI</span>) und aus deinen übrigen Dokumenten desselben Absenders
   (<span class="badge src-history">Verlauf</span>). <strong>Vormerken</strong> speichert deine Entscheidung nur im Companion – die App lernt sofort daraus
   (vorgemerkte Tags und Titel fließen in die nächsten Vorschläge ein). Nach Paperless geht erst etwas, wenn du <strong>Übertragen</strong> wählst.
@@ -122,7 +138,7 @@
     {% set total_open = meta_counts.what.values()|sum %}
     <a href="/paperless-changes?{{ mq(what='', value='') }}#metadata" class="{{ 'active' if not mf.what }}">Alle ({{ total_open }})</a>
     {% for key, label in [('title', 'Titel'), ('tag', 'Tags'), ('correspondent', 'Korrespondent'), ('document_type', 'Dokumenttyp')] %}
-    <a href="/paperless-changes?{{ mq(what=key, value='') }}#metadata" class="{{ 'active' if mf.what == key }}">{{ label }} ({{ meta_counts.what.get(key, 0) }})</a>
+    <a href="/paperless-changes?{{ mq(what=key, value='') }}#metadata" class="kind-tab k-{{ key }} {{ 'active' if mf.what == key }}">{{ label }} ({{ meta_counts.what.get(key, 0) }})</a>
     {% endfor %}
   </nav>
   <input type="hidden" name="what" value="{{ mf.what }}">
@@ -157,13 +173,14 @@
   </div>
 </form>
 
-<section class="card">
+<section class="card section-accepted">
 <h3>Vorgemerkt – wartet auf Übertragung ({{ meta_accepted_count }}{{ ', gefiltert' if mf_active }}) {{ help("Von dir vorgemerkt. Die App lernt bereits daraus, Paperless bleibt unverändert, bis du überträgst.") }}</h3>
 {% if meta_accepted %}
 <form method="post" action="/paperless-changes/meta" id="meta-accepted">
   {{ mf_hidden(mf) }}
   {{ meta_table('meta-accepted', meta_accepted) }}
-  <div class="actions">
+  <div class="actions sticky-actions">
+    <span class="sel-count" data-for="meta-accepted"></span>
     <button name="action" value="transfer" class="primary" title="{{ TIPS.uebertragen }}" onclick="return confirm('Ausgewählte vorgemerkte Werte jetzt in Paperless schreiben?')">Ausgewählte nach Paperless übertragen</button>
     <button name="action" value="transfer_all" title="{{ TIPS.uebertragen }}" onclick="return confirm('Alle {{ meta_accepted_count }} {{ 'angezeigten ' if mf_active }}vorgemerkten Werte jetzt in Paperless schreiben?')">Alle {{ meta_accepted_count }} {{ 'angezeigten ' if mf_active }}übertragen</button>
     <button name="action" value="withdraw" title="{{ TIPS.zuruecknehmen }}">Vormerkung zurücknehmen</button>
@@ -176,7 +193,7 @@
 {% endif %}
 </section>
 
-<section class="card">
+<section class="card section-open">
 <h3>Offene Vorschläge ({{ meta_open_count }}{{ ', gefiltert' if mf_active }}) {{ help("Noch nicht entschieden. Vormerken oder verwerfen – beides bleibt im Companion.") }}</h3>
 <p class="muted">Hier stehen fehlende Tags, Titel nur, wenn der jetzige nichtssagend ist (z.B. „Scan_0012“), und Korrespondent/Dokumenttyp nur,
   wenn sie in Paperless fehlen. Abweichungen bei gepflegten Werten siehst du auf der Dokumentseite.</p>
@@ -184,7 +201,8 @@
 <form method="post" action="/paperless-changes/meta" id="meta-open">
   {{ mf_hidden(mf) }}
   {{ meta_table('meta-open', meta_open) }}
-  <div class="actions">
+  <div class="actions sticky-actions">
+    <span class="sel-count" data-for="meta-open"></span>
     <button name="action" value="accept" class="primary" title="{{ TIPS.vormerken }}">Ausgewählte vormerken</button>
     <button name="action" value="dismiss" title="{{ TIPS.verwerfen }}">Ausgewählte verwerfen</button>
     {% if mf_active %}
@@ -204,13 +222,13 @@
   <h2>Wie gut sind die Vorschläge? {{ help("Je Quelle und Art: wie oft du übernommen, geändert oder verworfen hast. Hilft zu entscheiden, wann sich das Übertragen lohnt.") }}</h2>
   {% if quality.rows %}
   <div class="table-wrap"><table class="list">
-    <thead><tr><th>Quelle</th><th>Was</th><th>übernommen</th><th>geändert</th><th>verworfen</th><th title="{{ TIPS.trefferquote }}">Trefferquote</th></tr></thead>
+    <thead><tr><th>Quelle</th><th>Was</th><th class="hide-sm">übernommen</th><th class="hide-sm">geändert</th><th class="hide-sm">verworfen</th><th title="{{ TIPS.trefferquote }}">Trefferquote</th></tr></thead>
     <tbody>
     {% for r in quality.rows %}
       <tr>
         <td><span class="badge src-{{ r.source }}">{{ META_SOURCES.get(r.source, r.source) }}</span></td>
         <td>{{ META_ITEMS.get(r.item, r.item) }}</td>
-        <td>{{ r.accepted }}</td><td>{{ r.edited }}</td><td>{{ r.dismissed }}</td>
+        <td class="hide-sm">{{ r.accepted }}</td><td class="hide-sm">{{ r.edited }}</td><td class="hide-sm">{{ r.dismissed }}</td>
         <td><strong>{{ r.rate }} %</strong> <small class="muted">von {{ r.total }}</small></td>
       </tr>
     {% endfor %}
@@ -232,4 +250,13 @@
     {% endfor %}
   </ul>
 </section>
+<script>
+// Anzahl ausgewählter Einträge in der Aktionsleiste anzeigen
+function countSel(formId) {
+  const form = document.getElementById(formId);
+  if (!form) return;
+  const n = form.querySelectorAll('input[name=item]:checked, input[name=change]:checked').length;
+  form.querySelectorAll('.sel-count').forEach((el) => { el.textContent = n ? n + ' ausgewählt' : ''; });
+}
+</script>
 {% endblock %}
