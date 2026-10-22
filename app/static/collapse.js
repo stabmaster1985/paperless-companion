@@ -51,3 +51,14 @@ document.addEventListener('click', (e) => {
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') document.querySelectorAll('.help.show').forEach((t) => t.classList.remove('show'));
 });
+
+
+// Menügruppen: nur eine offen, Klick daneben schließt
+document.addEventListener('click', (e) => {
+  document.querySelectorAll('details.navgroup[open], .bottom-nav details[open]').forEach((d) => {
+    if (!d.contains(e.target)) d.open = false;
+  });
+});
+document.querySelectorAll('details.navgroup').forEach((d) => d.addEventListener('toggle', () => {
+  if (d.open) document.querySelectorAll('details.navgroup[open]').forEach((o) => { if (o !== d) o.open = false; });
+}));

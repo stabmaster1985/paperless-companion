@@ -435,3 +435,62 @@ kbd { border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 
   .review-actions .big { flex: 1 1 30%; padding: .7rem .4rem; }
   .viewer iframe { height: 45vh; }
 }
+
+/* Navigation: Gruppen mit Untermenü, am Handy Leiste unten */
+.brand { display: inline-flex; align-items: center; gap: .45rem; }
+.brand img { border-radius: 5px; }
+.main-nav { display: flex; flex-wrap: wrap; gap: .25rem; align-items: center; }
+.main-nav > a, .navgroup > summary { padding: .35rem .7rem; border-radius: 6px; color: var(--muted); cursor: pointer; list-style: none; }
+.navgroup > summary::-webkit-details-marker { display: none; }
+.navgroup > summary::after { content: " ▾"; font-size: .75rem; }
+.main-nav > a.active, .navgroup.active > summary, .main-nav > a:hover, .navgroup > summary:hover { background: var(--bg); color: var(--text); text-decoration: none; }
+.navgroup { position: relative; }
+.navmenu { position: absolute; top: calc(100% + .3rem); left: 0; z-index: 30; min-width: 14rem; background: var(--surface);
+  border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0, 0, 0, .12); padding: .35rem; display: flex; flex-direction: column; }
+.navmenu a { padding: .45rem .6rem; border-radius: 6px; color: var(--text); display: flex; justify-content: space-between; gap: .5rem; }
+.navmenu a:hover, .navmenu a.active { background: var(--bg); text-decoration: none; }
+.navmenu a.active { font-weight: 600; }
+.bottom-nav { display: none; }
+@media (max-width: 640px) {
+  .topbar .main-nav { display: none; }
+  body { padding-bottom: 4.2rem; }
+  .bottom-nav { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; background: var(--surface);
+    border-top: 1px solid var(--border); justify-content: space-around; padding: .25rem 0 calc(.25rem + env(safe-area-inset-bottom)); }
+  .bottom-nav > a, .bottom-nav summary { display: flex; flex-direction: column; align-items: center; font-size: .7rem; color: var(--muted);
+    padding: .2rem .4rem; position: relative; list-style: none; cursor: pointer; min-width: 3.5rem; }
+  .bottom-nav summary::-webkit-details-marker { display: none; }
+  .bottom-nav .ico { font-size: 1.25rem; line-height: 1.3; }
+  .bottom-nav a.active, .bottom-nav details[open] summary { color: var(--accent); text-decoration: none; }
+  .bottom-nav .pill { position: absolute; top: -.1rem; right: .2rem; font-size: .65rem; padding: 0 .35rem; }
+  .more-sheet { position: fixed; left: 0; right: 0; bottom: 3.6rem; max-height: 70vh; overflow-y: auto; background: var(--surface);
+    border-top: 1px solid var(--border); box-shadow: 0 -8px 24px rgba(0, 0, 0, .15); padding: .75rem 1rem 1rem; display: grid;
+    grid-template-columns: 1fr 1fr; gap: .75rem 1rem; }
+  .more-group { display: flex; flex-direction: column; gap: .15rem; }
+  .more-group strong { font-size: .75rem; text-transform: uppercase; color: var(--muted); letter-spacing: .03em; }
+  .more-group a { padding: .35rem 0; }
+  .sticky-actions, .review-actions { bottom: 3.6rem; }
+}
+
+/* Startseite: Kacheln „Heute zu tun“ */
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: .75rem; margin: 1rem 0 1.5rem; }
+.tile { display: flex; flex-direction: column; gap: .15rem; padding: .85rem 1rem; border-radius: var(--radius); background: var(--surface);
+  border: 1px solid var(--border); border-left: 5px solid var(--tile); color: var(--text); }
+.tile:hover { text-decoration: none; border-color: var(--tile); }
+.tile.has { background: var(--tile-bg); }
+.tile-num { font-size: 1.7rem; font-weight: 700; line-height: 1.1; color: var(--tile); }
+.tile:not(.has) .tile-num { color: var(--muted); }
+.tile-label { font-weight: 600; }
+.tile small { color: var(--muted); }
+.t-inbox { --tile: #0e7490; --tile-bg: #ecf8fb; }
+.t-meta { --tile: #d97706; --tile-bg: #fff7e6; }
+.t-transfer { --tile: #17845f; --tile-bg: #edf8f3; }
+.t-receipts { --tile: #b91c1c; --tile-bg: #fdeeee; }
+.t-rules { --tile: #7c3aed; --tile-bg: #f5f0ff; }
+.t-deadline { --tile: #1d4ed8; --tile-bg: #eef3ff; }
+@media (prefers-color-scheme: dark) {
+  .t-inbox { --tile-bg: #13303a; } .t-meta { --tile-bg: #3a2d14; } .t-transfer { --tile-bg: #16302a; }
+  .t-receipts { --tile-bg: #3a1a1a; } .t-rules { --tile-bg: #2a2140; } .t-deadline { --tile-bg: #1c2540; }
+}
+@media (max-width: 640px) { .tiles { grid-template-columns: 1fr 1fr; gap: .5rem; } .tile { padding: .65rem .75rem; } .tile-num { font-size: 1.4rem; } }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+@media (max-width: 640px) { .more-sheet .pill { position: static; font-size: .7rem; margin-left: .3rem; } }

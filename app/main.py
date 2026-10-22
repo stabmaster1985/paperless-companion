@@ -81,6 +81,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
 
     templates.env.filters["ts"] = fmt_ts
     templates.env.filters["term"] = identifiers.term_label
+    templates.env.globals["starts_any"] = lambda path, prefixes: any(path.startswith(p) for p in prefixes if p != "/")
     templates.env.globals.update(page_help=helptexts.page_help, TIPS=helptexts.TIPS, asset_v=asset_version())
     templates.env.globals["tx_links"] = lambda group_id, day: payments.links(settings, group_id, day)
 
@@ -118,8 +119,9 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             inbox_count = s.scalar(select(func.count()).select_from(Document).where(Document.review_state == "pending"))
             outgoing = s.scalar(select(func.count()).select_from(Document).where(
                 Document.writeback_pending.is_(True) | Document.meta_pending.is_(True)))
+            receipts_missing = s.scalar(select(func.count()).select_from(ReceiptCheck).where(ReceiptCheck.state == "missing"))
         return templates.TemplateResponse(request, name, {
-            "inbox_count": inbox_count, "outgoing_count": outgoing, "today": today(),
+            "inbox_count": inbox_count, "outgoing_count": outgoing, "today": today(), "receipts_missing": receipts_missing,
             "update_available": app.state.version.update_available, **ctx,
         })
 
@@ -178,7 +180,23 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                 select(func.count()).select_from(Document).where(Document.extraction_state.in_(("queued", "running")))
             ),
         }
-        return render(request, "dashboard.html", events=upcoming, stats=stats)
+        # „Heute zu tun“: was auf dich wartet, je Bereich
+        meta_open = meta_accepted = 0
+        for doc in session.scalars(select(Document).where(Document.meta_pending.is_(True))):
+            for item in metadata.pending(doc):
+                if item["state"] == "open":
+                    meta_open += 1
+                else:
+                    meta_accepted += 1
+        rule_counts = Counter(session.scalars(select(RuleProposal.state)))
+        todo = {
+            "fields": len(pipeline.documents_with_changes(session, settings, t)),
+            "meta_open": meta_open, "meta_accepted": meta_accepted,
+            "receipts": receipts.overview(session) if settings.firefly_enabled else None,
+            "rules_proposed": rule_counts.get("proposed", 0), "rules_approved": rule_counts.get("approved", 0),
+            "next": upcoming[0] if upcoming else None,
+        }
+        return render(request, "dashboard.html", events=upcoming, stats=stats, todo=todo)
 
     @app.get("/inbox", response_class=HTMLResponse)
     def inbox(request: Request, msg: str = "", session: Session = Depends(get_session)):

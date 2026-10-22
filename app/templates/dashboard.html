@@ -2,8 +2,33 @@
 {% from "macros.html" import doclink %}
 {% block content %}
 <h1>Übersicht</h1>
+<h2 class="sr-only">Heute zu tun</h2>
+<section class="tiles" aria-label="Heute zu tun">
+  <a class="tile t-inbox {{ 'has' if inbox_count }}" href="/inbox">
+    <span class="tile-num">{{ inbox_count }}</span><span class="tile-label">Dokumente prüfen</span>
+    <small>{{ 'Neue Rechnungen, Verträge, Garantien' if inbox_count else 'Inbox ist leer' }}</small></a>
+  <a class="tile t-meta {{ 'has' if todo.meta_open }}" href="{{ '/review' if todo.meta_open else '/paperless-changes' }}">
+    <span class="tile-num">{{ todo.meta_open }}</span><span class="tile-label">Vorschläge entscheiden</span>
+    <small>{% if todo.meta_open %}einzeln durchgehen{% else %}keine offenen{% endif %}{% if todo.meta_accepted %} · {{ todo.meta_accepted }} vorgemerkt{% endif %}</small></a>
+  <a class="tile t-transfer {{ 'has' if todo.meta_accepted or todo.fields }}" href="/paperless-changes">
+    <span class="tile-num">{{ todo.meta_accepted + todo.fields }}</span><span class="tile-label">Für Paperless bereit</span>
+    <small>{{ todo.meta_accepted }} vorgemerkt · {{ todo.fields }} Dokumente mit Feldern</small></a>
+  {% if todo.receipts %}
+  <a class="tile t-receipts {{ 'has' if todo.receipts.counts.missing }}" href="/receipts">
+    <span class="tile-num">{{ todo.receipts.counts.missing }}</span><span class="tile-label">Belege fehlen</span>
+    <small>{% if todo.receipts.counts.missing %}{{ todo.receipts.missing_sum|eur }} ohne Beleg{% else %}alles belegt{% endif %}{% if todo.receipts.counts.candidate %} · {{ todo.receipts.counts.candidate }} möglich{% endif %}</small></a>
+  {% endif %}
+  <a class="tile t-rules {{ 'has' if todo.rules_proposed or todo.rules_approved }}" href="/rules#proposals">
+    <span class="tile-num">{{ todo.rules_proposed }}</span><span class="tile-label">Regel-Vorschläge</span>
+    <small>{% if todo.rules_approved %}{{ todo.rules_approved }} freigegeben, im Testbetrieb{% else %}für Paperless prüfen{% endif %}</small></a>
+  <a class="tile t-deadline {{ 'has' if todo.next and (todo.next.date - today).days <= 14 }}" href="{{ todo.next.url if todo.next else '/contracts' }}">
+    <span class="tile-num">{% if todo.next %}{% set d = (todo.next.date - today).days %}{{ 'heute' if d == 0 else (d ~ ' T.' if d > 0 else 'fällig') }}{% else %}–{% endif %}</span>
+    <span class="tile-label">Nächste Frist</span>
+    <small>{% if todo.next %}{{ todo.next.label }}: {{ todo.next.title }} ({{ todo.next.date|d }}){% else %}keine in 60 Tagen{% endif %}</small></a>
+</section>
+
+<h2>Finanzen und Status</h2>
 <section class="stats">
-  <a class="stat" href="/inbox"><span class="num">{{ inbox_count }}</span><span>zu prüfen</span></a>
   <a class="stat {{ 'warn' if stats.overdue }}" href="/invoices"><span class="num">{{ stats.open_sum|eur }}</span><span>{{ stats.open_count }} offene Rechnungen{% if stats.overdue %}, {{ stats.overdue }} überfällig{% endif %}{% if stats.payment_suggestions %}, {{ stats.payment_suggestions }} Zahlungen gefunden{% endif %}</span></a>
   <a class="stat" href="/contracts"><span class="num">{{ stats.fixed_costs|eur }}</span><span>Fixkosten / Monat ({{ stats.contracts }} Verträge)</span></a>
   <a class="stat" href="/documents?state=queued"><span class="num">{{ stats.queued }}</span><span>in Analyse</span></a>

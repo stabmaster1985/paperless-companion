@@ -13,27 +13,52 @@
 </head>
 <body>
 <header class="topbar">
-  <a class="brand" href="/">Paperless Companion</a>
-  <nav>
-    {% set path = request.url.path %}
+  <a class="brand" href="/"><img src="/static/icons/icon.svg" alt="" width="22" height="22"> Paperless Companion</a>
+  {% set path = request.url.path %}
+  {% set nav_todo = inbox_count + outgoing_count + receipts_missing %}
+  {% set nav_groups = [
+    ('Erledigen', nav_todo, [('/inbox', 'Inbox', inbox_count, 'Neue Dokumente prüfen'), ('/paperless-changes', 'Für Paperless', outgoing_count, 'Vorschläge sammeln und übertragen'),
+                         ('/review', 'Vorschläge durchgehen', 0, 'Einzeln mit Vorschau'), ('/receipts', 'Belege', receipts_missing, 'Buchungen ohne Beleg')]),
+    ('Überblick', 0, [('/invoices', 'Rechnungen', 0, ''), ('/contracts', 'Verträge', 0, ''), ('/warranties', 'Garantien', 0, ''),
+                      ('/cases', 'Vorgänge', 0, ''), ('/tax', 'Steuer', 0, '')]),
+    ('Archiv', 0, [('/documents', 'Dokumente', 0, ''), ('/rules', 'Regeln', 0, 'Gelerntes und Vorschläge für Paperless-Regeln'),
+                   ('/retention', 'Aufbewahrung', 0, '')]),
+    ('System', 1 if update_available else 0, [('/settings', 'Einstellungen', 0, ''), ('/system', 'System', 1 if update_available else 0, 'Verbindungen, Warteschlange, Updates'),
+                   ('/help', 'Hilfe', 0, '')]),
+  ] %}
+  <nav class="main-nav" aria-label="Hauptmenü">
     <a href="/" class="{{ 'active' if path == '/' }}">Übersicht</a>
-    <a href="/inbox" class="{{ 'active' if path.startswith('/inbox') }}">Inbox{% if inbox_count %} <span class="pill">{{ inbox_count }}</span>{% endif %}</a>
-    <a href="/contracts" class="{{ 'active' if path.startswith('/contracts') }}">Verträge</a>
-    <a href="/invoices" class="{{ 'active' if path.startswith('/invoices') }}">Rechnungen</a>
-    <a href="/warranties" class="{{ 'active' if path.startswith('/warranties') }}">Garantien</a>
-    <a href="/cases" class="{{ 'active' if path.startswith('/cases') }}">Vorgänge</a>
-    <a href="/tax" class="{{ 'active' if path.startswith('/tax') }}">Steuer</a>
-    <a href="/retention" class="{{ 'active' if path.startswith('/retention') }}">Aufbewahrung</a>
-    <a href="/documents" class="{{ 'active' if path.startswith('/documents') }}">Dokumente</a>
-    <a href="/receipts" class="{{ 'active' if path.startswith('/receipts') }}" title="Firefly-Abbuchungen ohne Beleg in Paperless">Belege</a>
-    <a href="/rules" class="{{ 'active' if path.startswith('/rules') }}" title="Gelerntes und Vorschläge für Paperless-Regeln">Regeln</a>
-    <a href="/paperless-changes" class="{{ 'active' if path.startswith('/paperless-changes') }}">Für Paperless{% if outgoing_count %} <span class="pill">{{ outgoing_count }}</span>{% endif %}</a>
-    <a href="/settings" class="{{ 'active' if path.startswith('/settings') }}">Einstellungen</a>
-    <a href="/system" class="{{ 'active' if path.startswith('/system') }}">System{% if update_available %} <span class="pill" title="Update verfügbar">Update</span>{% endif %}</a>
-    <a href="/help" class="help-link {{ 'active' if path.startswith('/help') }}" title="Hilfe: Ablauf, Begriffe und Erklärungen zu allen Seiten">Hilfe</a>
-    {% if auth %}<form method="post" action="/logout" class="inline"><button class="link">Abmelden</button></form>{% endif %}
+    {% for title, count, links in nav_groups %}
+    {% set group_active = starts_any(path, links|map(attribute=0)|list) %}
+    <details class="navgroup {{ 'active' if group_active }}">
+      <summary>{{ title }}{% if count %} <span class="pill" {% if title == 'System' %}title="Update verfügbar"{% endif %}>{{ 'Update' if title == 'System' else count }}</span>{% endif %}</summary>
+      <div class="navmenu">
+        {% for href, label, n, tip in links %}
+        <a href="{{ href }}" class="{{ 'active' if path.startswith(href) }}" {% if tip %}title="{{ tip }}"{% endif %}>{{ label }}{% if n %} <span class="pill">{{ 'Update' if href == '/system' else n }}</span>{% endif %}</a>
+        {% endfor %}
+        {% if title == 'System' and auth %}<form method="post" action="/logout" class="inline"><button class="link">Abmelden</button></form>{% endif %}
+      </div>
+    </details>
+    {% endfor %}
   </nav>
 </header>
+<nav class="bottom-nav" aria-label="Schnellzugriff">
+  <a href="/" class="{{ 'active' if path == '/' }}"><span class="ico">⌂</span>Übersicht</a>
+  <a href="/inbox" class="{{ 'active' if path.startswith('/inbox') }}"><span class="ico">✉</span>Inbox{% if inbox_count %}<span class="pill">{{ inbox_count }}</span>{% endif %}</a>
+  <a href="/paperless-changes" class="{{ 'active' if path.startswith('/paperless-changes') or path.startswith('/review') }}"><span class="ico">⇄</span>Paperless{% if outgoing_count %}<span class="pill">{{ outgoing_count }}</span>{% endif %}</a>
+  <a href="/receipts" class="{{ 'active' if path.startswith('/receipts') }}"><span class="ico">€</span>Belege{% if receipts_missing %}<span class="pill">{{ receipts_missing }}</span>{% endif %}</a>
+  <details class="more">
+    <summary><span class="ico">☰</span>Mehr{% if update_available %}<span class="pill">!</span>{% endif %}</summary>
+    <div class="more-sheet">
+      {% for title, count, links in nav_groups %}
+      <div class="more-group"><strong>{{ title }}</strong>
+        {% for href, label, n, tip in links %}<a href="{{ href }}" class="{{ 'active' if path.startswith(href) }}">{{ label }}{% if n %} <span class="pill">{{ 'Update' if href == '/system' else n }}</span>{% endif %}</a>{% endfor %}
+      </div>
+      {% endfor %}
+      {% if auth %}<form method="post" action="/logout" class="inline"><button class="link">Abmelden</button></form>{% endif %}
+    </div>
+  </details>
+</nav>
 <main class="{% block main_class %}{% endblock %}">
 {% set ph = page_help(request.url.path) %}
 {% if ph %}
