@@ -61,6 +61,10 @@ class PaperlessClient:
         return {"username": user.get("username") or user.get("display_name"), "is_superuser": bool(user.get("is_superuser")),
                 "permissions": data.get("permissions") or []}
 
+    def objects(self, endpoint: str) -> list[dict]:
+        """Vollständige Einträge (z.B. Tags mit Zuordnungsregel „match“/„matching_algorithm“)."""
+        return list(self._paginate(f"/api/{endpoint}/", page_size=500))
+
     def names(self, endpoint: str) -> dict[int, str]:
         return {item["id"]: item["name"] for item in self._paginate(f"/api/{endpoint}/", page_size=500)}
 

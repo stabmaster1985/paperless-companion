@@ -215,11 +215,16 @@ nicht verändert. Geprüft wird stündlich zusammen mit dem Zahlungsabgleich.
   „Gelernt“). Das spart AI-Abfragen. Jede gelernte Regel lässt sich unter **Regeln** abschalten.
 - **Trefferquote:** Beim Bestätigen in der Inbox zählt die App je Quelle (Regel, AI, Gelernt …) und Feld,
   ob der Vorschlag stimmte.
-- **Regelvorschläge:** Tragen mindestens 5 Dokumente eines Absenders zu 90 % dieselben Tags/denselben
-  Typ (inkl. Vorgemerktem, ohne Jahres-Tags und verworfene Tags), schlägt die App einen Paperless-Workflow
-  vor. Du passt ihn an, siehst, was er bei deinen bisherigen Dokumenten bewirkt hätte (schon passend,
-  würde ergänzen, Widerspruch), und gibst ihn frei. Danach zeigt die App die Klick-Anleitung und den
-  API-Inhalt; anlegen tust du die Regel selbst in Paperless. Der Companion schreibt nichts.
+- **Regelvorschläge aus deinem Archiv** (inkl. Vorgemerktem, ohne Jahres-Tags und verworfene Tags):
+  - *Korrespondent → Tags/Typ* und *Dokumenttyp → Tags*: ab 5 Dokumenten zu 90 % einheitlich → Paperless-Workflow
+    („Dokument hinzugefügt“ + Filter „Hat Korrespondent“/„Hat Dokumenttyp“ → Zuweisung).
+  - *Stichwort im Titel → Tags/Typ*: ab 5 Dokumenten zu 85 % einheitlich (nicht, wenn das Stichwort ohnehin an
+    einem Absender hängt) → Zuordnung am Tag/Typ („Irgendein Wort“). Die App zeigt die heutige Zuordnung des Tags.
+  - Du passt jede Regel an, siehst die Auswirkung auf deine bisherigen Dokumente und gibst sie frei; danach
+    zeigt die App die Klick-Anleitung und den API-Inhalt. Anlegen tust du die Regel selbst – der Companion schreibt nichts.
+- **Ausreißer:** Dokumente, die ein Muster erfüllen, aber anders abgelegt sind (vermutlich falsch einsortiert).
+  Auswählen → „zum Korrigieren vormerken“ → erscheinen unter *Für Paperless → Vorgemerkt* (Quelle „Regel“).
+- **Ähnliche Namen:** fast gleich geschriebene Tags/Korrespondenten/Typen (z.B. „Kfz“/„KFZ“), die vermutlich doppelt angelegt sind.
 
 ### Hilfe in der App
 

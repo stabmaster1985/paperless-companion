@@ -29,7 +29,7 @@ from app.ollama import OllamaClient, OllamaError
 from app.paperless import PaperlessClient
 
 ITEMS = {"title": "Titel", "correspondent": "Korrespondent", "document_type": "Dokumenttyp", "tag": "Tag"}
-SOURCES = {"llm": "AI", "history": "Verlauf"}
+SOURCES = {"llm": "AI", "history": "Verlauf", "rule": "Regel"}
 MAX_TAGS = 4
 MAX_NEW_TAGS = 2
 VOCAB_LIMIT = 200

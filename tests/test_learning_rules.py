@@ -140,13 +140,13 @@ def test_rule_proposals_and_preview(db):
         add_docs(s, "Wenige", 3, ["X"], start=500)  # zu wenige Dokumente
     with db() as s:
         found = rules.compute(s)
-        assert list(found) == ["Stadtwerke Nord"]
+        assert "Stadtwerke Nord" in found and "Wenige" not in found
         # Jahres-Tag wird nie vorgeschlagen; vorgemerktes „Haus“ zählt mit
         assert set(found["Stadtwerke Nord"]["tags"]) == {"Strom", "Haus"}
         assert found["Stadtwerke Nord"]["document_type"] == {"Rechnung": 9}
-        assert rules.refresh(s) == 1
+        assert rules.refresh(s) >= 1
     with db() as s:
-        p = s.query(RuleProposal).one()
+        p = s.query(RuleProposal).filter_by(correspondent="Stadtwerke Nord").one()
         pv = rules.preview(s, p)
         assert pv["total"] == 10 and pv["unchanged"] == 9 and pv["conflicts"][0]["id"] == 399  # Typ Brief -> Rechnung
         # Verworfener Tag wird nicht (mehr) vorgeschlagen
@@ -154,16 +154,16 @@ def test_rule_proposals_and_preview(db):
                            source="llm", decision="dismissed"))
     with db() as s:
         rules.refresh(s)
-        assert s.query(RuleProposal).one().tags == ["Strom"]
+        assert s.query(RuleProposal).filter_by(correspondent="Stadtwerke Nord").one().tags == ["Strom"]
 
 
 def test_rules_page_edit_approve(client, mock_api):
     with session_scope() as s:
         add_docs(s, "Stadtwerke", 6, ["Haus"], start=300)
     page = client.get("/rules").text
-    assert "Wenn Korrespondent = „Stadtwerke“" in page and "Auswirkung auf deine" in page
+    assert "Wenn Korrespondent = „Stadtwerke“" in page and "passende Dokumente" in page
     with session_scope() as s:
-        pid = s.query(RuleProposal).one().id
+        pid = s.query(RuleProposal).filter_by(correspondent="Stadtwerke").one().id
     client.post(f"/rules/proposals/{pid}", data={"action": "save", "tag": ["Haus", "Steuer"], "document_type": "Rechnung"})
     with session_scope() as s:
         p = s.get(RuleProposal, pid)
@@ -214,3 +214,68 @@ def test_auto_confirmed_invoices_are_not_learned_from(db):
     with db() as s:
         assert learning.profiles(s)["Versorger"]["fields"]["payment_method"] == {
             "value": "debit", "basis": "2 von 2", "disabled": False}
+
+
+def test_keyword_and_doctype_rules_with_outliers(db):
+    with db() as s:
+        # 6 Versicherungs-Dokumente verschiedener Absender, eines ohne Tag -> Ausreißer
+        for i in range(6):
+            s.add(Document(id=600 + i, title=f"Versicherung Beitrag {i}", correspondent=f"Versicherer {i % 3}",
+                           tags=["Versicherung"] if i else [], extraction_state="skipped"))
+        # Dokumenttyp -> Tag
+        for i in range(6):
+            s.add(Document(id=700 + i, title=f"Abrechnung {i}", correspondent=f"Firma {i}", document_type="Lohnabrechnung",
+                           tags=["Gehalt"], extraction_state="skipped"))
+    with db() as s:
+        found = rules.compute(s)
+        # 5 von 6 = 83 % < 85 % -> noch kein Stichwort-Vorschlag; mit einem weiteren Dokument schon
+        assert "wort:versicherung" not in found and found["typ:Lohnabrechnung"]["tags"] == {"Gehalt": 6}
+        s.add(Document(id=606, title="Versicherung Police", correspondent="Versicherer 9", tags=["Versicherung"],
+                       extraction_state="skipped"))
+        for i in range(607, 612):
+            s.add(Document(id=i, title=f"Versicherung Nachtrag {i}", correspondent=f"V{i}", tags=["Versicherung"],
+                           extraction_state="skipped"))
+    with db() as s:
+        rules.refresh(s)
+        p = s.query(RuleProposal).filter_by(correspondent="wort:versicherung").one()
+        assert p.trigger == "keyword" and p.tags == ["Versicherung"] and rules.label(p) == "Wenn Stichwort im Titel enthält „versicherung“"
+        pv = rules.preview(s, p)
+        assert [e["id"] for e in pv["changed"]] == [600]
+        # Ausreißer zum Korrigieren vormerken – nur im Companion
+        assert rules.prefill_fixes(s, p, [600]) == 1
+    with db() as s:
+        doc = s.get(Document, 600)
+        assert doc.meta_accepted["tag:Versicherung"]["source"] == "rule" and doc.meta_pending and doc.tags == []
+        assert rules.preview(s, s.query(RuleProposal).filter_by(correspondent="wort:versicherung").one())["changed"] == []
+        ids = {"tags": {"versicherung": 5}, "document_types": {}, "correspondents": {}}
+        objects = {"tags": {"versicherung": {"match": "police", "matching_algorithm": 1}}}
+        payload = rules.api_payload(s.query(RuleProposal).filter_by(correspondent="wort:versicherung").one(), ids, objects)
+        assert payload == [{"PATCH": "/api/tags/5/", "match": "police versicherung", "matching_algorithm": 1}]
+
+
+def test_similar_names(db):
+    with db() as s:
+        s.add(Document(id=1, title="a", correspondent="Telekom", tags=["Kfz"], extraction_state="skipped"))
+        s.add(Document(id=2, title="b", correspondent="Telekom Deutschland GmbH", tags=["KFZ"], extraction_state="skipped"))
+        s.add(Document(id=3, title="c", correspondent="Stadtwerke", tags=["Rechnungen", "Rechnung"], extraction_state="skipped"))
+    with db() as s:
+        sim = rules.similar_names(s)
+        assert [n for n, _ in sim["Korrespondenten"][0]] == ["Telekom", "Telekom Deutschland GmbH"] or \
+            sorted(n for n, _ in sim["Korrespondenten"][0]) == ["Telekom", "Telekom Deutschland GmbH"]
+        tag_groups = [sorted(n for n, _ in g) for g in sim["Tags"]]
+        assert ["KFZ", "Kfz"] in tag_groups and ["Rechnung", "Rechnungen"] in tag_groups
+
+
+def test_rules_page_fix_outliers(client):
+    with session_scope() as s:
+        add_docs(s, "Stadtwerke", 10, ["Haus"], start=300)
+        s.get(Document, 300).tags = []
+    page = client.get("/rules?trigger=correspondent").text
+    assert "abweichend" in page and "Ähnliche Namen" in page
+    with session_scope() as s:
+        pid = s.query(RuleProposal).filter_by(correspondent="Stadtwerke").one().id
+    response = client.post(f"/rules/proposals/{pid}", data={"action": "fix", "fix": ["300"], "back": "trigger=correspondent"},
+                           follow_redirects=False)
+    assert response.headers["location"].startswith("/rules?trigger=correspondent&msg=F%C3%BCr%201%20Dokumente")
+    page = client.get("/paperless-changes").text
+    assert "Vorgemerkt – wartet auf Übertragung" in page and "Regel</span>" in page

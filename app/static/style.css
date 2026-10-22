@@ -318,3 +318,7 @@ img.thumb { width: 56px; height: 72px; object-fit: cover; object-position: top; 
 .howto { margin-top: .75rem; padding: .6rem .8rem; background: var(--info-bg); border-radius: var(--radius); }
 pre.code { background: var(--bg); padding: .6rem; border-radius: 6px; overflow-x: auto; font-size: .8rem; }
 .rule-body select { width: auto; max-width: 100%; }
+.impact h4 { display: flex; gap: .75rem; align-items: center; margin: .6rem 0 .2rem; }
+.impact h4 .check { font-weight: 400; }
+.impact-list li { display: flex; flex-wrap: wrap; gap: .35rem; align-items: baseline; }
+.impact-list label.check { display: inline-flex; gap: .35rem; align-items: baseline; margin: 0; }

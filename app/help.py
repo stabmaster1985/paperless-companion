@@ -64,9 +64,12 @@ PAGES: dict[str, tuple[str, list[str]]] = {
         "<strong>Gelernte Felder:</strong> Aus deinen bestätigten Rechnungen lernt die App je Absender Zahlungsart, IBAN und Zahlungsziel "
         "und belegt neue Rechnungen damit vor (Kennzeichen „Gelernt“). Jede gelernte Regel lässt sich abschalten.",
         "<strong>Trefferquote:</strong> wie oft die Vorschläge je Quelle beim Bestätigen stimmten.",
-        "<strong>Vorschläge für Paperless-Regeln:</strong> Tragen fast alle Dokumente eines Absenders dieselben Tags/denselben Typ, "
-        "schlägt die App einen Paperless-Workflow vor. Du passt ihn an, siehst die Auswirkung auf deine bisherigen Dokumente "
-        "und gibst ihn frei. Angelegt wird er von dir in Paperless – der Companion schreibt nichts.",
+        "<strong>Vorschläge für Paperless-Regeln:</strong> Die App sucht Muster in deinem Archiv – Absender → Tags/Typ, "
+        "Dokumenttyp → Tags und Stichwort im Titel → Tags/Typ. Du passt die Regel an und gibst sie frei; angelegt wird sie von dir "
+        "in Paperless (Anleitung steht dabei). Der Companion schreibt nichts.",
+        "<strong>Ausreißer:</strong> Dokumente, die ein Muster erfüllen, aber anders abgelegt sind – vermutlich falsch einsortiert. "
+        "Auswählen und „zum Korrigieren vormerken“; übertragen wird wie immer erst unter „Für Paperless“.",
+        "<strong>Ähnliche Namen:</strong> fast gleich geschriebene Tags, Korrespondenten oder Typen, die vermutlich doppelt angelegt sind.",
     ]),
     "/paperless-changes": ("Für Paperless", [
         "Der Companion schreibt nie ungefragt nach Paperless. Hier sammelt sich alles, was er vorschlägt.",

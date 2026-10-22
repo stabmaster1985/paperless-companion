@@ -1,11 +1,13 @@
-"""Vorschläge für Paperless-Regeln (Workflows) aus deinem Archiv und deinen Entscheidungen.
+"""Vorschläge für Paperless-Regeln aus deinem Archiv – und welche Dokumente davon abweichen.
 
-Beispiel: Fast alle Dokumente der Stadtwerke tragen „Strom“ und „Haus“ und den Typ „Rechnung“ →
-Vorschlag „Wenn Korrespondent = Stadtwerke, dann Tags Strom + Haus und Typ Rechnung setzen“.
+Drei Muster werden gesucht (vorgemerkte Metadaten zählen schon mit):
+- Korrespondent → Tags/Dokumenttyp („alle Stadtwerke-Dokumente: Tag Haus, Typ Rechnung“)
+- Dokumenttyp → Tags („alle Lohnabrechnungen: Tag Gehalt“)
+- Stichwort im Titel → Tags/Dokumenttyp („‚Versicherung‘ im Titel: Tag Versicherung“)
 
-Der Companion legt nichts in Paperless an. Er zeigt den Vorschlag, was er an deinen bisherigen
-Dokumenten bewirkt hätte, und – nach deiner Freigabe – die Anleitung bzw. den genauen Inhalt zum Anlegen.
-Vorgemerkte Metadaten zählen dabei schon mit, verworfene Tags werden nicht vorgeschlagen.
+Zu jeder Regel zeigt die App die Ausreißer – Dokumente, die das Muster erfüllen, aber anders abgelegt
+sind (vermutlich falsch einsortiert). Die lassen sich per Klick zum Korrigieren vormerken; geschrieben
+wird erst über „Für Paperless“. Regeln selbst legt der Companion nie an: Er zeigt Anleitung und Inhalt.
 """
 
 import re
@@ -15,40 +17,129 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.metadata import _archive, rejected_tags
-from app.models import Document, RuleProposal
+from app.metadata import effective, rejected_tags
+from app.models import Document, MetaDecision, RuleProposal
 from app.pipeline import is_unresolved_tag
 
 MIN_DOCS = 5
-SHARE = 0.9
+SHARE = 0.9  # Anteil für einen Regelvorschlag
+KEYWORD_SHARE = 0.85
+MAX_KEYWORDS = 25
 YEAR_TAG = re.compile(r"(19|20)\d\d")
 STATES = {"proposed": "Vorschlag", "approved": "Freigegeben", "created": "In Paperless angelegt", "dismissed": "Verworfen"}
+TRIGGERS = {"correspondent": "Korrespondent", "document_type": "Dokumenttyp", "keyword": "Stichwort im Titel"}
+PREFIX = {"correspondent": "", "document_type": "typ:", "keyword": "wort:"}
+WORD = re.compile(r"[a-zäöüß][a-zäöüß\-]{3,}")
+STOPWORDS = {
+    "scan", "dokument", "dokumente", "seite", "seiten", "kopie", "datei", "neue", "neuer", "neues", "ihre", "ihren", "ihrer",
+    "unser", "unsere", "über", "eine", "einer", "eines", "nach", "sowie", "oder", "und", "für", "vom", "zum", "zur",
+    "januar", "februar", "märz", "april", "juni", "juli", "august", "september", "oktober", "november", "dezember",
+    "jahr", "monat", "quartal", "teil", "anlage", "anlagen", "nummer", "kundennummer", "datum",
+}
 
 
 def _rule_tag(tag: str) -> bool:
-    """Taugt der Tag für eine feste Regel? Jahres-Tags („2021“) hängen vom Datum ab, nicht vom Absender."""
+    """Taugt der Tag für eine feste Regel? Jahres-Tags („2021“) hängen vom Datum ab, nicht vom Inhalt."""
     return not YEAR_TAG.fullmatch(tag) and not is_unresolved_tag(tag)
 
 
-def compute(session: Session) -> dict[str, dict]:
-    """Regel-Kandidaten je Korrespondent: {"Stadtwerke": {"docs": 12, "tags": {...}, "document_type": {...}}}"""
-    groups: dict[str, list[tuple[list[str], str | None]]] = {}
-    for _, tags, corr, doctype in _archive(session):
-        if corr:
-            groups.setdefault(corr, []).append((tags, doctype))
-    result = {}
-    for corr, rows in groups.items():
-        n = len(rows)
-        if n < MIN_DOCS:
+def title_words(title: str) -> set[str]:
+    return {w.strip("-") for w in WORD.findall((title or "").lower()) if w.strip("-") not in STOPWORDS}
+
+
+def key_of(trigger: str, condition: str) -> str:
+    return PREFIX[trigger] + condition
+
+
+def label(p: RuleProposal) -> str:
+    trigger = p.trigger or "correspondent"
+    return f"Wenn {TRIGGERS[trigger]} {'enthält' if trigger == 'keyword' else '='} „{p.condition or p.correspondent}“"
+
+
+# --------------------------------------------------------------------------- Archiv lesen
+
+
+def archive(session: Session) -> list[dict]:
+    """Alle Dokumente mit wirksamem Stand (Paperless + Vorgemerktes)."""
+    rows = session.execute(select(Document.id, Document.title, Document.tags, Document.correspondent,
+                                  Document.document_type, Document.meta_accepted))
+    result = []
+    for doc_id, title, tags, corr, doctype, accepted in rows:
+        tags, corr, doctype = effective(tags, corr, doctype, accepted)
+        title = (accepted or {}).get("title", {}).get("value", title)
+        result.append({"id": doc_id, "title": title or "", "tags": tags, "correspondent": corr, "document_type": doctype})
+    return result
+
+
+def matches(trigger: str, condition: str, doc: dict) -> bool:
+    if trigger == "correspondent":
+        return doc["correspondent"] == condition
+    if trigger == "document_type":
+        return doc["document_type"] == condition
+    return condition in title_words(doc["title"])
+
+
+# --------------------------------------------------------------------------- Muster finden
+
+
+def _pattern(rows: list[dict], share: float, exclude_tags: set[str] = frozenset(), with_type: bool = True) -> dict | None:
+    n = len(rows)
+    if n < MIN_DOCS:
+        return None
+    tag_counts = Counter(t for r in rows for t in set(r["tags"]))
+    tags = {t: c for t, c in tag_counts.items() if c / n >= share and _rule_tag(t) and t.lower() not in exclude_tags}
+    types = Counter(r["document_type"] for r in rows if r["document_type"]) if with_type else Counter()
+    doctype = {d: c for d, c in types.items() if c / n >= share}
+    if not tags and not doctype:
+        return None
+    return {"docs": n, "tags": dict(sorted(tags.items(), key=lambda kv: -kv[1])), "document_type": doctype}
+
+
+def compute(session: Session, docs: list[dict] | None = None) -> dict[str, dict]:
+    """Regel-Kandidaten: {Schlüssel: {"trigger", "condition", "docs", "tags": {...}, "document_type": {...}}}"""
+    docs = docs if docs is not None else archive(session)
+    result: dict[str, dict] = {}
+
+    by_corr: dict[str, list[dict]] = {}
+    by_type: dict[str, list[dict]] = {}
+    by_word: dict[str, list[dict]] = {}
+    for d in docs:
+        if d["correspondent"]:
+            by_corr.setdefault(d["correspondent"], []).append(d)
+        if d["document_type"]:
+            by_type.setdefault(d["document_type"], []).append(d)
+        for w in title_words(d["title"]):
+            by_word.setdefault(w, []).append(d)
+
+    for corr, rows in by_corr.items():
+        if found := _pattern(rows, SHARE, rejected_tags(session, corr)):
+            result[key_of("correspondent", corr)] = {"trigger": "correspondent", "condition": corr, **found}
+    for doctype, rows in by_type.items():
+        found = _pattern(rows, SHARE, with_type=False)
+        if found:
+            result[key_of("document_type", doctype)] = {"trigger": "document_type", "condition": doctype, **found}
+
+    # Stichworte: nur, wenn sie nicht ohnehin an einem Absender hängen (dann reicht die Absender-Regel)
+    corr_names = {c.lower() for c in by_corr}
+    keyword_rules = []
+    for word, rows in by_word.items():
+        if len(rows) < MIN_DOCS or word in corr_names or any(word in c for c in corr_names):
             continue
-        rejected = rejected_tags(session, corr)
-        tag_counts = Counter(t for tags, _ in rows for t in set(tags))
-        types = Counter(d for _, d in rows if d)
-        tags = {t: c for t, c in tag_counts.items() if c / n >= SHARE and _rule_tag(t) and t.lower() not in rejected}
-        doctype = {d: c for d, c in types.items() if c / n >= SHARE}
-        if tags or doctype:
-            result[corr] = {"docs": n, "tags": dict(sorted(tags.items(), key=lambda kv: -kv[1])),
-                            "document_type": doctype}
+        top_corr = Counter(r["correspondent"] for r in rows).most_common(1)[0]
+        if top_corr[0] and top_corr[1] / len(rows) >= 0.8:
+            continue
+        if found := _pattern(rows, KEYWORD_SHARE):
+            # Vorrang: Stichwort, das im Namen eines vorgeschlagenen Tags/Typs vorkommt („versicherung“ vor „beitrag“)
+            named = any(word in name.lower() for name in [*found["tags"], *found["document_type"]])
+            keyword_rules.append((len(rows), named, word, found, frozenset(r["id"] for r in rows)))
+    seen: set[frozenset] = set()
+    for _, _, word, found, ids in sorted(keyword_rules, key=lambda k: (-k[0], not k[1], k[2])):
+        if ids in seen:
+            continue  # gleiche Dokumente wie ein besseres Stichwort
+        seen.add(ids)
+        result[key_of("keyword", word)] = {"trigger": "keyword", "condition": word, **found}
+        if len(seen) >= MAX_KEYWORDS:
+            break
     return result
 
 
@@ -57,49 +148,123 @@ def refresh(session: Session) -> int:
     found = compute(session)
     existing = {p.correspondent: p for p in session.scalars(select(RuleProposal))}
     new = 0
-    for corr, basis in found.items():
-        p = existing.get(corr)
+    for key, basis in found.items():
+        p = existing.get(key)
+        info = {k: basis[k] for k in ("docs", "tags", "document_type")}
         if p is None:
-            p = RuleProposal(correspondent=corr, state="proposed")
+            p = RuleProposal(correspondent=key, trigger=basis["trigger"], condition=basis["condition"], state="proposed")
             session.add(p)
             new += 1
         elif p.state != "proposed" or p.edited:
-            p.basis = basis  # Grundlage aktuell halten, Inhalt nicht
+            p.basis = info  # Grundlage aktuell halten, Inhalt nicht
             continue
-        p.basis = basis
+        p.trigger, p.condition, p.basis = basis["trigger"], basis["condition"], info
         p.tags = list(basis["tags"])
-        p.document_type = next(iter(basis["document_type"]), None)
-    # Vorschläge, deren Grundlage weggefallen ist (und die du nicht angefasst hast), entfernen
-    for corr, p in existing.items():
-        if corr not in found and p.state == "proposed" and not p.edited:
+        p.document_type = next(iter(basis["document_type"]), None) if basis["trigger"] != "document_type" else None
+    for key, p in existing.items():
+        if key not in found and p.state == "proposed" and not p.edited:
             session.delete(p)
     return new
 
 
-def preview(session: Session, proposal: RuleProposal) -> dict:
-    """Was hätte die Regel bei deinen bisherigen Dokumenten dieses Absenders bewirkt?"""
-    rejected = rejected_tags(session, proposal.correspondent)
+# --------------------------------------------------------------------------- Auswirkung und Ausreißer
+
+
+def preview(session: Session, proposal: RuleProposal, docs: list[dict] | None = None) -> dict:
+    """Was bewirkt die Regel bei den bisherigen passenden Dokumenten? Ausreißer = vermutlich falsch einsortiert."""
+    trigger, condition = proposal.trigger or "correspondent", proposal.condition or proposal.correspondent
+    docs = docs if docs is not None else archive(session)
     unchanged, changed, conflicts = 0, [], []
-    for doc in session.scalars(select(Document).where(Document.correspondent == proposal.correspondent).order_by(Document.id)):
-        have = {t.lower() for t in doc.tags or []}
-        accepted = doc.meta_accepted or {}
-        have |= {k[4:].lower() for k in accepted if k.startswith("tag:")}
+    for d in docs:
+        if not matches(trigger, condition, d):
+            continue
+        rejected = rejected_tags(session, d["correspondent"])
+        have = {t.lower() for t in d["tags"]}
         add = [t for t in proposal.tags if t.lower() not in have]
-        current_type = accepted.get("document_type", {}).get("value", doc.document_type)
-        type_change = proposal.document_type and (current_type or "") != proposal.document_type
-        clash = [t for t in add if t.lower() in rejected]
+        type_change = bool(proposal.document_type) and (d["document_type"] or "") != proposal.document_type
         if not add and not type_change:
             unchanged += 1
             continue
-        entry = {"id": doc.id, "title": doc.title, "add": add, "type_from": current_type if type_change else None,
+        entry = {"id": d["id"], "title": d["title"], "add": add, "correspondent": d["correspondent"],
+                 "type_from": d["document_type"] if type_change else None,
                  "type_to": proposal.document_type if type_change else None}
-        (conflicts if clash or (type_change and current_type) else changed).append(entry)
+        clash = any(t.lower() in rejected for t in add) or (type_change and d["document_type"])
+        (conflicts if clash else changed).append(entry)
     return {"unchanged": unchanged, "changed": changed, "conflicts": conflicts,
             "total": unchanged + len(changed) + len(conflicts)}
 
 
+def prefill_fixes(session: Session, proposal: RuleProposal, doc_ids: list[int]) -> int:
+    """Für ausgewählte Ausreißer die fehlenden Tags/den Typ VORMERKEN (nur im Companion, Quelle „Regel“).
+
+    Übertragen wird wie alle Metadaten unter „Für Paperless“ – erst nach deiner Auswahl.
+    """
+    pv = preview(session, proposal)
+    wanted = {e["id"]: e for e in pv["changed"] + pv["conflicts"] if e["id"] in doc_ids}
+    stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    count = 0
+    for doc_id, e in wanted.items():
+        doc = session.get(Document, doc_id)
+        if doc is None:
+            continue
+        accepted = dict(doc.meta_accepted or {})
+        for tag in e["add"]:
+            accepted[f"tag:{tag}"] = {"value": tag, "source": "rule", "new_tag": False, "at": stamp}
+            _decide(session, doc, f"tag:{tag}", "tag", tag)
+        if e["type_to"]:
+            accepted["document_type"] = {"value": e["type_to"], "source": "rule", "new_tag": False, "at": stamp}
+            _decide(session, doc, "document_type", "document_type", e["type_to"])
+        doc.meta_accepted = accepted or None
+        doc.meta_pending = True
+        count += 1
+    return count
+
+
+def _decide(session: Session, doc: Document, key: str, item: str, value: str) -> None:
+    row = session.scalar(select(MetaDecision).where(MetaDecision.document_id == doc.id, MetaDecision.key == key))
+    if row is None:
+        row = MetaDecision(document_id=doc.id, key=key, item=item)
+        session.add(row)
+    row.correspondent, row.suggested, row.value, row.source, row.decision = doc.correspondent, value, value, "rule", "accepted"
+    row.decided_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    row.transferred_at = None
+
+
+# --------------------------------------------------------------------------- ähnliche Namen
+
+
+def _norm(name: str) -> str:
+    n = re.sub(r"\b(gmbh|ag|se|kg|ohg|ug|mbh|co|e\.?\s?v|deutschland|germany)\b", " ", name.lower())
+    n = re.sub(r"[^a-zäöüß0-9]", "", n)
+    return re.sub(r"(en|e|s|n)$", "", n) if len(n) > 4 else n
+
+
+def similar_names(session: Session) -> dict[str, list[list[tuple[str, int]]]]:
+    """Ähnlich geschriebene Tags, Korrespondenten und Dokumenttypen (vermutlich doppelt angelegt)."""
+    counts = {"Tags": Counter(), "Korrespondenten": Counter(), "Dokumenttypen": Counter()}
+    for tags, corr, doctype in session.execute(select(Document.tags, Document.correspondent, Document.document_type)):
+        counts["Tags"].update(t for t in tags or [] if not is_unresolved_tag(t))
+        if corr:
+            counts["Korrespondenten"][corr] += 1
+        if doctype:
+            counts["Dokumenttypen"][doctype] += 1
+    result = {}
+    for kind, counter in counts.items():
+        groups: dict[str, list[tuple[str, int]]] = {}
+        for name, n in counter.items():
+            if (key := _norm(name)):
+                groups.setdefault(key, []).append((name, n))
+        found = [sorted(g, key=lambda x: -x[1]) for g in groups.values() if len(g) > 1]
+        if found:
+            result[kind] = sorted(found, key=lambda g: -sum(n for _, n in g))
+    return result
+
+
+# --------------------------------------------------------------------------- bearbeiten und anlegen
+
+
 def update(proposal: RuleProposal, tags: list[str], document_type: str | None) -> None:
-    proposal.tags = [t for t in tags if t]
+    proposal.tags = list(dict.fromkeys(t for t in tags if t))
     proposal.document_type = document_type or None
     proposal.edited = True
     proposal.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -112,19 +277,36 @@ def set_state(proposal: RuleProposal, state: str) -> None:
     proposal.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-def api_payload(proposal: RuleProposal, ids: dict[str, dict[str, int]]) -> dict:
-    """Inhalt für die Paperless-API (POST /api/workflows/) – zur Kontrolle bzw. zum späteren Anlegen.
+def api_payload(proposal: RuleProposal, ids: dict[str, dict[str, int]], objects: dict | None = None) -> dict | list:
+    """Inhalt für die Paperless-API – nur zur Kontrolle bzw. zum späteren Anlegen. Das Schema kann je nach Version abweichen.
 
-    Auslöser 2 = „Dokument hinzugefügt“, Aktion 1 = „Zuweisung“. Je nach Paperless-Version kann das Schema abweichen.
+    Korrespondent/Dokumenttyp: Workflow (Auslöser 2 = „Dokument hinzugefügt“, Aktion 1 = „Zuweisung“).
+    Stichwort: Zuordnung am Tag/Dokumenttyp selbst (matching_algorithm 1 = „Irgendein Wort“).
     """
-    corr_id = ids["correspondents"].get(proposal.correspondent.lower())
+    trigger = proposal.trigger or "correspondent"
+    condition = proposal.condition or proposal.correspondent
+    if trigger == "keyword":
+        changes = []
+        for endpoint, names in (("tags", proposal.tags), ("document_types", [proposal.document_type] if proposal.document_type else [])):
+            for name in names:
+                obj_id = ids[endpoint].get(name.lower())
+                current = ((objects or {}).get(endpoint) or {}).get(name.lower(), {})
+                words = " ".join(dict.fromkeys([*(current.get("match") or "").split(), condition])) \
+                    if current.get("matching_algorithm") == 1 else condition
+                changes.append({"PATCH": f"/api/{endpoint}/{obj_id}/", "match": words, "matching_algorithm": 1})
+        return changes
     action: dict = {"type": 1, "assign_tags": [ids["tags"][t.lower()] for t in proposal.tags if t.lower() in ids["tags"]]}
     if proposal.document_type and proposal.document_type.lower() in ids["document_types"]:
         action["assign_document_type"] = ids["document_types"][proposal.document_type.lower()]
+    filter_key = "filter_has_correspondent" if trigger == "correspondent" else "filter_has_document_type"
+    filter_ids = ids["correspondents"] if trigger == "correspondent" else ids["document_types"]
     return {
-        "name": f"Companion: {proposal.correspondent}",
+        "name": f"Companion: {condition}",
         "order": 100,
         "enabled": True,
-        "triggers": [{"type": 2, "filter_has_correspondent": corr_id}],
+        "triggers": [{"type": 2, filter_key: filter_ids.get(condition.lower())}],
         "actions": [action],
     }
+
+
+MATCHING = {0: "keine", 1: "irgendein Wort", 2: "alle Wörter", 3: "exakt", 4: "regulärer Ausdruck", 5: "ungefähr", 6: "automatisch (lernend)"}

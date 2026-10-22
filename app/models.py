@@ -201,7 +201,11 @@ class RuleProposal(Base):
     __tablename__ = "rule_proposals"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    # Eindeutiger Schlüssel: Korrespondent (Auslöser „correspondent“) bzw. „typ:…“ / „wort:…“
     correspondent: Mapped[str] = mapped_column(String, unique=True)
+    # correspondent | document_type | keyword
+    trigger: Mapped[str] = mapped_column(String, default="correspondent", server_default="correspondent")
+    condition: Mapped[str | None] = mapped_column(String)  # Typ bzw. Stichwort (bei Korrespondent = correspondent)
     tags: Mapped[list] = mapped_column(JSON, default=list)
     document_type: Mapped[str | None] = mapped_column(String)
     # Grundlage: {"docs": 12, "tags": {"Strom": 12}, "document_type": {"Rechnung": 11}}

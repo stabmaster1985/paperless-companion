@@ -55,24 +55,35 @@
 </section>
 
 <section class="card" id="proposals">
-  <h2>Vorschläge für Paperless-Regeln {{ help("Wenn mindestens " ~ MIN_DOCS ~ " Dokumente eines Absenders zu " ~ SHARE ~ " % dieselben Tags oder denselben Dokumenttyp tragen (inkl. Vorgemerktem), schlägt die App eine Paperless-Regel (Workflow) vor. Jahres-Tags und verworfene Tags werden nicht vorgeschlagen.") }}</h2>
-  <p class="muted">Ablauf: Vorschlag prüfen und bei Bedarf anpassen → Auswirkung auf deine bisherigen Dokumente ansehen → <strong>freigeben</strong> →
-    die Regel nach der Anleitung selbst in Paperless anlegen → als „angelegt“ markieren. Der Companion schreibt nichts nach Paperless.</p>
-  <nav class="tabs">
-    <a href="/rules?show=open#proposals" class="{{ 'active' if show == 'open' }}">Offen ({{ counts.get('proposed', 0) + counts.get('approved', 0) }})</a>
-    {% for key, label in STATES.items() %}<a href="/rules?show={{ key }}#proposals" class="{{ 'active' if show == key }}">{{ label }} ({{ counts.get(key, 0) }})</a>{% endfor %}
+  <h2>Vorschläge für Paperless-Regeln {{ help("Gesucht werden Muster in deinem Archiv (inkl. Vorgemerktem): Absender → Tags/Typ und Dokumenttyp → Tags ab " ~ MIN_DOCS ~ " Dokumenten und " ~ SHARE ~ " %, Stichwort im Titel → Tags/Typ ab " ~ KEYWORD_SHARE ~ " %. Jahres-Tags und verworfene Tags werden nie vorgeschlagen.") }}</h2>
+  <p class="muted">Ablauf: Vorschlag prüfen und anpassen → Auswirkung und <strong>Ausreißer</strong> ansehen (Dokumente, die das Muster erfüllen,
+    aber anders abgelegt sind) → Ausreißer bei Bedarf zum Korrigieren vormerken → Regel <strong>freigeben</strong> → nach der Anleitung selbst in Paperless anlegen.
+    Der Companion schreibt nichts nach Paperless.</p>
+  <p class="muted"><strong>Abweichend</strong> = erfüllt das Muster, trägt aber nicht die Tags/den Typ der Regel – vermutlich falsch oder unvollständig einsortiert.
+    <strong>Widerspruch</strong> = anderer Dokumenttyp oder ein Tag, den du für diesen Absender verworfen hast – bitte genau prüfen.
+    Eine Paperless-Regel gilt nur für <strong>künftige</strong> Dokumente; bestehende korrigierst du, indem du sie auswählst und vormerkst.</p>
+  {% if outliers %}<p><strong>{{ outliers }}</strong> Dokumente weichen in dieser Ansicht vom Muster ab.</p>{% endif %}
+  <nav class="tabs" aria-label="Art der Regel">
+    <a href="/rules?show={{ show }}#proposals" class="{{ 'active' if not trigger }}">Alle Arten</a>
+    {% for key, text in TRIGGERS.items() %}<a href="/rules?show={{ show }}&amp;trigger={{ key }}#proposals" class="{{ 'active' if trigger == key }}">{{ text }} ({{ trigger_counts.get(key, 0) }})</a>{% endfor %}
+  </nav>
+  <nav class="tabs" aria-label="Stand">
+    <a href="/rules?show=open{{ '&trigger=' ~ trigger if trigger }}#proposals" class="{{ 'active' if show == 'open' }}">Offen ({{ counts.get('proposed', 0) + counts.get('approved', 0) }})</a>
+    {% for key, text in STATES.items() %}<a href="/rules?show={{ key }}{{ '&trigger=' ~ trigger if trigger }}#proposals" class="{{ 'active' if show == key }}">{{ text }} ({{ counts.get(key, 0) }})</a>{% endfor %}
   </nav>
   {% if ids_error %}<div class="notice warn">Namen konnten nicht aus Paperless gelesen werden: {{ ids_error }}</div>{% endif %}
   {% for p in proposals %}
-  {% set pv = preview(p) %}
+  {% set pv = previews[p.id] %}
+  {% set trig = p.trigger or 'correspondent' %}
   <article class="rule" id="rule-{{ p.id }}">
     <header>
-      <strong>Wenn Korrespondent = „{{ p.correspondent }}“</strong>
+      <strong>{{ rule_label(p) }}</strong>
       <span class="tag {{ 'tag-ok' if p.state in ('approved', 'created') }}">{{ STATES[p.state] }}</span>
       {% if p.edited %}<span class="tag" title="Von dir angepasst">angepasst</span>{% endif %}
       <small class="muted">Grundlage: {{ p.basis.docs if p.basis else '?' }} Dokumente</small>
     </header>
     <form method="post" action="/rules/proposals/{{ p.id }}">
+      <input type="hidden" name="back" value="show={{ show }}{{ '&trigger=' ~ trigger if trigger }}">
       <div class="rule-body">
         <div><span class="muted">dann Tags setzen:</span>
           {% for t in (p.basis.tags.keys()|list if p.basis else []) + (p.tags|reject('in', p.basis.tags if p.basis else {})|list) %}
@@ -84,29 +95,35 @@
             {% for t in tag_choices if t not in p.tags %}<option>{{ t }}</option>{% endfor %}</select>
           {% endif %}
         </div>
+        {% if trig != 'document_type' %}
         <div><span class="muted">und Dokumenttyp:</span>
           <select name="document_type" {{ 'disabled' if p.state != 'proposed' }}><option value="">– nicht setzen –</option>
             {% for d in doctype_choices %}<option {{ 'selected' if d == p.document_type }}>{{ d }}</option>{% endfor %}</select>
           {% if p.basis and p.basis.document_type %}<small class="muted">({% for d, n in p.basis.document_type.items() %}{{ d }} {{ n }}/{{ p.basis.docs }}{% endfor %})</small>{% endif %}
         </div>
+        {% endif %}
       </div>
 
-      <details class="impact" {{ 'open' if pv.conflicts }}>
-        <summary>Auswirkung auf deine {{ pv.total }} bisherigen Dokumente: {{ pv.unchanged }} schon passend, {{ pv.changed|length }} würden ergänzt,
-          <span class="{{ 'bad' if pv.conflicts }}">{{ pv.conflicts|length }} Widersprüche</span></summary>
-        <p class="muted">Eine Paperless-Regel mit Auslöser „Dokument hinzugefügt“ gilt nur für <strong>neue</strong> Dokumente. Diese Liste zeigt, was sie bei deinen
-          bisherigen Dokumenten bewirkt hätte – so siehst du, ob sie passt. Widerspruch = ein Tag, den du für diesen Absender verworfen hast, oder ein anderer Dokumenttyp.</p>
-        {% for label, items in [('Widersprüche', pv.conflicts), ('Würden ergänzt', pv.changed)] if items %}
-        <h4>{{ label }}</h4>
+      <details class="impact" {{ 'open' if pv.conflicts or (pv.changed and p.state == 'proposed') }}>
+        <summary>Bisherige {{ pv.total }} passende Dokumente: {{ pv.unchanged }} schon so abgelegt,
+          <strong>{{ pv.changed|length }} abweichend</strong>, <span class="{{ 'bad' if pv.conflicts }}">{{ pv.conflicts|length }} Widersprüche</span></summary>
+        {% for label, items, checked in [('Widersprüche', pv.conflicts, false), ('Abweichend', pv.changed, true)] if items %}
+        <h4>{{ label }} ({{ items|length }})
+          <label class="check small-check"><input type="checkbox" onclick="this.closest('details').querySelectorAll('input[data-group=&quot;{{ label }}-{{ p.id }}&quot;]').forEach(c => c.checked = this.checked)" {{ 'checked' if checked }}> alle</label></h4>
         <ul class="plain impact-list">
-          {% for e in items[:25] %}
-          <li><a href="/documents/{{ e.id }}">{{ e.title or ('#' ~ e.id) }}</a> {{ doclink(e.id) }}
-            {% if e.add %} – Tags + {{ e.add|join(', ') }}{% endif %}
-            {% if e.type_to %} – Typ {{ e.type_from or 'leer' }} → {{ e.type_to }}{% endif %}</li>
+          {% for e in items[:60] %}
+          <li><label class="check"><input type="checkbox" name="fix" value="{{ e.id }}" data-group="{{ label }}-{{ p.id }}" {{ 'checked' if checked }}>
+            <a href="/documents/{{ e.id }}">{{ e.title or ('#' ~ e.id) }}</a></label> {{ doclink(e.id) }}
+            <small class="muted">{% if e.correspondent and trig != 'correspondent' %}{{ e.correspondent }} · {% endif %}
+            {% if e.add %}fehlt: {{ e.add|join(', ') }}{% endif %}{% if e.type_to %}{{ ' · ' if e.add }}Typ {{ e.type_from or 'leer' }} → {{ e.type_to }}{% endif %}</small></li>
           {% endfor %}
-          {% if items|length > 25 %}<li class="muted">… und {{ items|length - 25 }} weitere</li>{% endif %}
+          {% if items|length > 60 %}<li class="muted">… und {{ items|length - 60 }} weitere (nach dem Vormerken erscheinen die nächsten)</li>{% endif %}
         </ul>
         {% endfor %}
+        {% if pv.changed or pv.conflicts %}
+        <div class="actions"><button name="action" value="fix" class="small" title="Fehlende Tags/Typ für die ausgewählten Dokumente vormerken – nur im Companion">Ausgewählte zum Korrigieren vormerken</button>
+          <small class="muted">erscheinen dann unter „Für Paperless → Vorgemerkt“ (Quelle „Regel“)</small></div>
+        {% endif %}
       </details>
 
       <div class="actions">
@@ -125,27 +142,58 @@
     </form>
 
     {% if p.state == 'approved' %}
+    {% set cond = p.condition or p.correspondent %}
     <div class="howto">
       <h4>So legst du die Regel in Paperless an</h4>
+      {% if trig == 'keyword' %}
+      <p>Für Stichworte nutzt Paperless die <strong>Zuordnung</strong> direkt am Tag bzw. Dokumenttyp (sie prüft den Dokumenttext; das Stichwort aus dem Titel steht dort in der Regel auch).</p>
       <ol>
-        <li>In Paperless <strong>Workflows</strong> öffnen → <strong>Workflow hinzufügen</strong>, Name z.B. „Companion: {{ p.correspondent }}“.</li>
-        <li><strong>Auslöser</strong>: „Dokument hinzugefügt“, Filter <strong>Hat Korrespondent</strong> = „{{ p.correspondent }}“.</li>
+        {% for t in p.tags %}{% set cur = (objects or {}).get('tags', {}).get(t|lower) %}
+        <li><strong>Tags</strong> → „{{ t }}“ bearbeiten → Zuweisung: Algorithmus <strong>„Irgendein Wort“</strong>, Muster um <strong>„{{ cond }}“</strong> ergänzen.
+          {% if cur %}<br><small class="muted">Jetzt in Paperless: {{ MATCHING.get(cur.matching_algorithm, cur.matching_algorithm) }}{% if cur.match %} „{{ cur.match }}“{% endif %}
+          {% if cur.matching_algorithm not in (0, 1) %} – <span class="bad">Achtung: Umstellen ersetzt diese Zuordnung.</span>{% endif %}</small>{% endif %}</li>
+        {% endfor %}
+        {% if p.document_type %}<li><strong>Dokumenttypen</strong> → „{{ p.document_type }}“ ebenso: „Irgendein Wort“, Muster „{{ cond }}“.</li>{% endif %}
+        <li>Dann hier „In Paperless angelegt“ klicken.</li>
+      </ol>
+      {% else %}
+      <ol>
+        <li>In Paperless <strong>Workflows</strong> öffnen → <strong>Workflow hinzufügen</strong>, Name z.B. „Companion: {{ cond }}“.</li>
+        <li><strong>Auslöser</strong>: „Dokument hinzugefügt“, Filter <strong>{{ 'Hat Korrespondent' if trig == 'correspondent' else 'Hat Dokumenttyp' }}</strong> = „{{ cond }}“.</li>
         <li><strong>Aktion</strong>: „Zuweisung“ →
           {% if p.tags %}Tags: <strong>{{ p.tags|join(', ') }}</strong>{% endif %}{% if p.tags and p.document_type %}, {% endif %}
           {% if p.document_type %}Dokumenttyp: <strong>{{ p.document_type }}</strong>{% endif %}.</li>
         <li>Speichern, dann hier „In Paperless angelegt“ klicken.</li>
       </ol>
+      {% endif %}
       {% if payload %}
       <details><summary>Technischer Inhalt für die Paperless-API (zur Kontrolle)</summary>
         <pre class="code">{{ payload(p)|tojson(indent=2) }}</pre>
-        <p class="muted"><small>POST /api/workflows/ – Auslöser 2 = „Dokument hinzugefügt“, Aktion 1 = „Zuweisung“. Das Schema kann je nach Paperless-Version abweichen.</small></p>
+        <p class="muted"><small>{% if trig == 'keyword' %}matching_algorithm 1 = „Irgendein Wort“.{% else %}POST /api/workflows/ – Auslöser 2 = „Dokument hinzugefügt“, Aktion 1 = „Zuweisung“.{% endif %}
+          Das Schema kann je nach Paperless-Version abweichen.</small></p>
       </details>
       {% endif %}
     </div>
     {% endif %}
   </article>
   {% else %}
-  <p class="empty">Keine Vorschläge in dieser Ansicht.{% if show == 'open' %} Es braucht mindestens {{ MIN_DOCS }} Dokumente eines Absenders mit einheitlichen Tags oder Typ.{% endif %}</p>
+  <p class="empty">Keine Vorschläge in dieser Ansicht.{% if show == 'open' %} Es braucht mindestens {{ MIN_DOCS }} Dokumente mit einheitlichen Tags oder Typ.{% endif %}</p>
   {% endfor %}
+</section>
+
+<section class="card" id="similar">
+  <h2>Ähnliche Namen {{ help("Fast gleich geschriebene Tags, Korrespondenten oder Dokumenttypen – oft doppelt angelegt (z.B. „Kfz“ und „KFZ“, „Telekom“ und „Telekom Deutschland GmbH“). Dadurch landen gleiche Dokumente an verschiedenen Stellen.") }}</h2>
+  {% if similar %}
+  {% for kind, groups in similar.items() %}
+  <h4>{{ kind }}</h4>
+  <ul class="plain">
+    {% for g in groups[:30] %}
+    <li>{% for name, n in g %}<span class="tag">{{ name }}</span> <small class="muted">{{ n }}</small>{{ ' · ' if not loop.last }}{% endfor %}</li>
+    {% endfor %}
+  </ul>
+  {% endfor %}
+  <p class="muted">Zusammenführen kannst du in Paperless: Dokumente des selteneren Namens per Massenbearbeitung umstellen, danach den Eintrag löschen.
+    Der Companion ändert hier nichts.</p>
+  {% else %}<p class="muted">Keine auffällig ähnlichen Namen gefunden.</p>{% endif %}
 </section>
 {% endblock %}

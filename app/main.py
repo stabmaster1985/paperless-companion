@@ -1092,33 +1092,43 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     # ------------------------------------------------------------------ Regeln: Gelerntes und Vorschläge für Paperless
 
     @app.get("/rules", response_class=HTMLResponse)
-    def rules_page(request: Request, msg: str = "", show: str = "open", session: Session = Depends(get_session)):
+    def rules_page(request: Request, msg: str = "", show: str = "open", trigger: str = "",
+                   session: Session = Depends(get_session)):
         rule_proposals.refresh(session)
-        proposals = session.scalars(select(RuleProposal).order_by(RuleProposal.correspondent)).all()
+        session.flush()
+        all_proposals = session.scalars(select(RuleProposal).order_by(RuleProposal.trigger, RuleProposal.correspondent)).all()
+        proposals = [p for p in all_proposals if not trigger or (p.trigger or "correspondent") == trigger]
         if show == "open":
             proposals = [p for p in proposals if p.state in ("proposed", "approved")]
         elif show in rule_proposals.STATES:
             proposals = [p for p in proposals if p.state == show]
-        counts = Counter(p.state for p in session.scalars(select(RuleProposal)))
-        ids, ids_error = None, None
+        counts = Counter(p.state for p in all_proposals)
+        trigger_counts = Counter(p.trigger or "correspondent" for p in all_proposals if p.state in ("proposed", "approved"))
+        docs = rule_proposals.archive(session)
+        previews = {p.id: rule_proposals.preview(session, p, docs) for p in proposals}
+        outliers = sum(len(pv["changed"]) + len(pv["conflicts"]) for pv in previews.values())
+        ids, objects, ids_error = None, None, None
         if any(p.state == "approved" for p in proposals):
             paperless = make_paperless(settings, timeout=15)
             try:
-                ids = {e: {n.lower(): i for i, n in paperless.names(e).items()} for e in ("tags", "correspondents", "document_types")}
+                objects = {e: {o["name"].lower(): o for o in paperless.objects(e)} for e in ("tags", "correspondents", "document_types")}
+                ids = {e: {name: o["id"] for name, o in objs.items()} for e, objs in objects.items()}
             except PaperlessError as exc:
                 ids_error = str(exc)
             finally:
                 paperless.close()
-        tag_choices = sorted({t for tags in session.scalars(select(Document.tags)) for t in tags or []
-                              if not pipeline.is_unresolved_tag(t)}, key=str.lower)
-        doctype_choices = sorted({d for d in session.scalars(select(Document.document_type).distinct()) if d}, key=str.lower)
+        tag_choices = sorted({t for d in docs for t in d["tags"] if not pipeline.is_unresolved_tag(t)}, key=str.lower)
+        doctype_choices = sorted({d["document_type"] for d in docs if d["document_type"]}, key=str.lower)
         return render(
-            request, "rules.html", msg=msg, show=show, proposals=proposals, counts=counts, STATES=rule_proposals.STATES,
-            preview=lambda p: rule_proposals.preview(session, p),
-            payload=(lambda p: rule_proposals.api_payload(p, ids)) if ids else None, ids_error=ids_error,
+            request, "rules.html", msg=msg, show=show, trigger=trigger, proposals=proposals, counts=counts,
+            trigger_counts=trigger_counts, STATES=rule_proposals.STATES, TRIGGERS=rule_proposals.TRIGGERS,
+            previews=previews, outliers=outliers, rule_label=rule_proposals.label, MATCHING=rule_proposals.MATCHING,
+            payload=(lambda p: rule_proposals.api_payload(p, ids, objects)) if ids else None, objects=objects,
+            ids_error=ids_error, similar=rule_proposals.similar_names(session),
             profiles=learning.profiles(session), accuracy=learning.accuracy(session), LEARN_FIELDS=learning.FIELDS,
             tag_choices=tag_choices, doctype_choices=doctype_choices, MIN_DOCS=rule_proposals.MIN_DOCS,
-            SHARE=int(rule_proposals.SHARE * 100), SOURCE_LABELS=pipeline.SOURCE_LABELS,
+            SHARE=int(rule_proposals.SHARE * 100), KEYWORD_SHARE=int(rule_proposals.KEYWORD_SHARE * 100),
+            SOURCE_LABELS=pipeline.SOURCE_LABELS,
         )
 
     @app.post("/rules/learned")
@@ -1138,6 +1148,11 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         if action == "save":
             rule_proposals.update(proposal, [str(t) for t in form.getlist("tag")], str(form.get("document_type") or ""))
             msg = "Regel geändert – Auswirkung unten neu berechnet"
+        elif action == "fix":
+            ids = [int(i) for i in form.getlist("fix") if str(i).isdigit()]
+            n = rule_proposals.prefill_fixes(session, proposal, ids)
+            msg = (f"Für {n} Dokumente vorgemerkt – nur im Companion. Prüfen und übertragen unter „Für Paperless → Vorgemerkt“."
+                   if n else "Keine Dokumente ausgewählt")
         elif action in ("approved", "dismissed", "created", "proposed"):
             if action == "proposed":
                 proposal.edited = False  # zurück auf den berechneten Vorschlag
@@ -1147,7 +1162,9 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                    "proposed": "Zurück auf Vorschlag"}[action]
         else:
             raise HTTPException(400)
-        return RedirectResponse(f"/rules?msg={quote(msg)}#rule-{proposal_id}", status_code=303)
+        back = str(form.get("back") or "")
+        query = back if back.startswith("show=") or back.startswith("trigger=") else ""
+        return RedirectResponse(f"/rules?{query}{'&' if query else ''}msg={quote(msg)}#rule-{proposal_id}", status_code=303)
 
     @app.get("/paperless-changes", response_class=HTMLResponse)
     def paperless_changes(request: Request, msg: str = "", session: Session = Depends(get_session)):
