@@ -1,6 +1,6 @@
 # Paperless Companion
 
-[![Tests](https://github.com/stabmaster1985/amazon/actions/workflows/tests.yml/badge.svg)](https://github.com/stabmaster1985/amazon/actions/workflows/tests.yml)
+[![Tests](https://github.com/stabmaster1985/paperless-companion/actions/workflows/tests.yml/badge.svg)](https://github.com/stabmaster1985/paperless-companion/actions/workflows/tests.yml)
 
 Fristen-, Rechnungs- und Vertragscockpit für [Paperless NGX](https://docs.paperless-ngx.com/).
 
