@@ -1,5 +1,7 @@
 # Paperless Companion
 
+[![Tests](https://github.com/stabmaster1985/amazon/actions/workflows/tests.yml/badge.svg)](https://github.com/stabmaster1985/amazon/actions/workflows/tests.yml)
+
 Fristen-, Rechnungs- und Vertragscockpit für [Paperless NGX](https://docs.paperless-ngx.com/).
 
 Paperless archiviert Dokumente und macht sie durchsuchbar. Der Companion leitet daraus ab,
@@ -448,6 +450,9 @@ python3 -m venv .venv
 .venv/bin/pytest
 DATA_DIR=./data .venv/bin/uvicorn app.main:app --reload
 ```
+
+Die Tests laufen auf GitHub bei jedem Push nach `main` und bei Pull Requests automatisch
+(`.github/workflows/tests.yml`, Python 3.12 wie im Docker-Image). Schlägt ein Lauf fehl, schickt GitHub eine E-Mail.
 
 Aufbau:
 
