@@ -86,8 +86,9 @@
     <div class="sugg-list">
       {% for it in items %}
       {% set kind = 'tag' if it.key.startswith('tag:') else it.key %}
+      <div class="sugg-item">
       <label class="sugg-row k-{{ kind }}">
-        <input type="checkbox" name="item" value="{{ doc.id }}:{{ it.key }}" onchange="countSel('{{ form_id }}')">
+        <input type="checkbox" name="item" value="{{ doc.id }}:{{ it.key }}" onchange="countSel('{{ form_id }}'); similar(this)">
         <span class="kind-pill">{{ it.label }}</span>
         <span class="change">{% if it.current %}<span class="old">{{ it.current }}</span> → {% elif kind == 'tag' %}+ {% endif %}<strong>{{ it.new }}</strong>
           {% if it.new_tag %}<small class="soon" title="{{ TIPS.neuer_tag }}">neuer Tag</small>{% endif %}</span>
@@ -95,6 +96,8 @@
           {% if it.state == 'accepted' %}vorgemerkt <span class="nowrap">{{ it.at|ts }}</span>{% if it.suggested_at %} · <span class="muted">Vorschlag <span class="nowrap">{{ it.suggested_at|ts }}</span></span>{% endif %}
           {%- else %}Vorschlag <span class="nowrap">{{ it.at|ts }}</span>{% endif %}</span>
       </label>
+      <div class="similar-box" hidden data-src="/paperless-changes/similar?doc={{ doc.id }}&amp;key={{ it.key|urlencode }}&amp;gid={{ form_id|replace('-', '') }}{{ doc.id }}x{{ loop.index }}"></div>
+      </div>
       {% endfor %}
     </div>
   </article>
@@ -104,7 +107,8 @@
 <h2 id="metadata">Titel, Tags, Korrespondent, Dokumenttyp</h2>
 <p class="kind-legend"><span class="kind-pill k-title">Titel</span> <span class="kind-pill k-tag">Tag</span>
   <span class="kind-pill k-correspondent">Korrespondent</span> <span class="kind-pill k-document_type">Dokumenttyp</span>
-  <small class="muted">· Tipp: ganze Zeile antippen zum Auswählen, Kästchen am Dokument wählt alle seine Vorschläge</small></p>
+  <small class="muted">· Tipp: ganze Zeile antippen zum Auswählen, Kästchen am Dokument wählt alle seine Vorschläge.
+    Beim Anhaken eines einzelnen Vorschlags erscheinen darunter ähnliche Dokumente (gleicher Absender, Betreff, IBAN/Kundennr.), die du gleich mit vormerken kannst.</small></p>
 <p class="muted">Vorschläge aus dem lokalen Modell (<span class="badge src-llm">AI</span>) und aus deinen übrigen Dokumenten desselben Absenders
   (<span class="badge src-history">Verlauf</span>). <strong>Vormerken</strong> speichert deine Entscheidung nur im Companion – die App lernt sofort daraus
   (vorgemerkte Tags und Titel fließen in die nächsten Vorschläge ein). Nach Paperless geht erst etwas, wenn du <strong>Übertragen</strong> wählst.
@@ -258,6 +262,21 @@ function countSel(formId) {
   if (!form) return;
   const n = form.querySelectorAll('input[name=item]:checked, input[name=change]:checked').length;
   form.querySelectorAll('.sel-count').forEach((el) => { el.textContent = n ? n + ' ausgewählt' : ''; });
+}
+// Ähnliche Dokumente unter einem angehakten Vorschlag zeigen (nur bei einzelnem Anhaken, nicht bei „alle“)
+async function similar(cb) {
+  const box = cb.closest('.sugg-item').querySelector('.similar-box');
+  if (!cb.checked) { box.hidden = true; return; }
+  box.hidden = false;
+  if (box.dataset.loaded) return;
+  box.innerHTML = '<p class="similar-empty muted"><small>Suche ähnliche Dokumente …</small></p>';
+  try {
+    const r = await fetch(box.dataset.src);
+    box.innerHTML = r.ok ? await r.text() : '<p class="similar-empty bad"><small>Ähnliche konnten nicht geladen werden.</small></p>';
+    box.dataset.loaded = r.ok ? '1' : '';
+  } catch (e) {
+    box.innerHTML = '<p class="similar-empty bad"><small>Ähnliche konnten nicht geladen werden.</small></p>';
+  }
 }
 </script>
 {% endblock %}

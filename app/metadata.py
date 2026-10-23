@@ -558,3 +558,116 @@ HINTS = {
     "no_correspondent": "ohne Korrespondent",
     "meta_pending": "mit offenem Metadaten-Vorschlag",
 }
+
+
+# --------------------------------------------------------------------------- Ähnliche Dokumente gemeinsam vormerken
+
+SOURCES["similar"] = "Ähnlich"
+MIN_SIMILAR_SCORE = 3
+_MONTHS = {"januar", "februar", "märz", "maerz", "april", "mai", "juni", "juli", "august", "september", "oktober",
+           "november", "dezember", "jan", "feb", "mär", "apr", "jun", "jul", "aug", "sep", "sept", "okt", "nov", "dez"}
+_STOP = {"und", "der", "die", "das", "den", "dem", "des", "für", "fuer", "von", "vom", "zur", "zum", "mit", "auf", "aus",
+         "bei", "nach", "über", "ein", "eine", "einer", "ihre", "ihr", "ihren", "nr.", "the", "and", "for"}
+
+
+def title_words(title: str | None) -> set[str]:
+    """Kennwörter eines Titels ohne Zahlen, Monate und Füllwörter („Stromrechnung Oktober 2026“ → {stromrechnung})."""
+    return {w for w in re.findall(r"[a-zäöüß][a-zäöüß\-]{2,}", (title or "").lower()) if w not in _STOP | _MONTHS}
+
+
+def _effective_title(doc: Document) -> str | None:
+    return ((doc.meta_accepted or {}).get("title") or {}).get("value") or doc.title
+
+
+def _effective_value(doc: Document, key: str) -> str | None:
+    """Jetziger Wert inklusive Vorgemerktem (bei Tags: der Tag, falls vorhanden)."""
+    tags, corr, doctype = effective(doc.tags, doc.correspondent, doc.document_type, doc.meta_accepted)
+    if key.startswith("tag:"):
+        name = key[4:].lower()
+        return next((t for t in tags if t.lower() == name), None)
+    return {"correspondent": corr, "document_type": doctype, "title": _effective_title(doc)}.get(key)
+
+
+def similar(session: Session, doc: Document, key: str, value: str, limit: int = 30) -> dict:
+    """Dokumente, die dem gewählten ähneln und den Wert noch nicht haben (auch nicht vorgemerkt).
+
+    Ähnlich heißt: gleicher Absender, gleicher oder ähnlicher Betreff (Titel ohne Datum/Zahlen), gemeinsame
+    Textmerkmale (IBAN, Kundennr. …, ohne deine eigenen) und gleicher Dokumenttyp – jeweils mit Punkten.
+    """
+    from app.identifiers import own_terms
+
+    own = own_terms(session)
+    docs = list(session.scalars(select(Document).where(Document.id != doc.id)))
+    _, src_corr, src_type = effective(doc.tags, doc.correspondent, doc.document_type, doc.meta_accepted)
+    src_title = _effective_title(doc)
+    src_words = set() if is_generic_title(src_title, doc.original_file_name) else title_words(src_title)
+
+    def terms(d: Document) -> set[str]:
+        return {f"{k}:{v}" for k, values in (d.identifiers or {}).items() for v in values} - own
+
+    # Merkmale, die bei vielen verschiedenen Absendern vorkommen, taugen nicht als Kennzeichen
+    spread: dict[str, set] = {}
+    for d in docs:
+        for t in terms(d):
+            spread.setdefault(t, set()).add(d.correspondent)
+    src_terms = {t for t in terms(doc) if len(spread.get(t, ())) <= 2}
+
+    found = []
+    for d in docs:
+        current = _effective_value(d, key)
+        if current and current.strip().lower() == value.strip().lower():
+            continue
+        if (d.meta_dismissed or {}).get(key) == value:
+            continue  # für dieses Dokument schon verworfen
+        _, corr, doctype = effective(d.tags, d.correspondent, d.document_type, d.meta_accepted)
+        score, reasons = 0, []
+        if key != "correspondent" and src_corr and corr == src_corr:
+            score, reasons = score + 2, [*reasons, "gleicher Absender"]
+        words = set() if is_generic_title(_effective_title(d), d.original_file_name) else title_words(_effective_title(d))
+        if src_words and words:
+            overlap = len(src_words & words) / len(src_words | words)
+            if src_words == words:
+                score, reasons = score + 3, [*reasons, "gleicher Betreff"]
+            elif overlap >= 0.5:
+                score, reasons = score + 2, [*reasons, "ähnlicher Betreff"]
+        shared = src_terms & terms(d)
+        if shared:
+            score += 3  # gleiche Kundennr./IBAN des Absenders ist ein starkes Zeichen
+            reasons.append("gleiche " + ", ".join(sorted({_TERM_LABELS.get(t.split(':', 1)[0], 'Merkmal') for t in shared})))
+        if key != "document_type" and src_type and doctype == src_type:
+            score, reasons = score + 1, [*reasons, "gleicher Typ"]
+        if score >= MIN_SIMILAR_SCORE:
+            # Vorauswahl nur bei starker Ähnlichkeit und ohne vorhandenen anderen Wert
+            has_other = not is_generic_title(current, d.original_file_name) if key == "title" else bool(current)
+            found.append({"doc": d, "score": score, "reasons": reasons, "current": None if key.startswith("tag:") else current,
+                          "preselect": score >= 4 and not has_other})
+    found.sort(key=lambda f: (-f["score"], -f["doc"].id))
+    return {"items": found[:limit], "more": max(0, len(found) - limit)}
+
+
+_TERM_LABELS = {"iban": "IBAN", "vat": "USt-IdNr.", "domain": "Domain", "number": "Kundennr."}
+
+
+def apply_value(session: Session, doc: Document, key: str, value: str, new_tag: bool = False) -> bool:
+    """Einen Wert für ein (ähnliches) Dokument vormerken – nur im Companion.
+
+    Liegt dort schon derselbe offene Vorschlag, wird dieser vorgemerkt (seine Quelle bleibt), sonst ein
+    eigener Eintrag mit Quelle „Ähnlich“.
+    """
+    current = _effective_value(doc, key)
+    if current and current.strip().lower() == value.strip().lower():
+        return False
+    same = next((i for i in pending(doc, everything=True)
+                 if i["key"] == key and i["state"] == "open" and i["new"] == value), None)
+    if same:
+        return accept(session, doc, [key]) > 0
+    item = {"key": key, "new": value, "source": "similar"}
+    accepted = dict(doc.meta_accepted or {})
+    accepted[key] = {"value": value, "source": "similar", "new_tag": new_tag,
+                     "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+    _record(session, doc, item, "accepted", value)
+    doc.meta_accepted = accepted
+    dismissed = {k: v for k, v in (doc.meta_dismissed or {}).items() if k != key}
+    doc.meta_dismissed = dismissed or None
+    refresh_pending(doc)
+    return True

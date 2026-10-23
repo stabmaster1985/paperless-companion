@@ -1,0 +1,31 @@
+{# Ähnliche Dokumente zu einem Vorschlag – wird per JS unter die angehakte Zeile geladen #}
+{% set kind = 'tag' if it.key.startswith('tag:') else it.key %}
+{% if items %}
+<div class="similar-inner k-{{ kind }}">
+  <p class="similar-head"><strong>{{ items|length }}{{ '+' if more }} ähnliche Dokumente</strong> ohne {{ it.label }} „{{ it.new }}“
+    <small class="muted">– zusammen vormerken? Vorausgewählt sind sehr ähnliche{{ ' ohne eigenen Wert' if kind != 'tag' }}.</small></p>
+  <input type="hidden" name="sim_{{ gid }}_src" value="{{ src.id }}">
+  <input type="hidden" name="sim_{{ gid }}_key" value="{{ it.key }}">
+  <label class="check small"><input type="checkbox" onclick="this.closest('.similar-inner').querySelectorAll('input[name=sim_{{ gid }}]').forEach(c => c.checked = this.checked)"> alle</label>
+  <ul class="similar-list">
+    {% if it.state == 'open' %}
+    <li><label class="sim-row"><input type="checkbox" name="sim_{{ gid }}" value="{{ src.id }}" checked>
+      <span><strong>dieses Dokument</strong> <small class="muted">#{{ src.id }}</small></span></label></li>
+    {% endif %}
+    {% for f in items %}
+    <li><label class="sim-row"><input type="checkbox" name="sim_{{ gid }}" value="{{ f.doc.id }}" {{ 'checked' if f.preselect }}>
+      <span class="sim-main">
+        <a href="/documents/{{ f.doc.id }}" target="_blank" rel="noopener">{{ f.doc.title or ('#' ~ f.doc.id) }}</a>
+        <small class="muted">{{ f.doc.correspondent or 'ohne Korrespondent' }}{% if f.doc.document_type %} · {{ f.doc.document_type }}{% endif %} · #{{ f.doc.id }}</small>
+        {% if f.current %}<small class="sim-current">jetzt: {{ f.current }}</small>{% endif %}
+        <span class="sim-reasons">{% for r in f.reasons %}<span class="pill">{{ r }}</span>{% endfor %}</span>
+      </span></label></li>
+    {% endfor %}
+  </ul>
+  {% if more %}<p class="muted"><small>… und {{ more }} weitere mit geringerer Ähnlichkeit.</small></p>{% endif %}
+  <button type="submit" class="small primary" name="sim_group" value="{{ gid }}" formaction="/paperless-changes/similar"
+    title="Nur im Companion vormerken – nach Paperless geht erst etwas beim Übertragen">Für ausgewählte vormerken</button>
+</div>
+{% else %}
+<p class="similar-empty muted"><small>Keine ähnlichen Dokumente ohne {{ it.label }} „{{ it.new }}“ gefunden.</small></p>
+{% endif %}

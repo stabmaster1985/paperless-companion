@@ -1330,6 +1330,44 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         query = meta_query(flt)
         return RedirectResponse(f"/paperless-changes?{query}{'&' if query else ''}msg={quote(msg)}#metadata", status_code=303)
 
+    @app.get("/paperless-changes/similar", response_class=HTMLResponse)
+    def paperless_changes_similar(request: Request, doc: int, key: str, gid: str = "0", session: Session = Depends(get_session)):
+        """Ähnliche Dokumente zu einem Vorschlag (wird beim Anhaken unter die Zeile geladen)."""
+        source = session.get(Document, doc)
+        if source is None:
+            raise HTTPException(404)
+        item = next((i for i in metadata.pending(source, everything=True) if i["key"] == key), None)
+        if item is None:
+            return HTMLResponse('<p class="similar-empty muted"><small>Dieser Vorschlag ist nicht mehr offen.</small></p>')
+        result = metadata.similar(session, source, key, item["new"])
+        return render(request, "_similar.html", src=source, it=item, gid=re.sub(r"\W", "", gid) or "0", **result)
+
+    @app.post("/paperless-changes/similar")
+    async def paperless_changes_similar_apply(request: Request, session: Session = Depends(get_session)):
+        """Den Wert eines Vorschlags für ausgewählte ähnliche Dokumente vormerken (nur im Companion)."""
+        form = await request.form()
+        gid = str(form.get("sim_group") or "")
+        flt = {k: str(form.get(k) or "") for k in metadata.FILTER_KEYS}
+        source = session.get(Document, int(str(form.get(f"sim_{gid}_src") or "0") or 0))
+        key = str(form.get(f"sim_{gid}_key") or "")
+        item = next((i for i in metadata.pending(source, everything=True) if i["key"] == key), None) if source else None
+        ids = [int(v) for v in form.getlist(f"sim_{gid}") if str(v).isdigit()]
+        if item is None or not ids:
+            msg = "Nichts ausgewählt"
+        else:
+            count = 0
+            for doc_id in ids:
+                doc = session.get(Document, doc_id)
+                if doc is None:
+                    continue
+                if doc_id == source.id:
+                    count += metadata.accept(session, doc, [key]) if item["state"] == "open" else 0
+                else:
+                    count += metadata.apply_value(session, doc, key, item["new"], item["new_tag"])
+            msg = f"{item['label']} „{item['new']}“ für {count} Dokumente vorgemerkt – noch nichts in Paperless geändert"
+        query = meta_query(flt)
+        return RedirectResponse(f"/paperless-changes?{query}{'&' if query else ''}msg={quote(msg)}#metadata", status_code=303)
+
     # ------------------------------------------------------------------ Vorschläge einzeln durchgehen
 
     @app.get("/review", response_class=HTMLResponse)

@@ -345,3 +345,40 @@ def test_review_one_by_one(client):
         assert set(doc.meta_accepted) == {"tag:Haus", "title"} and doc.meta_accepted["title"]["value"] == "Rechnung Waschmaschine"
         assert "tag:Elektronik" in doc.meta_dismissed
     assert "Keine offenen Vorschläge" in client.get("/review?after=3").text
+
+
+def test_similar_documents_marked_together(client):
+    with session_scope() as s:
+        own = Document(id=800, title="Stromrechnung Oktober 2026", correspondent="Stadtwerke", tags=[],
+                       identifiers={"number": ["KD12345"], "iban": ["DE89370400440532013000"]})
+        own.meta_suggestion = {"tags": [{"name": "Haus", "source": "llm"}], "at": "2026-10-01T10:00:00+00:00"}
+        metadata.refresh_pending(own)
+        s.add_all([own,
+                   Document(id=801, title="Stromrechnung November 2026", correspondent="Stadtwerke", tags=[]),
+                   Document(id=802, title="Brief", correspondent=None, tags=[], identifiers={"number": ["KD12345"]}),
+                   Document(id=803, title="Stromrechnung Dezember 2026", correspondent="Stadtwerke", tags=["Haus"]),
+                   Document(id=804, title="Urlaub Italien", correspondent="Reisebüro", tags=[])])
+        # Eigene IBAN verbindet nichts
+        s.add(Document(id=805, title="Kontoauszug", correspondent="Bank", tags=[], identifiers={"iban": ["DE89370400440532013000"]}))
+        metadata.accept(s, own, ["tag:Haus"])
+    with session_scope() as s:
+        from app.identifiers import FIREFLY_OWN_KEY, set_own_terms
+        set_own_terms(s, FIREFLY_OWN_KEY, ["iban:DE89370400440532013000"])
+    with session_scope() as s:
+        found = metadata.similar(s, s.get(Document, 800), "tag:Haus", "Haus")
+        ids = {f["doc"].id: f for f in found["items"]}
+        assert set(ids) == {801, 802}  # 803 hat den Tag schon, 804/805 sind nicht ähnlich
+        assert ids[801]["preselect"] and "gleicher Absender" in ids[801]["reasons"] and "gleicher Betreff" in ids[801]["reasons"]
+        assert "gleiche Kundennr." in ids[802]["reasons"]
+    page = client.get("/paperless-changes")
+    assert 'class="similar-box" hidden data-src="/paperless-changes/similar?doc=800&amp;key=tag%3AHaus' in page.text
+    frag = client.get("/paperless-changes/similar?doc=800&key=tag:Haus&gid=a1").text
+    assert "2 ähnliche Dokumente" in frag and 'name="sim_a1" value="801" checked' in frag and "Stromrechnung November" in frag
+    r = client.post("/paperless-changes/similar", data={"sim_group": "a1", "sim_a1_src": "800", "sim_a1_key": "tag:Haus",
+                                                        "sim_a1": ["801", "802"]})
+    assert "für 2 Dokumente vorgemerkt" in r.text
+    with session_scope() as s:
+        for doc_id in (801, 802):
+            entry = s.get(Document, doc_id).meta_accepted["tag:Haus"]
+            assert entry["source"] == "similar" and s.get(Document, doc_id).meta_pending
+        assert s.get(Document, 801).tags == []  # Paperless/Spiegel unverändert
