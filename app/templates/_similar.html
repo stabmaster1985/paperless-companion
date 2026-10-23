@@ -17,7 +17,8 @@
       <span class="sim-main">
         <a href="/documents/{{ f.doc.id }}" target="_blank" rel="noopener">{{ f.doc.title or ('#' ~ f.doc.id) }}</a>
         <small class="muted">{{ f.doc.correspondent or 'ohne Korrespondent' }}{% if f.doc.document_type %} · {{ f.doc.document_type }}{% endif %} · #{{ f.doc.id }}</small>
-        {% if f.current %}<small class="sim-current">jetzt: {{ f.current }}</small>{% endif %}
+        {% if f.own_title %}<small class="sim-current">bekommt seinen eigenen Vorschlag: <strong>{{ f.own_title }}</strong></small>
+        {% elif f.current %}<small class="sim-current">jetzt: {{ f.current }}</small>{% endif %}
         <span class="sim-reasons">{% for r in f.reasons %}<span class="pill">{{ r }}</span>{% endfor %}</span>
       </span></label></li>
     {% endfor %}

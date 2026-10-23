@@ -382,3 +382,27 @@ def test_similar_documents_marked_together(client):
             entry = s.get(Document, doc_id).meta_accepted["tag:Haus"]
             assert entry["source"] == "similar" and s.get(Document, doc_id).meta_pending
         assert s.get(Document, 801).tags == []  # Paperless/Spiegel unverändert
+
+
+def test_similar_by_nearly_same_title_without_correspondent(db):
+    def doc(i, title, suggested=None):
+        d = Document(id=i, title=title, tags=[], original_file_name=f"{title}.pdf")  # Titel = Dateiname wie oft in Paperless
+        d.meta_suggestion = {"tags": [{"name": "Gehalt", "source": "llm"}], "at": "2026-10-01T00:00:00+00:00",
+                             **({"title": {"value": suggested, "source": "llm"}} if suggested else {})}
+        metadata.refresh_pending(d)
+        return d
+
+    with db() as s:
+        s.add_all([doc(1, "Scan_0001", "Lohnabrechnung März 2026"), doc(2, "Scan_0002", "Lohnabrechnung April 2026"),
+                   doc(3, "Lohnabrechnung Mai 2026"), doc(4, "Lohn- und Gehaltsabrechnung 07/2026"), doc(5, "Kfz-Versicherung 2026")])
+        s.flush()
+        metadata.accept(s, s.get(Document, 1), ["tag:Gehalt", "title"])
+    with db() as s:
+        src = s.get(Document, 1)
+        tag = {f["doc"].id: f for f in metadata.similar(s, src, "tag:Gehalt", "Gehalt")["items"]}
+        assert set(tag) == {2, 3, 4} and tag[2]["preselect"] and tag[3]["preselect"] and not tag[4]["preselect"]
+        title = {f["doc"].id: f for f in metadata.similar(s, src, "title", "Lohnabrechnung März 2026")["items"]}
+        assert title[2]["own_title"] == "Lohnabrechnung April 2026" and title[2]["preselect"]
+        assert not title[3]["preselect"]  # sprechender Titel ohne eigenen Vorschlag wird nicht überschrieben
+        assert metadata.apply_value(s, s.get(Document, 2), "title", "Lohnabrechnung März 2026")
+        assert s.get(Document, 2).meta_accepted["title"]["value"] == "Lohnabrechnung April 2026"

@@ -571,8 +571,40 @@ _STOP = {"und", "der", "die", "das", "den", "dem", "des", "für", "fuer", "von",
 
 
 def title_words(title: str | None) -> set[str]:
-    """Kennwörter eines Titels ohne Zahlen, Monate und Füllwörter („Stromrechnung Oktober 2026“ → {stromrechnung})."""
-    return {w for w in re.findall(r"[a-zäöüß][a-zäöüß\-]{2,}", (title or "").lower()) if w not in _STOP | _MONTHS}
+    """Kennwörter eines Titels ohne Zahlen, Monate und Füllwörter („Stromrechnung Oktober 2026“ → {stromrechnung}).
+
+    Scanner-Titel wie „Scan_0012“ haben keine Kennwörter. Ein Titel gleich dem Dateinamen zählt hier
+    (anders als bei is_generic_title) mit – in Paperless ist das oft der sprechende Dateiname.
+    """
+    title = (title or "").strip()
+    if GENERIC_TITLE.fullmatch(title):
+        return set()
+    words = {w.strip("-") for w in re.findall(r"[a-zäöüß][a-zäöüß\-]+", title.lower())}
+    return {w for w in words if len(w) >= 3 and w not in _STOP | _MONTHS}
+
+
+def _word_match(a: set[str], b: set[str]) -> float:
+    """Anteil gemeinsamer Wörter; gleicher Wortanfang zählt mit („lohn“ ~ „lohnabrechnung“, nicht „rechnung“ ~ „stromrechnung“)."""
+    if not a or not b:
+        return 0.0
+    def hit(w, other):
+        return any(w == o or (min(len(w), len(o)) >= 4 and (w.startswith(o) or o.startswith(w))) for o in other)
+    small, large = (a, b) if len(a) <= len(b) else (b, a)
+    common = sum(hit(w, large) for w in small)
+    return common / (len(a) + len(b) - common)
+
+
+def _subject_words(doc: Document) -> set[str]:
+    """Betreff eines Dokuments: Titel (inkl. Vorgemerktem), bei Scanner-Titel ersatzweise der vorgeschlagene."""
+    words = title_words(_effective_title(doc))
+    if not words:
+        words = title_words(((doc.meta_suggestion or {}).get("title") or {}).get("value"))
+    return words
+
+
+def _own_title(doc: Document) -> str | None:
+    """Eigener offener Titelvorschlag eines Dokuments (statt den Titel eines anderen zu übernehmen)."""
+    return next((i["new"] for i in pending(doc, everything=True) if i["key"] == "title" and i["state"] == "open"), None)
 
 
 def _effective_title(doc: Document) -> str | None:
@@ -599,8 +631,7 @@ def similar(session: Session, doc: Document, key: str, value: str, limit: int = 
     own = own_terms(session)
     docs = list(session.scalars(select(Document).where(Document.id != doc.id)))
     _, src_corr, src_type = effective(doc.tags, doc.correspondent, doc.document_type, doc.meta_accepted)
-    src_title = _effective_title(doc)
-    src_words = set() if is_generic_title(src_title, doc.original_file_name) else title_words(src_title)
+    src_words = _subject_words(doc)
 
     def terms(d: Document) -> set[str]:
         return {f"{k}:{v}" for k, values in (d.identifiers or {}).items() for v in values} - own
@@ -619,17 +650,17 @@ def similar(session: Session, doc: Document, key: str, value: str, limit: int = 
             continue
         if (d.meta_dismissed or {}).get(key) == value:
             continue  # für dieses Dokument schon verworfen
+        own_title = _own_title(d) if key == "title" else None
         _, corr, doctype = effective(d.tags, d.correspondent, d.document_type, d.meta_accepted)
         score, reasons = 0, []
         if key != "correspondent" and src_corr and corr == src_corr:
             score, reasons = score + 2, [*reasons, "gleicher Absender"]
-        words = set() if is_generic_title(_effective_title(d), d.original_file_name) else title_words(_effective_title(d))
+        words = _subject_words(d)
         if src_words and words:
-            overlap = len(src_words & words) / len(src_words | words)
             if src_words == words:
-                score, reasons = score + 3, [*reasons, "gleicher Betreff"]
-            elif overlap >= 0.5:
-                score, reasons = score + 2, [*reasons, "ähnlicher Betreff"]
+                score, reasons = score + 4, [*reasons, "gleicher Betreff"]
+            elif _word_match(src_words, words) >= 0.5:
+                score, reasons = score + 3, [*reasons, "ähnlicher Betreff"]
         shared = src_terms & terms(d)
         if shared:
             score += 3  # gleiche Kundennr./IBAN des Absenders ist ein starkes Zeichen
@@ -638,9 +669,12 @@ def similar(session: Session, doc: Document, key: str, value: str, limit: int = 
             score, reasons = score + 1, [*reasons, "gleicher Typ"]
         if score >= MIN_SIMILAR_SCORE:
             # Vorauswahl nur bei starker Ähnlichkeit und ohne vorhandenen anderen Wert
-            has_other = not is_generic_title(current, d.original_file_name) if key == "title" else bool(current)
+            if key == "title":
+                has_other = not own_title and bool(title_words(current))  # sprechender Titel ohne eigenen Vorschlag
+            else:
+                has_other = bool(current)
             found.append({"doc": d, "score": score, "reasons": reasons, "current": None if key.startswith("tag:") else current,
-                          "preselect": score >= 4 and not has_other})
+                          "own_title": own_title, "preselect": score >= 4 and not has_other})
     found.sort(key=lambda f: (-f["score"], -f["doc"].id))
     return {"items": found[:limit], "more": max(0, len(found) - limit)}
 
@@ -657,6 +691,8 @@ def apply_value(session: Session, doc: Document, key: str, value: str, new_tag: 
     current = _effective_value(doc, key)
     if current and current.strip().lower() == value.strip().lower():
         return False
+    if key == "title" and _own_title(doc):
+        return accept(session, doc, ["title"]) > 0  # eigenen Titelvorschlag statt fremden Titel
     same = next((i for i in pending(doc, everything=True)
                  if i["key"] == key and i["state"] == "open" and i["new"] == value), None)
     if same:
