@@ -1323,12 +1323,58 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             state = "accepted" if action == "transfer_all" else "open"
             selected = {doc.id: [i["key"] for i in items] for doc, items in metadata.pending_rows(session, state, **flt)}
             action = action.removesuffix("_all")
+        groups = similar_groups(form) if action == "accept" else {}
         if not any(selected.values()) or action not in ("accept", "dismiss", "withdraw", "transfer"):
             msg = "Nichts ausgewählt"
         else:
+            # Listen der ähnlichen Dokumente vorher lesen (danach ist der Vorschlag selbst schon vorgemerkt)
+            chosen = {f"{d}:{k}" for d, keys in selected.items() for k in keys}
             msg = meta_action(session, action, selected)
+            extra = 0
+            for gid, ref in groups.items():
+                if ref in chosen:  # nur Listen unter angehakten Vorschlägen (zugeklappte bleiben außen vor)
+                    result = apply_similar(session, form, gid)
+                    extra += result[1] if result else 0
+            if extra:
+                msg += f", dazu {extra} bei ähnlichen Dokumenten"
         query = meta_query(flt)
         return RedirectResponse(f"/paperless-changes?{query}{'&' if query else ''}msg={quote(msg)}#metadata", status_code=303)
+
+    def similar_groups(form) -> dict[str, str]:
+        """Aufgeklappte Ähnliche-Listen im Formular: {gid: "dokument:schlüssel"} des Vorschlags darüber."""
+        groups = {}
+        for name in form.keys():
+            if name.startswith("sim_") and name.endswith("_src"):
+                gid = name[4:-4]
+                groups[gid] = f"{form.get(name)}:{form.get(f'sim_{gid}_key')}"
+        return groups
+
+    def apply_similar(session: Session, form, gid: str) -> tuple[dict, int] | None:
+        """Wert des Vorschlags für die in der Liste `gid` angehakten Dokumente vormerken (nur im Companion)."""
+        src = str(form.get(f"sim_{gid}_src") or "")
+        source = session.get(Document, int(src)) if src.isdigit() else None
+        key = str(form.get(f"sim_{gid}_key") or "")
+        item = next((i for i in metadata.pending(source, everything=True) if i["key"] == key), None) if source else None
+        if item is None:
+            # schon vorgemerkt? Dann den vorgemerkten Wert verwenden
+            accepted = (source.meta_accepted or {}).get(key) if source else None
+            if not accepted:
+                return None
+            item = {"key": key, "label": "Tag" if key.startswith("tag:") else metadata.ITEMS.get(key, key),
+                    "new": accepted["value"], "new_tag": bool(accepted.get("new_tag")), "state": "accepted"}
+        ids = [int(v) for v in form.getlist(f"sim_{gid}") if str(v).isdigit()]
+        if not ids:
+            return None
+        count = 0
+        for doc_id in dict.fromkeys(ids):
+            doc = session.get(Document, doc_id)
+            if doc is None:
+                continue
+            if doc_id == source.id:
+                count += metadata.accept(session, doc, [key]) if item["state"] == "open" else 0
+            else:
+                count += metadata.apply_value(session, doc, key, item["new"], item["new_tag"])
+        return item, count
 
     @app.get("/paperless-changes/similar", response_class=HTMLResponse)
     def paperless_changes_similar(request: Request, doc: int, key: str, gid: str = "0", session: Session = Depends(get_session)):
@@ -1346,24 +1392,12 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     async def paperless_changes_similar_apply(request: Request, session: Session = Depends(get_session)):
         """Den Wert eines Vorschlags für ausgewählte ähnliche Dokumente vormerken (nur im Companion)."""
         form = await request.form()
-        gid = str(form.get("sim_group") or "")
         flt = {k: str(form.get(k) or "") for k in metadata.FILTER_KEYS}
-        source = session.get(Document, int(str(form.get(f"sim_{gid}_src") or "0") or 0))
-        key = str(form.get(f"sim_{gid}_key") or "")
-        item = next((i for i in metadata.pending(source, everything=True) if i["key"] == key), None) if source else None
-        ids = [int(v) for v in form.getlist(f"sim_{gid}") if str(v).isdigit()]
-        if item is None or not ids:
+        result = apply_similar(session, form, str(form.get("sim_group") or ""))
+        if result is None:
             msg = "Nichts ausgewählt"
         else:
-            count = 0
-            for doc_id in ids:
-                doc = session.get(Document, doc_id)
-                if doc is None:
-                    continue
-                if doc_id == source.id:
-                    count += metadata.accept(session, doc, [key]) if item["state"] == "open" else 0
-                else:
-                    count += metadata.apply_value(session, doc, key, item["new"], item["new_tag"])
+            item, count = result
             msg = f"{item['label']} „{item['new']}“ für {count} Dokumente vorgemerkt – noch nichts in Paperless geändert"
         query = meta_query(flt)
         return RedirectResponse(f"/paperless-changes?{query}{'&' if query else ''}msg={quote(msg)}#metadata", status_code=303)
@@ -1524,6 +1558,23 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     @app.exception_handler(HTTPException)
     async def http_error(request: Request, exc: HTTPException):
         return PlainTextResponse(str(exc.detail), status_code=exc.status_code)
+
+    @app.exception_handler(Exception)
+    async def server_error(request: Request, exc: Exception):
+        import html
+        import traceback
+
+        log.exception("Fehler bei %s %s", request.method, request.url.path)
+        lines = traceback.format_exception(exc)
+        where = next((ln.strip() for ln in reversed(lines) if 'File "' in ln and "/app/" in ln), "")
+        body = (f"<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'>"
+                f"<title>Fehler</title><body style='font-family:system-ui;max-width:46rem;margin:2rem auto;padding:0 1rem'>"
+                f"<h1>Da ist etwas schiefgegangen</h1><p>Es wurde nichts nach Paperless geschrieben, die Aktion wurde nicht gespeichert.</p>"
+                f"<p><strong>{html.escape(type(exc).__name__)}:</strong> {html.escape(str(exc))[:500]}</p>"
+                f"<p><small>{html.escape(request.method)} {html.escape(request.url.path)}<br>{html.escape(where)}</small></p>"
+                f"<p>Die vollständige Meldung steht im Log: <code>docker logs --tail 80 paperless-companion</code></p>"
+                f"<p><a href='javascript:history.back()'>← Zurück</a> · <a href='/'>Übersicht</a></p></body>")
+        return HTMLResponse(body, status_code=500)
 
     return app
 

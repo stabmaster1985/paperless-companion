@@ -406,3 +406,38 @@ def test_similar_by_nearly_same_title_without_correspondent(db):
         assert not title[3]["preselect"]  # sprechender Titel ohne eigenen Vorschlag wird nicht überschrieben
         assert metadata.apply_value(s, s.get(Document, 2), "title", "Lohnabrechnung März 2026")
         assert s.get(Document, 2).meta_accepted["title"]["value"] == "Lohnabrechnung April 2026"
+
+
+def test_accept_selected_takes_similar_along_and_hides_title(client):
+    with session_scope() as s:
+        for i, sugg in ((811, "Lohnabrechnung März 2026"), (812, "Lohnabrechnung April 2026"), (813, "Lohnabrechnung Mai 2026")):
+            d = Document(id=i, title=f"Scan_{i}", tags=[])
+            d.meta_suggestion = {"tags": [], "title": {"value": sugg, "source": "llm"}, "at": "2026-10-01T00:00:00+00:00"}
+            metadata.refresh_pending(d)
+            s.add(d)
+    # Liste unter 811 ist aufgeklappt (812 angehakt, 813 nicht); unter dem nicht angehakten 813 eine zugeklappte Liste
+    r = client.post("/paperless-changes/meta", data={
+        "action": "accept", "what": "title", "item": ["811:title"],
+        "sim_a_src": "811", "sim_a_key": "title", "sim_a": ["811", "812"],
+        "sim_b_src": "813", "sim_b_key": "title", "sim_b": ["813"]})
+    assert "dazu 1 bei ähnlichen Dokumenten" in r.text
+    with session_scope() as s:
+        assert s.get(Document, 811).meta_accepted["title"]["value"] == "Lohnabrechnung März 2026"
+        assert s.get(Document, 812).meta_accepted["title"]["value"] == "Lohnabrechnung April 2026"  # eigener Vorschlag
+        assert not s.get(Document, 813).meta_accepted
+    page = client.get("/paperless-changes?what=title").text
+    open_part = page.split('id="meta-open"')[1] if 'id="meta-open"' in page else ""
+    assert "811:title" not in open_part and "812:title" not in open_part and "813:title" in open_part
+
+
+def test_unexpected_error_shows_readable_page(settings, mock_api, monkeypatch):
+    app = create_app(settings, start_worker=False)
+    monkeypatch.setattr(metadata, "similar", lambda *a, **k: 1 / 0)
+    with TestClient(app, raise_server_exceptions=False) as c:
+        run_all(session_scope, settings)
+        with session_scope() as s:
+            d = s.get(Document, 3)
+            d.meta_suggestion = {"tags": [{"name": "Haus", "source": "llm"}], "at": "2026-10-01T00:00:00+00:00"}
+            metadata.refresh_pending(d)
+        r = c.get("/paperless-changes/similar?doc=3&key=tag:Haus")
+    assert r.status_code == 500 and "ZeroDivisionError" in r.text and "docker logs" in r.text

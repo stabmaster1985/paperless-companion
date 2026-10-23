@@ -3,7 +3,8 @@
 {% if items %}
 <div class="similar-inner k-{{ kind }}">
   <p class="similar-head"><strong>{{ items|length }}{{ '+' if more }} ähnliche Dokumente</strong> ohne {{ it.label }} „{{ it.new }}“
-    <small class="muted">– zusammen vormerken? Vorausgewählt sind sehr ähnliche{{ ' ohne eigenen Wert' if kind != 'tag' }}.</small></p>
+    <small class="muted">– zusammen vormerken? Vorausgewählt sind sehr ähnliche{{ ' ohne eigenen Wert' if kind != 'tag' }}.
+    {%- if it.state == 'open' %} Angehakte nimmt auch „Ausgewählte vormerken“ unten mit.{% endif %}</small></p>
   <input type="hidden" name="sim_{{ gid }}_src" value="{{ src.id }}">
   <input type="hidden" name="sim_{{ gid }}_key" value="{{ it.key }}">
   <label class="check small"><input type="checkbox" onclick="this.closest('.similar-inner').querySelectorAll('input[name=sim_{{ gid }}]').forEach(c => c.checked = this.checked)"> alle</label>

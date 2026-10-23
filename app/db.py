@@ -16,7 +16,8 @@ _session_factory: sessionmaker[Session] | None = None
 
 def init_db(url: str) -> Engine:
     global _engine, _session_factory
-    _engine = create_engine(url, connect_args={"check_same_thread": False})
+    # timeout: bis zu 30 s warten, falls der Hintergrund-Worker gerade schreibt
+    _engine = create_engine(url, connect_args={"check_same_thread": False, "timeout": 30})
 
     @event.listens_for(_engine, "connect")
     def _sqlite_pragmas(dbapi_conn, _record):  # pragma: no cover - trivial
