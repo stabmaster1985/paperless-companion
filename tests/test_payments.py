@@ -278,11 +278,13 @@ def test_choose_other_payment_for_confirmed_invoice(db):
                            counterparty="Stadtwerke", description="falsch", score=70, reasons="Betrag", state="suggested"))
     with db() as s:
         doc = s.get(Document, 1)
-        payments.choose(s, doc, tx("901", date(2026, 9, 12), 78.0, "Stadtwerke", "richtig"))
+        payments.choose(s, doc, tx("901", date(2026, 9, 12), 78.5, "Unbekannter Empfänger", "richtig"))
     with db() as s:
         states = {m.tx_id: m.state for m in s.query(PaymentMatch)}
         assert states == {"900": "rejected", "901": "accepted"}
-        assert s.get(Document, 1).invoice.status == "paid" and s.get(Document, 1).invoice.paid_on == date(2026, 9, 12)
+        inv = s.get(Document, 1).invoice
+        assert inv.status == "paid" and inv.paid_on == date(2026, 9, 12)
+        assert inv.amount == 78.5 and inv.issuer == "Unbekannter Empfänger"  # überschrieben (Standard: alles übernehmen)
         assert payments.clear(s, s.get(Document, 1))
     with db() as s:
         inv = s.get(Document, 1).invoice
@@ -291,9 +293,16 @@ def test_choose_other_payment_for_confirmed_invoice(db):
 
 
 def test_choose_and_clear_without_reload(review_client):
-    data = {"tx_id": "901", "group_id": "501", "date": "2026-10-12", "amount": "79.0", "counterparty": "Stadtwerke"}
-    r = review_client.post("/documents/1/payment", data=data, headers={"X-Requested-With": "fetch"})
-    assert r.json()["paid_on"] == "2026-10-12" and r.json()["amount"] == 79.0 and r.json()["saved"] is False
+    data = {"tx_id": "901", "group_id": "501", "date": "2026-10-12", "amount": "79.0", "iban": "DE02120300000000202051",
+            "counterparty": "STADTWERKE GmbH & Co. KG"}
+    # Auswahl: nur Betrag und Aussteller (IBAN nicht)
+    r = review_client.post("/documents/1/payment", data={**data, "take_sent": "1", "take": ["amount", "issuer"]},
+                           headers={"X-Requested-With": "fetch"})
+    assert r.json()["paid_on"] == "2026-10-12" and r.json()["saved"] is False
+    assert r.json()["values"] == {"amount": 79.0, "issuer": "Stadtwerke"}  # Firefly-Name -> dein Korrespondent
     assert r.json()["label"] == "Buchung vom 12.10.2026 (79,00 €)"
+    with session_scope() as s:
+        sugg = s.get(Document, 1).suggestions
+        assert sugg["amount"]["value"] == 79.0 and sugg["amount"]["source"] == "firefly" and "iban" not in sugg
     r = review_client.post("/documents/1/payment/clear", headers={"X-Requested-With": "fetch"})
     assert r.json()["paid_on"] == "2026-10-12" and "gelöst" in r.json()["msg"]

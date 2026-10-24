@@ -405,13 +405,15 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                              description=str(form.get("description") or ""), text="")
         except (KeyError, ValueError):
             raise HTTPException(400, "Buchung unvollständig")
-        result = payments.choose(session, doc, tx)
+        # ohne Angabe (Formular ohne Skript) alles übernehmen
+        take = [t for t in form.getlist("take") if t in payments.TAKE] if "take_sent" in form else payments.TAKE
+        result, taken = payments.choose(session, doc, tx, take)
         amount = f"{tx.amount:.2f}".replace(".", ",")
         msg = f"Firefly-Buchung vom {tx.date:%d.%m.%Y} ({amount} €) {result}"
         if request.headers.get("x-requested-with") == "fetch":
             # Seite nicht neu laden: ungespeicherte Eingaben im Formular bleiben erhalten, das Skript setzt die Felder
             return {"msg": msg, "label": f"Buchung vom {tx.date:%d.%m.%Y} ({amount} €)", "saved": doc.review_state != "pending",
-                    "paid_on": tx.date.isoformat(), "amount": tx.amount, "tx_id": tx.journal_id}
+                    "paid_on": tx.date.isoformat(), "tx_id": tx.journal_id, "values": taken}
         return RedirectResponse(f"/documents/{doc_id}?msg={quote(msg)}", status_code=303)
 
     @app.post("/documents/{doc_id}/payment/clear")

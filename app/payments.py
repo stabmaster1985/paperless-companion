@@ -415,18 +415,48 @@ def search(session: Session, doc: Document, client: FireflyClient, today: date, 
     return found[:limit]
 
 
-def choose(session: Session, doc: Document, tx: Transaction) -> str:
-    """Von dir gewählte Buchung zuordnen. In der Inbox nur vorbelegen, sonst als bezahlt übernehmen."""
+TAKE = ("amount", "issuer", "iban")  # was aus einer gewählten Buchung übernommen werden kann (Status/Bezahlt am immer)
+
+
+def issuer_name(session: Session, counterparty: str) -> str:
+    """Empfänger der Buchung als Aussteller – möglichst als Name deines passenden Korrespondenten."""
+    from app.metadata import correspondent_names
+
+    simple = lambda n: " ".join(re.sub(r"[^\w\s]", " ", n.lower()).split())  # noqa: E731
+    target = simple(counterparty)
+    if not target:
+        return counterparty
+    names = correspondent_names(session)
+    for name in names:
+        if simple(name) == target:
+            return name
+    # „Stadtwerke Musterstadt GmbH“ ~ „Stadtwerke Musterstadt“: der längste Korrespondent, der darin vorkommt
+    contained = [n for n in names if len(simple(n)) >= 4 and re.search(rf"\b{re.escape(simple(n))}\b", target)]
+    return max(contained, key=len) if contained else counterparty
+
+
+def choose(session: Session, doc: Document, tx: Transaction, take=TAKE) -> tuple[str, dict]:
+    """Von dir gewählte Buchung zuordnen. Status/Bezahlt am und die gewählten Werte (`take`) werden übernommen –
+    in der Inbox als Vorbelegung, bei bestätigten Rechnungen direkt gespeichert. Gibt Meldung und Werte zurück."""
+    from app.extraction.rules import field
+
     reasons = ["von dir gewählt"]
+    values = {"amount": tx.amount} if "amount" in take else {}
+    if "issuer" in take and tx.counterparty:
+        values["issuer"] = issuer_name(session, tx.counterparty)
+    if "iban" in take and tx.iban:
+        values["iban"] = tx.iban
     if doc.review_state == "pending":
         apply_payment(doc, AUTO_MIN, tx, reasons)
         sugg = dict(doc.suggestions)
         sugg["_payment_rejected"] = [t for t in sugg.get("_payment_rejected") or [] if t != tx.journal_id] or None
+        for name, value in values.items():
+            sugg[name] = field(value, 0.9, "firefly")
         doc.suggestions = {k: v for k, v in sugg.items() if v is not None}
-        return "vorbelegt – bitte prüfen und bestätigen"
+        return "vorbelegt – bitte prüfen und bestätigen", values
     inv = doc.invoice
     if inv is None:
-        return "keine Rechnung"
+        return "keine Rechnung", {}
     chosen = None
     for m in session.scalars(select(PaymentMatch).where(PaymentMatch.invoice_id == inv.id)):
         if m.tx_id == tx.journal_id:
@@ -440,9 +470,15 @@ def choose(session: Session, doc: Document, tx: Transaction) -> str:
         session.add(chosen)
     chosen.state = "accepted"
     inv.status, inv.paid_on = "paid", tx.date
+    for name, value in values.items():
+        setattr(inv, name, value)
     doc.writeback_pending = True
     _mark_firefly(doc, AUTO_MIN, confirmed=True)
-    return "als bezahlt übernommen"
+    if values:
+        from app import pipeline
+
+        pipeline.set_source(doc, list(values), "firefly", 0.9, True)
+    return "als bezahlt übernommen", values
 
 
 def clear(session: Session, doc: Document) -> bool:

@@ -110,6 +110,12 @@ document.querySelectorAll('#viewer .tab[data-tab]').forEach((tab) => tab.addEven
     <small class="muted">Gefunden wird bei gleichem oder ähnlichem Betrag (±5 %), Suchtext, Rechnungsnummer oder IBAN.
       {{ 'In der Inbox wird die gewählte Buchung nur vorbelegt – du bestätigst wie gewohnt.' if doc.review_state == 'pending' else 'Die gewählte Buchung setzt die Rechnung auf bezahlt.' }}</small>
   </form>
+  <fieldset class="ff-take">
+    <legend>Aus der gewählten Buchung übernehmen {{ help("Status „bezahlt“ und „Bezahlt am“ werden immer gesetzt. Angehakte Felder werden mit den Werten der Buchung überschrieben, egal was drinsteht. Deine Auswahl merkt sich dieser Browser.") }}</legend>
+    <label class="check"><input type="checkbox" name="take" value="amount" checked> Betrag</label>
+    <label class="check"><input type="checkbox" name="take" value="issuer" checked> Empfänger als Aussteller</label>
+    <label class="check"><input type="checkbox" name="take" value="iban" checked> IBAN</label>
+  </fieldset>
   <div class="ff-results" aria-live="polite"></div>
 </details>
 <script>
@@ -127,14 +133,29 @@ document.querySelectorAll('.ff-form').forEach((form) => form.addEventListener('s
   const panel = document.getElementById('firefly');
   // Formular erst beim Klick suchen – es steht auf der Seite unterhalb dieses Skripts
   const field = (name) => document.querySelector(`form[action$="/confirm"] [name="${name}"]`);
+  const LABELS = { amount: 'Betrag', issuer: 'Aussteller', iban: 'IBAN' };
   const flash = (el) => { if (el) { el.classList.add('ff-changed'); setTimeout(() => el.classList.remove('ff-changed'), 2500); } };
   const note = (text) => {
     let box = panel.querySelector('.ff-note');
     if (!box) { box = document.createElement('p'); box.className = 'notice ok ff-note'; panel.querySelector('summary').after(box); }
     box.textContent = text;
   };
+  // Auswahl „übernehmen“ im Browser merken
+  const takes = panel.querySelectorAll('.ff-take input[name=take]');
+  try {
+    const saved = JSON.parse(localStorage.getItem('ff-take') || 'null');
+    if (saved) takes.forEach((c) => { c.checked = saved.includes(c.value); });
+  } catch (e) {}
+  takes.forEach((c) => c.addEventListener('change', () => {
+    try { localStorage.setItem('ff-take', JSON.stringify([...takes].filter((t) => t.checked).map((t) => t.value))); } catch (e) {}
+  }));
   async function send(form) {
-    const r = await fetch(form.action, { method: 'POST', body: new FormData(form), headers: { 'X-Requested-With': 'fetch' } });
+    const body = new FormData(form);
+    if (form.matches('.ff-choose')) {
+      body.append('take_sent', '1');
+      takes.forEach((c) => { if (c.checked) body.append('take', c.value); });
+    }
+    const r = await fetch(form.action, { method: 'POST', body, headers: { 'X-Requested-With': 'fetch' } });
     if (!r.ok) throw new Error(await r.text());
     return r.json();
   }
@@ -146,16 +167,23 @@ document.querySelectorAll('.ff-form').forEach((form) => form.addEventListener('s
     try {
       const data = await send(form);
       if (form.matches('.ff-choose')) {
-        const status = field('status'), paid = field('paid_on'), amount = field('amount');
+        const status = field('status'), paid = field('paid_on');
         if (status) { status.value = 'paid'; flash(status); }
         if (paid) { paid.value = data.paid_on; flash(paid); }
-        if (amount && !amount.value) { amount.value = data.amount.toFixed(2); flash(amount); }
+        // angehakte Werte überschreiben, egal was drinsteht
+        for (const [name, value] of Object.entries(data.values || {})) {
+          const input = field(name);
+          if (!input) continue;
+          input.value = name === 'amount' ? Number(value).toFixed(2) : value;
+          flash(input);
+          if (name === 'issuer' && window.partySync) partySync(input);
+        }
         panel.querySelector('.ff-clear').hidden = false;
         panel.querySelectorAll('.ff-item.current').forEach((li) => li.classList.remove('current'));
         form.closest('.ff-item').classList.add('current');
         note(data.saved
           ? `${data.label} übernommen und die Rechnung als bezahlt gespeichert.`
-          : `${data.label} übernommen: Status „bezahlt“ und „Bezahlt am“ sind eingetragen, deine übrigen Eingaben bleiben. Zum Abschluss unten bestätigen.`);
+          : `${data.label} übernommen: ${['Status', '„Bezahlt am“', ...Object.keys(data.values || {}).map((n) => LABELS[n])].join(', ')} eingetragen, deine übrigen Eingaben bleiben. Zum Abschluss unten bestätigen.`);
       } else {
         const status = field('status'), paid = field('paid_on');
         if (paid && data.paid_on && paid.value === data.paid_on) { paid.value = ''; flash(paid); if (status) { status.value = 'open'; flash(status); } }

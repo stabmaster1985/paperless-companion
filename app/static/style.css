@@ -661,3 +661,6 @@ body.docview-open { overflow: hidden; }
 .party-field .party-sync { margin-top: .3rem; align-items: flex-start; }
 .party-field .party-sync input { width: auto; margin-top: .15rem; }
 .ff-changed { outline: 2px solid var(--accent); outline-offset: 1px; transition: outline-color .3s; }
+.ff-take { border: 1px solid var(--border); border-radius: var(--radius); padding: .4rem .7rem .5rem; margin: .4rem 0; display: flex; flex-wrap: wrap; gap: .2rem 1rem; }
+.ff-take legend { font-size: .85rem; color: var(--muted); padding: 0 .3rem; }
+.ff-take input { width: auto; }
