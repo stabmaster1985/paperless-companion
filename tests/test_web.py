@@ -137,6 +137,9 @@ def test_review_page_with_preview_and_highlights(client):
     assert response.status_code == 200 and response.headers["content-type"] == "application/pdf"
     assert client.get("/documents/1/preview?kind=evil").status_code == 404
     assert "Prüfung starten" in client.get("/inbox").text
+    # Seiten nicht zwischenspeichern (sonst zeigen Handy-Browser nach Updates alte Fassungen)
+    assert client.get("/documents/1").headers["cache-control"] == "no-store"
+    assert response.headers["cache-control"] == "private, max-age=600"  # Vorschau darf zwischengespeichert werden
 
 
 def test_confirm_and_next(client):

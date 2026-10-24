@@ -135,10 +135,16 @@ document.querySelectorAll('.ff-form').forEach((form) => form.addEventListener('s
   const field = (name) => document.querySelector(`form[action$="/confirm"] [name="${name}"]`);
   const LABELS = { amount: 'Betrag', issuer: 'Aussteller', iban: 'IBAN' };
   const flash = (el) => { if (el) { el.classList.add('ff-changed'); setTimeout(() => el.classList.remove('ff-changed'), 2500); } };
-  const note = (text) => {
-    let box = panel.querySelector('.ff-note');
-    if (!box) { box = document.createElement('p'); box.className = 'notice ok ff-note'; panel.querySelector('summary').after(box); }
+  // Meldung über den Feldern (bzw. im Firefly-Bereich, falls es kein Formular gibt) und dorthin springen
+  const note = (text, toFields) => {
+    const form = document.querySelector('form[action$="/confirm"]');
+    const host = toFields && form ? form : panel;
+    document.querySelectorAll('.ff-note').forEach((n) => n.remove());
+    const box = document.createElement('p');
+    box.className = 'notice ok ff-note';
     box.textContent = text;
+    if (host === panel) panel.querySelector('summary').after(box); else host.prepend(box);
+    if (host !== panel) host.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
   // Auswahl „übernehmen“ im Browser merken
   const takes = panel.querySelectorAll('.ff-take input[name=take]');
@@ -182,8 +188,9 @@ document.querySelectorAll('.ff-form').forEach((form) => form.addEventListener('s
         panel.querySelectorAll('.ff-item.current').forEach((li) => li.classList.remove('current'));
         form.closest('.ff-item').classList.add('current');
         note(data.saved
-          ? `${data.label} übernommen und die Rechnung als bezahlt gespeichert.`
-          : `${data.label} übernommen: ${['Status', '„Bezahlt am“', ...Object.keys(data.values || {}).map((n) => LABELS[n])].join(', ')} eingetragen, deine übrigen Eingaben bleiben. Zum Abschluss unten bestätigen.`);
+          ? `${data.label} übernommen und die Rechnung als bezahlt gespeichert` +
+            (Object.keys(data.values || {}).length ? ` (${Object.keys(data.values).map((n) => LABELS[n]).join(', ')} aus der Buchung).` : '.')
+          : `${data.label} übernommen: ${['Status', '„Bezahlt am“', ...Object.keys(data.values || {}).map((n) => LABELS[n])].join(', ')} eingetragen, deine übrigen Eingaben bleiben. Prüfen und bestätigen.`, true);
       } else {
         const status = field('status'), paid = field('paid_on');
         if (paid && data.paid_on && paid.value === data.paid_on) { paid.value = ''; flash(paid); if (status) { status.value = 'open'; flash(status); } }

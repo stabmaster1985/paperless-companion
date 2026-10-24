@@ -106,10 +106,13 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
 
     @app.middleware("http")
     async def static_revalidate(request: Request, call_next):
-        """CSS/JS bei jedem Aufruf kurz prüfen lassen (ETag), damit nach Updates nie alte Dateien verwendet werden."""
+        """CSS/JS bei jedem Aufruf kurz prüfen lassen (ETag), Seiten nie zwischenspeichern – nach Updates nie Altes zeigen."""
         response = await call_next(request)
         if request.url.path.startswith("/static/") and request.url.path.endswith((".css", ".js")):
             response.headers["Cache-Control"] = "no-cache"
+        elif response.headers.get("content-type", "").startswith("text/html"):
+            # Seiten nie aus dem Browser-Speicher zeigen (Handy-Browser holen sonst alte Fassungen samt Skript zurück)
+            response.headers.setdefault("Cache-Control", "no-store")
         return response
 
     def today() -> date:
