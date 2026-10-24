@@ -58,11 +58,18 @@ class FireflyClient:
         return f"{self.base_url}/transactions/show/{group_id}"
 
     def withdrawals(self, start: date, end: date) -> Iterator[Transaction]:
+        return self._transactions("withdrawal", start, end)
+
+    def deposits(self, start: date, end: date) -> Iterator[Transaction]:
+        """Geldeingänge (z.B. Erstattungen der Versicherung); Gegenseite ist hier der Absender."""
+        return self._transactions("deposit", start, end)
+
+    def _transactions(self, kind: str, start: date, end: date) -> Iterator[Transaction]:
         page = 1
         while True:
             try:
                 response = self._client.get("/api/v1/transactions", params={
-                    "type": "withdrawal", "start": start.isoformat(), "end": end.isoformat(), "page": page, "limit": 100,
+                    "type": kind, "start": start.isoformat(), "end": end.isoformat(), "page": page, "limit": 100,
                 })
                 response.raise_for_status()
             except httpx.HTTPError as exc:
@@ -70,14 +77,14 @@ class FireflyClient:
             data = response.json()
             for group in data.get("data", []):
                 for split in group.get("attributes", {}).get("transactions", []):
-                    yield _parse(group["id"], split)
+                    yield _parse(group["id"], split, incoming=kind == "deposit")
             pagination = data.get("meta", {}).get("pagination", {})
             if page >= int(pagination.get("total_pages", 1) or 1):
                 return
             page += 1
 
 
-def _parse(group_id: str, split: dict) -> Transaction:
+def _parse(group_id: str, split: dict, incoming: bool = False) -> Transaction:
     text_parts = [split.get(k) or "" for k in ("description", "notes", "internal_reference", "external_id", "sepa_ct_id",
                                                 "sepa_db", "sepa_ep", "sepa_ci")]
     return Transaction(
@@ -85,8 +92,8 @@ def _parse(group_id: str, split: dict) -> Transaction:
         group_id=str(group_id),
         date=date.fromisoformat(str(split["date"])[:10]),
         amount=round(abs(float(split["amount"])), 2),
-        counterparty=split.get("destination_name") or "",
-        iban=(split.get("destination_iban") or "").replace(" ", "").upper() or None,
+        counterparty=split.get("source_name" if incoming else "destination_name") or "",
+        iban=(split.get("source_iban" if incoming else "destination_iban") or "").replace(" ", "").upper() or None,
         description=split.get("description") or "",
         text=" ".join(text_parts),
     )

@@ -275,6 +275,9 @@ def run(session: Session, client: FireflyClient, settings: Settings, today: date
         result["transactions"] = len(transactions)
         result.update(match(session, transactions, settings))
         result["pending_found"] = match_pending(session, transactions, pending)
+    from app import reimbursements
+
+    result["refunds_found"] = reimbursements.run(session, client, settings, today)
     _remember(session, result)
     return result
 
@@ -363,9 +366,17 @@ def suggestions(session: Session) -> list[PaymentMatch]:
 
 
 def search_defaults(doc: Document) -> dict:
-    """Vorbelegung der Suche: Betrag, Zeitraum und Empfänger aus dem Dokument."""
-    from app import pipeline
+    """Vorbelegung der Suche: Betrag, Zeitraum und Empfänger (bei Erstattungen: Absender) aus dem Dokument."""
+    from app import pipeline, reimbursements
 
+    if doc.kind == "reimbursement":
+        v = pipeline.parse_values("reimbursement", pipeline.suggestion_values(doc))
+        rec = doc.reimbursement
+        base = (rec.statement_date if rec else None) or v.get("statement_date") or doc.created
+        return {"amount": reimbursements.reimbursed_amount(doc), "start": base - timedelta(days=10) if base else None,
+                "end": base + timedelta(days=60) if base else None,
+                "q": (rec.payer if rec else None) or v.get("payer") or doc.correspondent or "",
+                "invoice_number": None, "iban": None}
     if doc.invoice is not None and doc.review_state != "pending":
         inv = doc.invoice
         amount, number, issuer = inv.amount, inv.invoice_number, inv.issuer
@@ -387,12 +398,19 @@ def search_defaults(doc: Document) -> dict:
 def search(session: Session, doc: Document, client: FireflyClient, today: date, amount: float | None,
            start: date, end: date, q: str = "", limit: int = 30) -> list[dict]:
     """Abbuchungen im Zeitraum, die zu Betrag, Suchtext, Rechnungsnr. oder IBAN passen – beste zuerst."""
+    from app import reimbursements
+
     d = search_defaults(doc)
     words = _words(q)
-    used = _used_transactions(session, exclude_doc=doc.id)
-    current = (payment_for(session, doc) or {}).get("tx_id")
+    incoming = doc.kind == "reimbursement"  # Erstattung: Geldeingänge statt Abbuchungen
+    if incoming:
+        used = reimbursements.used_transactions(session, exclude=doc.id)
+        current = (doc.reimbursement.tx_id if doc.reimbursement else None) or ((doc.suggestions or {}).get("_deposit") or {}).get("tx_id")
+    else:
+        used = _used_transactions(session, exclude_doc=doc.id)
+        current = (payment_for(session, doc) or {}).get("tx_id")
     found = []
-    for tx in client.withdrawals(start, min(end, today)):
+    for tx in (client.deposits if incoming else client.withdrawals)(start, min(end, today)):
         points, reasons = 0, []
         if amount is not None:
             diff = abs(tx.amount - amount)
@@ -436,16 +454,20 @@ def issuer_name(session: Session, counterparty: str) -> str:
 
 
 def choose(session: Session, doc: Document, tx: Transaction, take=TAKE) -> tuple[str, dict]:
-    """Von dir gewählte Buchung zuordnen. Status/Bezahlt am und die gewählten Werte (`take`) werden übernommen –
-    in der Inbox als Vorbelegung, bei bestätigten Rechnungen direkt gespeichert. Gibt Meldung und Werte zurück."""
+    """Von dir gewählte Buchung zuordnen. Status, Datum und die gewählten Werte (`take`) werden übernommen –
+    in der Inbox als Vorbelegung, bei bestätigten Dokumenten direkt gespeichert.
+    Gibt Meldung und die Formularfelder zurück, die die Seite setzen soll."""
     from app.extraction.rules import field
 
+    if doc.kind == "reimbursement":
+        return _choose_deposit(session, doc, tx, take)
     reasons = ["von dir gewählt"]
     values = {"amount": tx.amount} if "amount" in take else {}
     if "issuer" in take and tx.counterparty:
         values["issuer"] = issuer_name(session, tx.counterparty)
     if "iban" in take and tx.iban:
         values["iban"] = tx.iban
+    form = {"status": "paid", "paid_on": tx.date.isoformat(), **values}
     if doc.review_state == "pending":
         apply_payment(doc, AUTO_MIN, tx, reasons)
         sugg = dict(doc.suggestions)
@@ -453,7 +475,7 @@ def choose(session: Session, doc: Document, tx: Transaction, take=TAKE) -> tuple
         for name, value in values.items():
             sugg[name] = field(value, 0.9, "firefly")
         doc.suggestions = {k: v for k, v in sugg.items() if v is not None}
-        return "vorbelegt – bitte prüfen und bestätigen", values
+        return "vorbelegt – bitte prüfen und bestätigen", form
     inv = doc.invoice
     if inv is None:
         return "keine Rechnung", {}
@@ -478,11 +500,52 @@ def choose(session: Session, doc: Document, tx: Transaction, take=TAKE) -> tuple
         from app import pipeline
 
         pipeline.set_source(doc, list(values), "firefly", 0.9, True)
-    return "als bezahlt übernommen", values
+    return "als bezahlt übernommen", form
+
+
+def _choose_deposit(session: Session, doc: Document, tx: Transaction, take) -> tuple[str, dict]:
+    """Geldeingang zu einer Erstattung: als erhalten übernehmen (Betrag/Absender auf Wunsch aus der Buchung)."""
+    from app import pipeline, reimbursements
+    from app.extraction.rules import field
+
+    values = {"amount": tx.amount} if "amount" in take else {}
+    if "issuer" in take and tx.counterparty:
+        values["payer"] = issuer_name(session, tx.counterparty)
+    form = {"status": "received", "received_on": tx.date.isoformat(), **values}
+    rec = doc.reimbursement
+    if doc.review_state == "pending" or rec is None:
+        sugg = dict(doc.suggestions or {})
+        sugg["_deposit"] = {"tx_id": tx.journal_id, "group_id": tx.group_id, "date": tx.date.isoformat(),
+                            "amount": tx.amount, "counterparty": tx.counterparty[:200]}
+        sugg["status"] = field("received", 0.9, "firefly")
+        sugg["received_on"] = field(tx.date, 0.9, "firefly")
+        for name, value in values.items():
+            sugg[name] = field(value, 0.9, "firefly")
+        doc.suggestions = sugg
+        return "vorbelegt – bitte prüfen und bestätigen", form
+    reimbursements.set_transaction(rec, tx, "accepted")
+    for name, value in values.items():
+        setattr(rec, name, value)
+    pipeline.set_source(doc, ["status", "received_on", *values], "firefly", 0.9, True)
+    return "als erhalten gespeichert", form
 
 
 def clear(session: Session, doc: Document) -> bool:
     """„Passt nicht“: zugeordnete bzw. vorgeschlagene Buchung lösen; sie wird nicht wieder vorgeschlagen."""
+    if doc.kind == "reimbursement":
+        from app import reimbursements
+
+        sugg = dict(doc.suggestions or {})
+        changed = bool(sugg.pop("_deposit", None))
+        if changed:
+            for name in ("status", "received_on", "amount", "payer"):
+                if isinstance(sugg.get(name), dict) and sugg[name].get("source") == "firefly":
+                    sugg.pop(name)
+            doc.suggestions = sugg
+        if doc.reimbursement is not None and doc.reimbursement.tx_id:
+            reimbursements.reject(doc.reimbursement)
+            changed = True
+        return changed
     changed = False
     sugg = dict(doc.suggestions or {})
     if p := sugg.pop("_payment", None):

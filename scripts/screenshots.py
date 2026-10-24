@@ -59,7 +59,7 @@ def start_demo(data: Path, port: int) -> None:
     from app.config import Settings
     from app.db import session_scope
     from app.main import create_app
-    from app.models import Case, CaseDocument, CaseEntry, Document, Invoice, PaymentMatch
+    from app.models import Case, CaseDocument, CaseEntry, Document, Invoice, PaymentMatch, Reimbursement
     from tests import conftest
     from tests.test_pipeline import run_all
 
@@ -75,6 +75,12 @@ def start_demo(data: Path, port: int) -> None:
             "transaction_journal_id": str(900 + journal), "type": "withdrawal", "date": f"{day}T00:00:00+02:00",
             "amount": str(amount), "description": text, "destination_name": name}]}}
 
+    # Geldeingänge (Erstattungen) – vor der allgemeinen Route, damit „type=deposit“ hier landet
+    router.get("http://firefly.test/api/v1/transactions", params={"type": "deposit"}).respond(json={"data": [
+        {"type": "transactions", "id": "600", "attributes": {"transactions": [{
+            "transaction_journal_id": "960", "type": "deposit", "date": "2026-09-22T00:00:00+02:00", "amount": "420.00",
+            "description": "Erstattung Leistungsabrechnung", "source_name": "Musterversicherung a.G."}]}}],
+        "meta": {"pagination": {"total": 1, "current_page": 1, "total_pages": 1}}})
     router.get("http://firefly.test/api/v1/transactions").respond(json={"data": [
         booking(0, "2026-10-10", "78.00", "Stadtwerke Musterstadt", "Abschlag RE-1"),
         booking(1, "2026-09-10", "78.00", "Stadtwerke Musterstadt", "Abschlag September"),
@@ -154,6 +160,24 @@ def start_demo(data: Path, port: int) -> None:
                            document_type="Rechnung", tags=["Auto", "Versicherung"], extraction_state="skipped",
                            created=date(2019 + i, 1, 2)))
 
+        # Erstattung: Leistungsabrechnung, in Paperless mit zwei Arztrechnungen verknüpft; eine weitere Rechnung offen
+        for doc_id, title, corr, amount, day in [(601, "Zahnbehandlung", "Zahnarztpraxis Dr. Muster", 500.0, date(2026, 8, 1)),
+                                                 (602, "Laborrechnung", "Labor Musterstadt", 112.4, date(2026, 8, 3)),
+                                                 (603, "Hautarzt Kontrolle", "Hautarztpraxis Beispiel", 65.0, date(2026, 10, 2))]:
+            s.add(Document(id=doc_id, title=title, correspondent=corr, document_type="Rechnung", kind="invoice",
+                           tags=["Krankheitskosten"], created=day, review_state="confirmed", extraction_state="done",
+                           invoice=Invoice(issuer=corr, amount=amount, status="paid", invoice_date=day)))
+        s.add(Document(id=600, title="Leistungsabrechnung September", correspondent="Musterversicherung a.G.",
+                       document_type="Leistungsabrechnung", kind="reimbursement", tags=["Krankheitskosten"],
+                       created=date(2026, 9, 12), review_state="confirmed", extraction_state="done",
+                       paperless_fields={"related": [601, 602]},
+                       reimbursement=Reimbursement(payer="Musterversicherung a.G.", amount=420.0,
+                                                   statement_date=date(2026, 9, 12))))
+        s.add(Document(id=604, title="Beihilfebescheid Oktober", correspondent="Beihilfestelle", document_type="Leistungsabrechnung",
+                       kind="reimbursement", tags=[], created=date(2026, 10, 15), review_state="confirmed", extraction_state="done",
+                       reimbursement=Reimbursement(payer="Beihilfestelle", amount=58.5, statement_date=date(2026, 10, 15))))
+    settings.reimbursable_tag = "Krankheitskosten"
+
 
 def launch(pw):
     try:
@@ -190,11 +214,14 @@ def shoot(base: str) -> None:
 
         warm = page(1280, 960)
         warm.goto(base + "/rules")  # Regelvorschläge berechnen, damit die Übersicht sie zählt
+        warm.goto(base + "/reimbursements")
+        warm.click("text=Mit Firefly abgleichen")  # Geldeingang der Erstattung vorschlagen lassen
         warm.close()
 
         for name, path, width, height in [
                 ("dashboard", "/", 1280, 960), ("inbox", "/inbox", 1280, 720), ("dokument", "/documents/1", 1280, 960),
-                ("rechnungen", "/invoices", 1280, 760), ("handy-dashboard", "/", 390, 844)]:
+                ("rechnungen", "/invoices", 1280, 760), ("erstattungen", "/reimbursements", 1280, 900),
+                ("erstattung", "/documents/600", 1280, 1100), ("handy-dashboard", "/", 390, 844)]:
             p = page(width, height)
             p.goto(base + path)
             if p.locator(".docview:not([data-lazy])").count():

@@ -19,7 +19,8 @@
   {% set nav_groups = [
     ('Erledigen', nav_todo, [('/inbox', 'Inbox', inbox_count, 'Neue Dokumente prüfen'), ('/paperless-changes', 'Für Paperless', outgoing_count, 'Vorschläge sammeln und übertragen'),
                          ('/review', 'Vorschläge durchgehen', 0, 'Einzeln mit Vorschau'), ('/receipts', 'Belege', receipts_missing, 'Buchungen ohne Beleg')]),
-    ('Überblick', 0, [('/invoices', 'Rechnungen', 0, ''), ('/contracts', 'Verträge', 0, ''), ('/warranties', 'Garantien', 0, ''),
+    ('Überblick', 0, [('/invoices', 'Rechnungen', 0, ''), ('/reimbursements', 'Erstattungen', 0, 'Leistungsabrechnungen, Geldeingang, Eigenanteil'),
+                      ('/contracts', 'Verträge', 0, ''), ('/warranties', 'Garantien', 0, ''),
                       ('/cases', 'Vorgänge', 0, ''), ('/tax', 'Steuer', 0, '')]),
     ('Archiv', 0, [('/documents', 'Dokumente', 0, ''), ('/rules', 'Regeln', 0, 'Gelerntes und Vorschläge für Paperless-Regeln'),
                    ('/retention', 'Aufbewahrung', 0, '')]),

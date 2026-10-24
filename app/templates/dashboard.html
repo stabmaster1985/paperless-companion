@@ -30,6 +30,11 @@
 <h2>Finanzen und Status</h2>
 <section class="stats">
   <a class="stat {{ 'warn' if stats.overdue }}" href="/invoices"><span class="num">{{ stats.open_sum|eur }}</span><span>{{ stats.open_count }} offene Rechnungen{% if stats.overdue %}, {{ stats.overdue }} überfällig{% endif %}{% if stats.payment_suggestions %}, {{ stats.payment_suggestions }} Zahlungen gefunden{% endif %}</span></a>
+  {% set rf = stats.refunds %}
+  {% if rf['items'] or rf.missing %}
+  <a class="stat" href="/reimbursements"><span class="num">{{ rf.expected_sum|eur }}</span><span>{{ rf.expected_count }} Erstattungen erwartet
+    {%- if rf.found %}, {{ rf.found|length }} Geldeingang gefunden{% endif %}{% if rf.missing %}, {{ rf.missing|length }} Rechnungen ohne Erstattung{% endif %}</span></a>
+  {% endif %}
   <a class="stat" href="/contracts"><span class="num">{{ stats.fixed_costs|eur }}</span><span>Fixkosten / Monat ({{ stats.contracts }} Verträge)</span></a>
   <a class="stat" href="/documents?state=queued"><span class="num">{{ stats.queued }}</span><span>in Analyse</span></a>
 </section>

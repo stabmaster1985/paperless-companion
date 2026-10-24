@@ -40,10 +40,12 @@
           <td class="hide-sm nowrap">{{ r.count[0] }}{% if r.count[0] %} <small class="muted">({{ r.count[1] }} analysiert)</small>{% endif %}</td>
           <td>
             <select name="kind:{{ r.key }}" aria-label="Art für {{ r.name }}">
-              <option value="" {{ 'selected' if not r.kind }}>nicht auswerten</option>
+              <option value="" {{ 'selected' if not r.kind }}>automatisch (Text entscheidet)</option>
               <option value="invoice" {{ 'selected' if r.kind == 'invoice' }}>Rechnung</option>
               <option value="contract" {{ 'selected' if r.kind == 'contract' }}>Vertrag</option>
               <option value="warranty" {{ 'selected' if r.kind == 'warranty' }}>Garantie</option>
+              <option value="reimbursement" {{ 'selected' if r.kind == 'reimbursement' }}>Erstattung</option>
+              <option value="other" {{ 'selected' if r.kind == 'other' }}>Sonstiges (nie auswerten)</option>
             </select>
           </td>
           <td><input type="checkbox" name="tax:{{ r.key }}" value="1" aria-label="{{ r.name }} steuerrelevant" {{ 'checked' if r.tax }}></td>

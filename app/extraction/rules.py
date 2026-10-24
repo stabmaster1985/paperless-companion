@@ -116,9 +116,9 @@ def field(value, confidence: float, source: str = "rule") -> dict:
 # --------------------------------------------------------------------------- Rechnungen
 
 
-def extract_amount(text: str) -> dict | None:
+def extract_amount(text: str, labels=AMOUNT_LABELS) -> dict | None:
     lines = text.splitlines()
-    for label, confidence in AMOUNT_LABELS:
+    for label, confidence in labels:
         best = None
         for i, line in enumerate(lines):
             if not re.search(label, line, re.IGNORECASE):
@@ -208,6 +208,34 @@ def extract_invoice(text: str, created: date | None = None) -> dict:
     warranty = extract_warranty_months(text)
     if warranty:
         result["warranty_months"] = warranty
+    return result
+
+
+# --------------------------------------------------------------------------- Erstattungen
+
+REIMBURSEMENT_RE = re.compile(
+    r"leistungsabrechnung|erstattungsmitteilung|erstattungsbescheid|beihilfebescheid|beihilfe-?festsetzung|"
+    r"abrechnung\s+ihre[rs]?\s+(?:eingereichten\s+)?(?:rechnung|belege|einreichung)|erstattungsbetrag", re.IGNORECASE)
+REIMBURSEMENT_AMOUNT_LABELS = [
+    (r"erstattungsbetrag|auszahlungsbetrag|gesamterstattung|erstattung\s+gesamt|summe\s+(?:der\s+)?erstattung|"
+     r"erstatten\s+wir|überweisen\s+wir|überwiesen\s+wir|beihilfe\s+(?:in\s+höhe|beträgt)|zahlbetrag", 0.9),
+    (r"erstattet|erstattung|auszahlung|gutschrift", 0.7),
+]
+
+
+def extract_reimbursement(text: str, created: date | None = None) -> dict:
+    """Leistungsabrechnung/Erstattung: erstatteter Betrag und Datum der Abrechnung."""
+    text = normalize(text)
+    result: dict = {}
+    amount = extract_amount(text, REIMBURSEMENT_AMOUNT_LABELS)
+    if amount and amount["confidence"] >= 0.7:  # ohne passendes Stichwort lieber die AI fragen
+        result["amount"] = amount
+    statement = date_after_label(
+        text, r"abrechnungsdatum|datum\s+der\s+abrechnung|bescheiddatum|(?:abrechnung|bescheid|mitteilung)\s+vom|\bdatum\b")
+    if statement:
+        result["statement_date"] = field(statement, 0.85)
+    elif created:
+        result["statement_date"] = field(created, 0.7, "paperless")
     return result
 
 
@@ -386,6 +414,8 @@ NOT_INVOICE = re.compile(
 def classify_by_keywords(title: str, text: str) -> str:
     title = title.lower()
     head = text[:2500].lower()
+    if REIMBURSEMENT_RE.search(title) or REIMBURSEMENT_RE.search(head[:800]):
+        return "reimbursement"  # vor „rechnung“ prüfen: „Leistungsabrechnung“ ist keine Rechnung
     if NOT_INVOICE.search(title) or NOT_INVOICE.search(head[:600]):
         return "other"
     if re.search(r"rechnung|invoice", title):
@@ -409,4 +439,5 @@ EXTRACTORS = {
     "invoice": extract_invoice,
     "contract": extract_contract,
     "warranty": extract_warranty,
+    "reimbursement": extract_reimbursement,
 }

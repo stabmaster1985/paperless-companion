@@ -12,6 +12,8 @@ Paperless archiviert Dokumente und macht sie durchsuchbar. Der Companion leitet 
 - **Rechnungen:** Betrag, Fälligkeit, IBAN und Lastschrift werden erkannt. Status offen,
   bezahlt oder überfällig.
 - **Garantie und Gewährleistung:** Ablaufdatum je Kauf.
+- **Erstattungen:** Leistungsabrechnungen (Krankenversicherung, Beihilfe …) mit den in Paperless verknüpften
+  Rechnungen – Summe, Erstattung, Eigenanteil (für die Steuer) und Geldeingang aus Firefly.
 - **Zahlungsabgleich mit Firefly III:** Abbuchungen werden offenen Rechnungen zugeordnet
   (Betrag, Rechnungsnummer im Verwendungszweck, IBAN, Empfänger).
 - **Vorgänge:** Dokumente und Notizen zu einem Fall bündeln (z.B. Schadensfall, Widerspruch),
@@ -59,6 +61,13 @@ IBAN, Domain oder Kundennummer erkennen. Mit Auswirkung auf dein Archiv, bevor d
 **Rechnungen** – offen, bezahlt, überfällig; passende Abbuchungen aus Firefly III werden vorgeschlagen.
 
 ![Rechnungen](docs/screenshots/rechnungen.png)
+
+**Erstattungen** – Leistungsabrechnungen mit erwartetem Geld, gefundenem Geldeingang aus Firefly und dem Eigenanteil.
+Welche Rechnungen dazugehören, kommt aus den Paperless-Verknüpfungen („gehört zu“) – nichts wird doppelt gepflegt.
+
+![Erstattungen](docs/screenshots/erstattungen.png)
+
+![Erstattung mit verknüpften Rechnungen](docs/screenshots/erstattung.png)
 
 **Inbox** – Dokumente, bei denen die Erkennung nicht sicher genug war.
 

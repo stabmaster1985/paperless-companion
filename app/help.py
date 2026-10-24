@@ -53,6 +53,15 @@ PAGES: dict[str, tuple[str, list[str]]] = {
         "solange du sie nicht auswählst – so bleibt die CPU frei.",
         "Mit den Filtern (auch Paperless-IDs wie „12, 15-20“) wählst du gezielt aus und lässt sie analysieren oder Metadaten vorschlagen.",
     ]),
+    "/reimbursements": ("Erstattungen", [
+        "Leistungsabrechnungen, Beihilfebescheide und andere Erstattungen. Welche Rechnungen dazugehören, kommt aus deinen "
+        "Paperless-Verknüpfungen (Feld „gehört zu“) – auch über ein Einreichungsschreiben dazwischen. Daraus ergeben sich Summe, "
+        "erstatteter Betrag und dein Eigenanteil (für die Steuer: nur der Eigenanteil zählt als Krankheitskosten).",
+        "Den Geldeingang sucht der Firefly-Abgleich unter den Einnahmen. Ein gefundener Eingang wird vorgeschlagen; mit „Passt“ "
+        "gilt die Erstattung als erhalten. Fehlt er, kannst du auf der Dokumentseite selbst in Firefly suchen.",
+        "Mit einem Tag für erstattungsfähige Rechnungen (Einstellungen → Firefly) siehst du hier auch Rechnungen, zu denen noch "
+        "keine Erstattung verknüpft ist. In Paperless wird nichts geändert.",
+    ]),
     "/receipts": ("Belege", [
         "Abbuchungen aus Firefly III, zu denen kein Dokument in Paperless zugeordnet ist – so merkst du rechtzeitig, "
         "wenn ein Kassenbon oder eine Rechnung fehlt (Garantie, Steuer).",

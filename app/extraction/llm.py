@@ -40,6 +40,10 @@ FIELDS: dict[str, dict[str, tuple[str, str]]] = {
         "monthly_cost": ("number", "Kosten pro Monat in Euro (Jahresbeiträge durch 12 teilen)"),
         "contract_number": ("string", "Vertrags-, Kunden- oder Versicherungsscheinnummer"),
     },
+    "reimbursement": {
+        "amount": ("number", "erstatteter bzw. ausgezahlter Gesamtbetrag in Euro (nicht der eingereichte Rechnungsbetrag)"),
+        "statement_date": ("string", "Datum der Abrechnung / des Bescheids"),
+    },
     "warranty": {
         "purchase_date": ("string", "Kaufdatum"),
         "months": ("integer", "Garantiedauer in Monaten, nur wenn ausdrücklich genannt"),
@@ -57,6 +61,7 @@ KEYWORDS = {
     "invoice": r"betrag|summe|gesamt|fällig|zahlbar|rechnung|datum|lastschrift|iban|überweis",
     "contract": r"kündig|laufzeit|verlänger|beginn|vertrag|frist|monatlich|beitrag|jährlich|ende",
     "warranty": r"garantie|gewährleistung|kauf|datum",
+    "reimbursement": r"erstatt|auszahl|überweis|gutschrift|beihilfe|summe|gesamt|betrag|datum",
 }
 
 LLM_CONFIDENCE = 0.6

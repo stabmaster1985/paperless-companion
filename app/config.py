@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     doctypes_invoice: str = "Rechnung,Quittung"
     doctypes_contract: str = "Vertrag,Versicherung,Police"
     doctypes_warranty: str = "Kaufbeleg,Kassenbon,Garantie"
+    doctypes_reimbursement: str = "Leistungsabrechnung,Erstattung,Beihilfebescheid"
+    doctypes_other: str = ""  # nie auswerten (z.B. Gehaltsabrechnung, Kontoauszug)
+    # Rechnungen mit diesem Tag gelten als erstattungsfähig (z.B. Arztrechnungen): ohne verknüpfte Erstattung „noch offen“
+    reimbursable_tag: str = ""
     keyword_classification: bool = True
 
     # LLM
@@ -149,6 +153,8 @@ class Settings(BaseSettings):
             ("invoice", self.doctypes_invoice),
             ("contract", self.doctypes_contract),
             ("warranty", self.doctypes_warranty),
+            ("reimbursement", self.doctypes_reimbursement),
+            ("other", self.doctypes_other),
         ):
             for name in _split(raw):
                 mapping[name.lower()] = kind

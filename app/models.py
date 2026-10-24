@@ -78,6 +78,7 @@ class Document(Base):
     contract: Mapped["Contract | None"] = relationship(back_populates="document", cascade="all, delete-orphan")
     invoice: Mapped["Invoice | None"] = relationship(back_populates="document", cascade="all, delete-orphan")
     warranty: Mapped["Warranty | None"] = relationship(back_populates="document", cascade="all, delete-orphan")
+    reimbursement: Mapped["Reimbursement | None"] = relationship(back_populates="document", cascade="all, delete-orphan")
 
 
 class Contract(Base):
@@ -126,6 +127,32 @@ class Invoice(Base):
     paid_on: Mapped[date | None] = mapped_column(Date)
 
     document: Mapped[Document] = relationship(back_populates="invoice")
+
+
+class Reimbursement(Base):
+    """Erstattung, z.B. Leistungsabrechnung der Krankenversicherung. Die zugehörigen Rechnungen kommen aus den
+    Paperless-Dokumentverknüpfungen („gehört zu“), der Geldeingang aus Firefly."""
+
+    __tablename__ = "reimbursements"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    document_id: Mapped[int] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"), unique=True)
+    payer: Mapped[str | None] = mapped_column(String)  # Versicherung, Beihilfestelle …
+    statement_date: Mapped[date | None] = mapped_column(Date)
+    amount: Mapped[float | None] = mapped_column(Float)  # erstatteter Betrag
+    # open (Geld erwartet) | received
+    status: Mapped[str] = mapped_column(String, default="open")
+    received_on: Mapped[date | None] = mapped_column(Date)
+    # Geldeingang in Firefly (gefunden bzw. von dir gewählt); tx_state: suggested | accepted
+    tx_id: Mapped[str | None] = mapped_column(String)
+    tx_group_id: Mapped[str | None] = mapped_column(String)
+    tx_date: Mapped[date | None] = mapped_column(Date)
+    tx_amount: Mapped[float | None] = mapped_column(Float)
+    tx_counterparty: Mapped[str | None] = mapped_column(String)
+    tx_state: Mapped[str | None] = mapped_column(String)
+    tx_rejected: Mapped[list | None] = mapped_column(JSON)  # „passt nicht“: nicht wieder vorschlagen
+
+    document: Mapped[Document] = relationship(back_populates="reimbursement")
 
 
 class Warranty(Base):

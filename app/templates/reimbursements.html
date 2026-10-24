@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% from "macros.html" import doclink, txlinks, help %}
+{% block content %}
+<div class="head">
+  <h1>Erstattungen</h1>
+  {% if settings.firefly_enabled %}<form method="post" action="/reimbursements/run" class="inline"><button class="small" title="Geldeingänge in Firefly suchen">Mit Firefly abgleichen</button></form>{% endif %}
+</div>
+{% if msg %}<div class="notice">{{ msg }}</div>{% endif %}
+<p class="muted">Leistungsabrechnungen und andere Erstattungen. Die zugehörigen Rechnungen kommen aus deinen Paperless-Verknüpfungen
+  („{{ settings.field_related or 'gehört zu' }}“), der Geldeingang aus Firefly. In Paperless wird nichts geändert.</p>
+{% if expected_count %}<p><strong>{{ expected_count }}</strong> Erstattungen erwartet, zusammen <strong>{{ expected_sum|eur }}</strong>.</p>{% endif %}
+
+<nav class="tabs">
+  <a href="/reimbursements" class="{{ 'active' if show != 'all' }}">Offen</a>
+  <a href="/reimbursements?show=all" class="{{ 'active' if show == 'all' }}">Alle ({{ items|length }})</a>
+</nav>
+
+{% if shown %}
+<div class="tx-cards">
+  {% for it in shown %}{% set d = it.document %}{% set rec = it.record %}
+  <article class="tx-card refund-card st-{{ 'linked' if it.status == 'received' else 'missing' }}">
+    <header>
+      <div class="tx-who">
+        <a href="/documents/{{ d.id }}"><strong>{{ d.title or ('#' ~ d.id) }}</strong></a> {{ doclink(d.id) }}
+        <div class="tx-desc">{{ (rec.payer if rec else None) or d.correspondent or 'unbekannter Erstatter' }}
+          · {{ ((rec.statement_date if rec else None) or d.created)|d }}</div>
+      </div>
+      <div class="tx-amount">{{ it.reimbursed|eur if it.reimbursed is not none else '–' }}<small>erstattet</small></div>
+    </header>
+    <div class="refund-meta">
+      {% if d.review_state == 'pending' %}<span class="tag tag-warn">in der Inbox – erst prüfen</span>
+      {% elif it.status == 'received' %}<span class="tag tag-ok">erhalten{% if rec and rec.received_on %} am {{ rec.received_on|d }}{% endif %}</span>
+      {% else %}<span class="tag tag-overdue">Geld erwartet</span>{% endif %}
+      {% if it.invoices %}
+      <small>{{ it.invoices|length }} Rechnung{{ 'en' if it.invoices|length != 1 }}{% if it.invoice_sum is not none %}, zusammen {{ it.invoice_sum|eur }}{% endif %}
+        {%- if it.own_share is not none %} · Eigenanteil <strong>{{ it.own_share|eur }}</strong>{% endif %}</small>
+      {% else %}<small class="muted">keine Rechnung verknüpft</small>{% endif %}
+    </div>
+    {% if rec and rec.tx_id %}
+    <div class="tx-receipt">
+      <span>{{ 'Geldeingang' if rec.tx_state == 'accepted' else 'Möglicher Geldeingang' }}: {{ rec.tx_date|d }} · {{ rec.tx_amount|eur }}
+        von {{ rec.tx_counterparty or 'unbekannt' }} <small>{{ txlinks(rec.tx_group_id, rec.tx_date) }}</small></span>
+      {% if rec.tx_state == 'suggested' %}
+      <form method="post" action="/reimbursements/{{ d.id }}/accept" class="inline"><input type="hidden" name="back" value="/reimbursements?show={{ show }}">
+        <button class="small primary">Passt</button></form>
+      <form method="post" action="/reimbursements/{{ d.id }}/reject" class="inline"><input type="hidden" name="back" value="/reimbursements?show={{ show }}">
+        <button class="small">Passt nicht</button></form>
+      {% endif %}
+    </div>
+    {% elif rec and it.status != 'received' %}
+    <div class="tx-receipt">
+      <form method="post" action="/reimbursements/{{ d.id }}/received" class="inline"><input type="hidden" name="back" value="/reimbursements?show={{ show }}">
+        <button class="small" title="Ohne Firefly-Buchung als erhalten markieren (Datum: heute, auf der Dokumentseite änderbar)">Als erhalten markieren</button></form>
+      <a class="small" href="/documents/{{ d.id }}#firefly">In Firefly suchen</a>
+    </div>
+    {% endif %}
+  </article>
+  {% endfor %}
+</div>
+{% elif items %}
+<p class="empty">Keine offenen Erstattungen.</p>
+{% else %}
+<div class="empty">
+  <p>Noch keine Erstattungen. So kommen sie hierher:</p>
+  <ul class="plain">
+    <li>Unter <a href="/settings">Einstellungen → Dokumenttypen</a> deinen Paperless-Typ (z.B. „Leistungsabrechnung“) der Art <strong>Erstattung</strong> zuordnen, oder</li>
+    <li>auf der Dokumentseite oben bei „Art“ <strong>Erstattung</strong> wählen.</li>
+  </ul>
+</div>
+{% endif %}
+
+<section class="card">
+  <h2>Rechnungen ohne Erstattung {{ help("Rechnungen mit dem Tag für erstattungsfähige Rechnungen, die mit keiner Erstattung verknüpft sind – noch nicht eingereicht oder noch nicht abgerechnet.") }}</h2>
+  {% if settings.reimbursable_tag %}
+    {% if missing %}
+    <ul class="plain refund-list">
+      {% for inv, amount in missing %}
+      <li><a href="/documents/{{ inv.id }}">{{ inv.title or ('#' ~ inv.id) }}</a> {{ doclink(inv.id) }}
+        <small class="muted">{{ inv.correspondent or '' }} · {{ inv.created|d }}</small>
+        <span class="refund-amount">{{ amount|eur if amount is not none else '–' }}</span></li>
+      {% endfor %}
+    </ul>
+    <p class="hint">Sobald du in Paperless eine Leistungsabrechnung mit der Rechnung verknüpfst, verschwindet sie hier.</p>
+    {% else %}<p class="muted">Alle Rechnungen mit dem Tag „{{ settings.reimbursable_tag }}“ sind einer Erstattung zugeordnet.</p>{% endif %}
+  {% else %}
+  <p class="muted">Aus. Trage unter <a href="/settings#app-settings">Einstellungen → Firefly III</a> einen „Tag für erstattungsfähige Rechnungen“ ein
+    (z.B. „Krankheitskosten“), dann stehen hier Rechnungen, zu denen noch keine Erstattung verknüpft ist.</p>
+  {% endif %}
+</section>
+{% endblock %}

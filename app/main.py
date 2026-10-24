@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import appsettings, cases, help as helptexts, identifiers, learning, paperless_rules, receipts, rules as rule_proposals, deadlines, events, fields, highlight, ics, metadata, notify, payments, pipeline, reminders, retention, selection, tax
+from app import appsettings, cases, reimbursements, help as helptexts, identifiers, learning, paperless_rules, receipts, rules as rule_proposals, deadlines, events, fields, highlight, ics, metadata, notify, payments, pipeline, reminders, retention, selection, tax
 from app.config import Settings, get_settings
 from app.db import get_session, init_db, session_scope
 from app.models import Case, CaseDocument, CaseEntry, Contract, Document, Invoice, KeyValue, ReceiptCheck, RuleProposal, RetentionLog, RetentionRule, Warranty
@@ -41,7 +41,8 @@ PUBLIC_PATHS = ("/login", "/static", "/favicon.ico", "/api/webhook", "/calendar.
 def create_app(settings: Settings | None = None, start_worker: bool = True) -> FastAPI:
     settings = settings or get_settings()
     # Werte aus der .env, falls die in der App gespeicherte Zuordnung zurückgesetzt wird
-    env_doctypes = {k: getattr(settings, k) for k in ("doctypes_invoice", "doctypes_contract", "doctypes_warranty", "tax_doctypes")}
+    env_doctypes = {k: getattr(settings, k) for k in ("doctypes_invoice", "doctypes_contract", "doctypes_warranty",
+                                                      "doctypes_reimbursement", "doctypes_other", "tax_doctypes")}
     # Werte aus der .env für die übrigen in der App änderbaren Einstellungen
     env_settings = {name: getattr(settings, name) for name in appsettings.FIELDS}
 
@@ -179,6 +180,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             "overdue": len([e for e in all_events if e.type == "overdue"]),
             "fixed_costs": events.monthly_fixed_costs(session),
             "payment_suggestions": len(payments.suggestions(session)),
+            "refunds": reimbursements.overview(session, settings),
             "contracts": session.scalar(select(func.count()).select_from(Contract).where(Contract.status == "active")),
             "queued": session.scalar(
                 select(func.count()).select_from(Document).where(Document.extraction_state.in_(("queued", "running")))
@@ -342,6 +344,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             text_html=text_html, text_found=text_found, text_error=text_error, HL_LABELS=highlight.LABELS,
             meta_items=metadata.pending(doc, everything=True), META_SOURCES=metadata.SOURCES,
             correspondents=metadata.correspondent_names(session, paperless_names),
+            refund=reimbursements.summary(session, doc) if doc.kind == "reimbursement" else None,
             doc_correspondent=metadata.effective(doc.tags, doc.correspondent, doc.document_type, doc.meta_accepted)[1],
             pending_left=session.scalar(
                 select(func.count()).select_from(Document).where(Document.review_state == "pending", Document.id != doc_id)
@@ -410,13 +413,13 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             raise HTTPException(400, "Buchung unvollständig")
         # ohne Angabe (Formular ohne Skript) alles übernehmen
         take = [t for t in form.getlist("take") if t in payments.TAKE] if "take_sent" in form else payments.TAKE
-        result, taken = payments.choose(session, doc, tx, take)
+        result, form_fields = payments.choose(session, doc, tx, take)
         amount = f"{tx.amount:.2f}".replace(".", ",")
         msg = f"Firefly-Buchung vom {tx.date:%d.%m.%Y} ({amount} €) {result}"
         if request.headers.get("x-requested-with") == "fetch":
             # Seite nicht neu laden: ungespeicherte Eingaben im Formular bleiben erhalten, das Skript setzt die Felder
             return {"msg": msg, "label": f"Buchung vom {tx.date:%d.%m.%Y} ({amount} €)", "saved": doc.review_state != "pending",
-                    "paid_on": tx.date.isoformat(), "tx_id": tx.journal_id, "values": taken}
+                    "tx_id": tx.journal_id, "set": form_fields}
         return RedirectResponse(f"/documents/{doc_id}?msg={quote(msg)}", status_code=303)
 
     @app.post("/documents/{doc_id}/payment/clear")
@@ -424,11 +427,18 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         doc = session.get(Document, doc_id)
         if doc is None:
             raise HTTPException(404)
-        previous = (payments.payment_for(session, doc) or {}).get("date")
+        if doc.kind == "reimbursement":
+            rec = doc.reimbursement
+            previous = (rec.tx_date.isoformat() if rec and rec.tx_date else None) or \
+                ((doc.suggestions or {}).get("_deposit") or {}).get("date")
+            date_field = "received_on"
+        else:
+            previous, date_field = (payments.payment_for(session, doc) or {}).get("date"), "paid_on"
         msg = ("Zuordnung gelöst – diese Buchung wird nicht wieder vorgeschlagen" if payments.clear(session, doc)
                else "Keine Buchung zugeordnet")
         if request.headers.get("x-requested-with") == "fetch":
-            return {"msg": msg, "paid_on": previous}
+            # Status/Datum nur zurücksetzen, wenn sie noch aus dieser Buchung stammen
+            return {"msg": msg, "previous": previous, "date_field": date_field}
         return RedirectResponse(f"/documents/{doc_id}?msg={quote(msg)}#firefly", status_code=303)
 
     @app.post("/documents/{doc_id}/confirm")
@@ -445,8 +455,10 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             learning.record_accuracy(session, doc, doc.kind, values)  # stimmten die Vorschläge?
         pipeline.apply_values(session, doc, doc.kind, values)
         pipeline.record_confirmation(doc, doc.kind, values, before, before_sources)
+        if doc.kind == "reimbursement":
+            reimbursements.record_confirmed(doc)
         # Aussteller/Anbieter auch als Paperless-Korrespondent vormerken (nur im Companion, Übertragen später)
-        party = values.get("issuer") or values.get("provider")
+        party = values.get("issuer") or values.get("provider") or values.get("payer")
         if form.get("set_correspondent") and party:
             # Schreibweise egal (Groß-/Kleinschreibung, Leerzeichen) – vorgemerkt wird der Name wie in Paperless
             simple = lambda n: " ".join(n.lower().split())
@@ -482,7 +494,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             request_worker(app)
             return RedirectResponse(f"/documents/{doc_id}", status_code=303)
         # Sonstiges: nicht mehr auswerten, angelegte Rechnung/Vertrag/Garantie entfernen (Paperless bleibt unverändert)
-        doc.invoice = doc.contract = doc.warranty = None
+        doc.invoice = doc.contract = doc.warranty = doc.reimbursement = None
         msg = f"„{doc.title or doc_id}“ ist jetzt „Sonstiges“ und wird nicht mehr ausgewertet"
         if not was_pending:
             return RedirectResponse(f"/documents/{doc_id}?msg={quote(msg)}", status_code=303)
@@ -1142,6 +1154,49 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
 
     # ------------------------------------------------------------------ Belege (Buchungen ohne Beleg)
 
+    @app.get("/reimbursements", response_class=HTMLResponse)
+    def reimbursements_page(request: Request, msg: str = "", show: str = "open", session: Session = Depends(get_session)):
+        data = reimbursements.overview(session, settings)
+        items = data["items"] if show == "all" else [i for i in data["items"] if i.status != "received" or i.document.review_state == "pending"]
+        return render(request, "reimbursements.html", msg=msg, show=show, shown=items, settings=settings,
+                      STATUS=reimbursements.STATUS, **data)
+
+    @app.post("/reimbursements/run")
+    def reimbursements_run(session: Session = Depends(get_session)):
+        client = make_firefly(settings)
+        if client is None:
+            return RedirectResponse(f"/reimbursements?msg={quote('Firefly III ist nicht eingerichtet')}", status_code=303)
+        try:
+            found = reimbursements.run(session, client, settings, today())
+            msg = (f"{found} {'Geldeingang' if found == 1 else 'Geldeingänge'} gefunden – bitte prüfen" if found
+                   else "Keine neuen passenden Geldeingänge gefunden")
+        except FireflyError as exc:
+            msg = f"Firefly nicht erreichbar: {exc}"
+        finally:
+            client.close()
+        return RedirectResponse(f"/reimbursements?msg={quote(msg)}", status_code=303)
+
+    @app.post("/reimbursements/{doc_id}/{action}")
+    def reimbursement_action(doc_id: int, action: str, back: str = Form(""), session: Session = Depends(get_session)):
+        doc = session.get(Document, doc_id)
+        rec = doc.reimbursement if doc else None
+        if rec is None or action not in ("accept", "reject", "received", "open"):
+            raise HTTPException(404)
+        if action == "accept":
+            reimbursements.accept(rec)
+            msg = "Geldeingang bestätigt – Erstattung erhalten"
+        elif action == "reject":
+            reimbursements.reject(rec)
+            msg = "Zuordnung gelöst – dieser Geldeingang wird nicht wieder vorgeschlagen"
+        elif action == "received":
+            rec.status, rec.received_on = "received", rec.received_on or today()
+            msg = "Als erhalten markiert"
+        else:
+            rec.status, rec.received_on = "open", None
+            msg = "Wieder als „Geld erwartet“ markiert"
+        target = back if back.startswith("/") else "/reimbursements"
+        return RedirectResponse(f"{target}{'&' if '?' in target else '?'}msg={quote(msg)}", status_code=303)
+
     @app.get("/receipts", response_class=HTMLResponse)
     def receipts_page(request: Request, state: str = "open", msg: str = "", session: Session = Depends(get_session)):
         query = select(ReceiptCheck).order_by(ReceiptCheck.tx_date.desc())
@@ -1732,7 +1787,8 @@ def field_badges(doc: Document, from_record: bool) -> dict:
 
 def form_values(doc: Document) -> tuple[dict, bool]:
     """Formularwerte: gespeicherter Datensatz, sonst Vorschläge."""
-    record = {"invoice": doc.invoice, "contract": doc.contract, "warranty": doc.warranty}.get(doc.kind)
+    record = {"invoice": doc.invoice, "contract": doc.contract, "warranty": doc.warranty,
+              "reimbursement": doc.reimbursement}.get(doc.kind)
     if record is None:
         return pipeline.suggestion_values(doc), False
     values = {name: getattr(record, name, None) for name in pipeline.FIELD_TYPES[doc.kind]}

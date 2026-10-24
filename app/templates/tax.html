@@ -25,7 +25,8 @@
   <tbody>
   {% for item in group['items'] %}
     <tr>
-      <td><a href="/documents/{{ item.doc.id }}">{{ item.doc.title }}</a> {{ doclink(item.doc.id) }}<br><small>{{ item.doc.correspondent or '' }}</small></td>
+      <td><a href="/documents/{{ item.doc.id }}">{{ item.doc.title }}</a> {{ doclink(item.doc.id) }}<br><small>{{ item.doc.correspondent or '' }}</small>
+        {% if item.refund %}<br><small class="refund-note" title="Aus der verknüpften Erstattung – für die Steuer zählt nur der Eigenanteil">Erstattung: {{ item.refund }}</small>{% endif %}</td>
       <td class="nowrap">{{ item.doc.created|d }}</td>
       <td class="nowrap">{{ item.amount|eur }}</td>
       <td class="hide-sm">

@@ -193,7 +193,7 @@ def test_doctype_settings_page(client):
         assert doc.document_type == "Vertrag" and doc.extraction_state == "queued"
         assert s.get(Document, 1).extraction_state == "done"
     page = client.get("/settings").text
-    assert '<option value="" selected>nicht auswerten</option>' in page and "Auf Werte aus der .env zurücksetzen" in page
+    assert '<option value="" selected>automatisch (Text entscheidet)</option>' in page and "Auf Werte aus der .env zurücksetzen" in page
     client.post("/settings/doctypes/reset")
     assert settings.doctype_map()["vertrag"] == "contract"
 

@@ -14,16 +14,17 @@ from app import deadlines, fields
 from app.config import Settings
 from app.extraction import llm
 from app.extraction.rules import EXTRACTORS, classify_by_keywords, field
-from app.models import Contract, Document, Invoice, KeyValue, Warranty
+from app.models import Contract, Document, Invoice, KeyValue, Reimbursement, Warranty
 from app.ollama import OllamaClient, OllamaError
 from app.paperless import PaperlessClient, PaperlessError
 
 log = logging.getLogger(__name__)
 
 # Bei Erweiterungen der Erkennung erhöhen – die Systemseite bietet dann an, betroffene Dokumente neu zu analysieren
-ANALYSIS_VERSION = 3  # 3: Gehaltsabrechnungen/Kontoauszüge nicht mehr als Rechnung
+ANALYSIS_VERSION = 4  # 3: Gehaltsabrechnungen/Kontoauszüge nicht als Rechnung, 4: Erstattungen
 
-KINDS = {"invoice": "Rechnung", "contract": "Vertrag", "warranty": "Garantie", "other": "Sonstiges"}
+KINDS = {"invoice": "Rechnung", "contract": "Vertrag", "warranty": "Garantie", "reimbursement": "Erstattung",
+         "other": "Sonstiges"}
 AUTO_THRESHOLD = 0.8
 
 # Feldtypen der Datensätze (für Formulare und Übernahme)
@@ -40,6 +41,7 @@ FIELD_TYPES: dict[str, dict[str, str]] = {
         "cancelled_on": "date", "notes": "str",
     },
     "warranty": {"product": "str", "purchase_date": "date", "months": "int", "warranty_type": "str"},
+    "reimbursement": {"payer": "str", "statement_date": "date", "amount": "float", "status": "str", "received_on": "date"},
 }
 
 
@@ -160,7 +162,7 @@ def kv_set(session: Session, key: str, value: str) -> None:
         session.add(KeyValue(key=key, value=value))
 
 
-DOCTYPE_KINDS = ("invoice", "contract", "warranty")
+DOCTYPE_KINDS = ("invoice", "contract", "warranty", "reimbursement", "other")
 
 
 def doctype_choices(settings: Settings) -> dict:
@@ -175,7 +177,8 @@ def apply_doctype_settings(session: Session, settings: Settings) -> bool:
         return False
     stored = json.loads(raw)
     kinds: dict = stored.get("kinds", {})
-    settings.doctypes_invoice, settings.doctypes_contract, settings.doctypes_warranty = (
+    (settings.doctypes_invoice, settings.doctypes_contract, settings.doctypes_warranty, settings.doctypes_reimbursement,
+     settings.doctypes_other) = (
         ",".join(name for name, kind in kinds.items() if kind == k) for k in DOCTYPE_KINDS
     )
     settings.tax_doctypes = ",".join(stored.get("tax", []))
@@ -425,6 +428,10 @@ def _fill_defaults(kind: str, doc: Document, sugg: dict) -> None:
             sugg.setdefault("provider", field(doc.correspondent, 0.9, "paperless"))
     elif kind == "warranty":
         sugg.setdefault("product", field(doc.title, 0.9, "paperless"))
+    elif kind == "reimbursement":
+        if doc.correspondent:
+            sugg.setdefault("payer", field(doc.correspondent, 0.9, "paperless"))
+        sugg.setdefault("status", field("open", 0.5, "default"))
 
 
 def _inject_paperless_fields(doc: Document, sugg: dict) -> None:
@@ -456,6 +463,8 @@ def can_auto_accept(kind: str, sugg: dict, settings: Settings) -> bool:
         settled = sugg.get("payment_method", {}).get("value") == "debit" or sugg.get("status", {}).get("value") == "paid"
         if not settled:
             required.append("due_date")
+    elif kind == "reimbursement":
+        required = ["amount"]
     else:
         required = ["purchase_date", "months"]
     for name in required:
@@ -586,6 +595,12 @@ def apply_values(session: Session, doc: Document, kind: str, values: dict) -> No
         record.notice_to = values.get("notice_to") or "term_end"
         record.status = values.get("status") or "active"
         doc.contract = record
+    elif kind == "reimbursement":
+        record = doc.reimbursement or Reimbursement(document_id=doc.id)
+        for name in ("payer", "statement_date", "amount", "received_on"):
+            setattr(record, name, values.get(name))
+        record.status = values.get("status") or ("received" if values.get("received_on") else "open")
+        doc.reimbursement = record
     elif kind == "warranty":
         record = doc.warranty or Warranty(document_id=doc.id)
         record.product = values.get("product") or doc.title
@@ -600,6 +615,8 @@ def apply_values(session: Session, doc: Document, kind: str, values: dict) -> No
         doc.invoice = None
     if kind not in ("warranty", "invoice"):
         doc.warranty = None
+    if kind != "reimbursement":
+        doc.reimbursement = None
     session.flush()
 
 

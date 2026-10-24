@@ -23,6 +23,7 @@ class TaxItem:
     doc: Document
     category: str
     amount: float | None
+    refund: str = ""  # zugehörige Erstattung, z.B. „#30 Leistungsabrechnung: 420,00 € von 612,40 € erstattet, Eigenanteil 192,40 €“
 
 
 def category_for(doc: Document, settings: Settings) -> str | None:
@@ -58,14 +59,33 @@ def _candidates(session: Session):
     return session.scalars(select(Document).options(selectinload(Document.invoice)))
 
 
+def refund_notes(session: Session) -> dict[int, str]:
+    """Je Rechnung die Erstattung(en), mit denen sie in Paperless verknüpft ist – Eigenanteil je Abrechnung."""
+    from app import reimbursements
+
+    def eur(value):
+        return "?" if value is None else f"{value:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
+
+    notes: dict[int, list[str]] = {}
+    graph = reimbursements.related_graph(session)
+    for refund_doc in session.scalars(select(Document).where(Document.kind == "reimbursement")):
+        item = reimbursements.summary(session, refund_doc, graph)
+        text = (f"#{item.document.id} {item.document.title}: {eur(item.reimbursed)} von {eur(item.invoice_sum)} erstattet"
+                + (f", Eigenanteil {eur(item.own_share)}" if item.own_share is not None else ""))
+        for inv, _ in item.invoices:
+            notes.setdefault(inv.id, []).append(text)
+    return {doc_id: "; ".join(texts) for doc_id, texts in notes.items()}
+
+
 def collect(session: Session, year: int, settings: Settings) -> list[TaxItem]:
     items = []
+    refunds = refund_notes(session)
     for doc in _candidates(session):
         if effective_year(doc) != year:
             continue
         category = category_for(doc, settings)
         if category:
-            items.append(TaxItem(doc, category, doc.invoice.amount if doc.invoice else None))
+            items.append(TaxItem(doc, category, doc.invoice.amount if doc.invoice else None, refunds.get(doc.id, "")))
     items.sort(key=lambda i: (i.category.lower(), i.doc.created or i.doc.id))
     return items
 
@@ -125,10 +145,12 @@ def build_zip(items: list[TaxItem], year: int, paperless: PaperlessClient, targe
                 f"{item.amount:.2f}".replace(".", ",") if item.amount is not None else "",
                 item.doc.id,
                 path,
+                item.refund,
             ])
         buffer = io.StringIO()
         writer = csv.writer(buffer, delimiter=";")
-        writer.writerow(["Kategorie", "Datum", "Korrespondent", "Titel", "Dokumenttyp", "Betrag (EUR)", "Paperless-ID", "Datei"])
+        writer.writerow(["Kategorie", "Datum", "Korrespondent", "Titel", "Dokumenttyp", "Betrag (EUR)", "Paperless-ID", "Datei",
+                         "Erstattung"])
         writer.writerows(rows)
         # BOM, damit Excel Umlaute korrekt erkennt
         zf.writestr(f"Übersicht_{year}.csv", "﻿" + buffer.getvalue())

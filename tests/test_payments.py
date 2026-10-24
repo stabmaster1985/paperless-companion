@@ -298,11 +298,12 @@ def test_choose_and_clear_without_reload(review_client):
     # Auswahl: nur Betrag und Aussteller (IBAN nicht)
     r = review_client.post("/documents/1/payment", data={**data, "take_sent": "1", "take": ["amount", "issuer"]},
                            headers={"X-Requested-With": "fetch"})
-    assert r.json()["paid_on"] == "2026-10-12" and r.json()["saved"] is False
-    assert r.json()["values"] == {"amount": 79.0, "issuer": "Stadtwerke"}  # Firefly-Name -> dein Korrespondent
+    assert r.json()["saved"] is False
+    # Firefly-Name -> dein Korrespondent; IBAN nicht angehakt
+    assert r.json()["set"] == {"status": "paid", "paid_on": "2026-10-12", "amount": 79.0, "issuer": "Stadtwerke"}
     assert r.json()["label"] == "Buchung vom 12.10.2026 (79,00 €)"
     with session_scope() as s:
         sugg = s.get(Document, 1).suggestions
         assert sugg["amount"]["value"] == 79.0 and sugg["amount"]["source"] == "firefly" and "iban" not in sugg
     r = review_client.post("/documents/1/payment/clear", headers={"X-Requested-With": "fetch"})
-    assert r.json()["paid_on"] == "2026-10-12" and "gelöst" in r.json()["msg"]
+    assert r.json()["previous"] == "2026-10-12" and r.json()["date_field"] == "paid_on" and "gelöst" in r.json()["msg"]

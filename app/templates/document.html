@@ -71,7 +71,7 @@ document.querySelectorAll('#viewer .tab[data-tab]').forEach((tab) => tab.addEven
 </script>
 <div class="review-main">
 {% if doc.kind == 'other' %}
-  <p class="empty">Dieses Dokument wird nicht ausgewertet. Wähle oben eine Art, um es als Rechnung, Vertrag oder Garantie zu erfassen.</p>
+  <p class="empty">Dieses Dokument wird nicht ausgewertet. Wähle oben eine Art, um es als Rechnung, Vertrag, Garantie oder Erstattung zu erfassen.</p>
 {% else %}
 {% set pay = sugg.get('_payment') %}
 {% if pay and doc.review_state == 'pending' %}
@@ -91,30 +91,55 @@ document.querySelectorAll('#viewer .tab[data-tab]').forEach((tab) => tab.addEven
 </div>
 {% endif %}
 {% endif %}
-{% if settings.firefly_url and settings.firefly_token and (doc.kind == 'invoice') %}
-{% set has_pay = pay or (doc.invoice and linked and linked.state != 'prefilled') %}
+{% if doc.kind == 'reimbursement' %}
+{% set rec = doc.reimbursement %}{% set dep = sugg.get('_deposit') %}
+{% if rec and rec.tx_id %}
+<div class="notice {{ 'ok' if rec.tx_state == 'accepted' }}">
+  {{ 'Erhalten laut' if rec.tx_state == 'accepted' else 'Passender' }} Geldeingang in Firefly vom {{ rec.tx_date|d }} · {{ rec.tx_amount|eur }}
+  von {{ rec.tx_counterparty or 'unbekannt' }}
+  <br><small>Buchung prüfen:{{ txlinks(rec.tx_group_id, rec.tx_date) }}</small>
+  {% if rec.tx_state == 'suggested' %}
+  <form method="post" action="/reimbursements/{{ doc.id }}/accept" class="inline"><input type="hidden" name="back" value="/documents/{{ doc.id }}">
+    <button class="small primary">Passt – als erhalten markieren</button></form>
+  {% endif %}
+</div>
+{% elif dep and doc.review_state == 'pending' %}
+<div class="notice ok">Geldeingang vom {{ dep.date[8:10] }}.{{ dep.date[5:7] }}.{{ dep.date[:4] }} · {{ dep.amount|eur }} von {{ dep.counterparty or 'unbekannt' }}
+  ist vorbelegt – bitte prüfen und bestätigen. <small>Buchung prüfen:{{ txlinks(dep.group_id, dep.date) }}</small></div>
+{% endif %}
+{% endif %}
+{% set incoming = doc.kind == 'reimbursement' %}
+{% if settings.firefly_url and settings.firefly_token and doc.kind in ('invoice', 'reimbursement') %}
+{% if incoming %}{% set has_pay = (doc.reimbursement and doc.reimbursement.tx_id) or sugg.get('_deposit') %}
+{% else %}{% set has_pay = pay or (doc.invoice and linked and linked.state != 'prefilled') %}{% endif %}
 {% set ffd = ff_defaults(doc) %}
 <details class="card ff-search" id="firefly">
+  {% if incoming %}
+  <summary>{{ 'Passt der Geldeingang nicht? Anderen in Firefly suchen' if has_pay else 'In Firefly nach dem Geldeingang suchen' }}</summary>
+  {% else %}
   <summary>{{ 'Passt die Buchung nicht? Andere in Firefly suchen' if has_pay else 'In Firefly nach der Zahlung suchen' }}</summary>
+  {% endif %}
   <form method="post" action="/documents/{{ doc.id }}/payment/clear" class="inline ff-clear" {{ 'hidden' if not has_pay }}
     data-confirm="Zuordnung lösen? Diese Buchung wird für das Dokument nicht wieder vorgeschlagen.">
     <button class="small">Passt nicht – Zuordnung lösen</button></form>
   <form class="ff-form" data-url="/documents/{{ doc.id }}/firefly-search">
     <div class="grid">
       <label class="field"><span>Betrag (€)</span><input name="amount" inputmode="decimal" value="{{ '%.2f'|format(ffd.amount) if ffd.amount is not none }}" placeholder="leer = egal"></label>
-      <label class="field"><span>Suchtext (Empfänger, Verwendungszweck)</span><input name="q" value="{{ ffd.q }}"></label>
+      <label class="field"><span>Suchtext ({{ 'Absender' if incoming else 'Empfänger' }}, Verwendungszweck)</span><input name="q" value="{{ ffd.q }}"></label>
       <label class="field"><span>von</span><input type="date" name="start" value="{{ ffd.start.isoformat() if ffd.start }}"></label>
       <label class="field"><span>bis</span><input type="date" name="end" value="{{ ffd.end.isoformat() if ffd.end }}"></label>
     </div>
     <button class="small primary">Suchen</button>
-    <small class="muted">Gefunden wird bei gleichem oder ähnlichem Betrag (±5 %), Suchtext, Rechnungsnummer oder IBAN.
-      {{ 'In der Inbox wird die gewählte Buchung nur vorbelegt – du bestätigst wie gewohnt.' if doc.review_state == 'pending' else 'Die gewählte Buchung setzt die Rechnung auf bezahlt.' }}</small>
+    <small class="muted">{% if incoming %}Gesucht wird unter den Geldeingängen: gleicher oder ähnlicher Betrag (±5 %) oder Suchtext.
+      {% else %}Gefunden wird bei gleichem oder ähnlichem Betrag (±5 %), Suchtext, Rechnungsnummer oder IBAN.{% endif %}
+      {% if doc.review_state == 'pending' %}In der Inbox wird die gewählte Buchung nur vorbelegt – du bestätigst wie gewohnt.
+      {% else %}Die gewählte Buchung {{ 'markiert die Erstattung als erhalten' if incoming else 'setzt die Rechnung auf bezahlt' }}.{% endif %}</small>
   </form>
   <fieldset class="ff-take">
-    <legend>Aus der gewählten Buchung übernehmen {{ help("Status „bezahlt“ und „Bezahlt am“ werden immer gesetzt. Angehakte Felder werden mit den Werten der Buchung überschrieben, egal was drinsteht. Deine Auswahl merkt sich dieser Browser.") }}</legend>
+    <legend>Aus der gewählten Buchung übernehmen {{ help("Status und Datum (bezahlt bzw. erhalten am) werden immer gesetzt. Angehakte Felder werden mit den Werten der Buchung überschrieben, egal was drinsteht. Deine Auswahl merkt sich dieser Browser.") }}</legend>
     <label class="check"><input type="checkbox" name="take" value="amount" checked> Betrag</label>
-    <label class="check"><input type="checkbox" name="take" value="issuer" checked> Empfänger als Aussteller</label>
-    <label class="check"><input type="checkbox" name="take" value="iban" checked> IBAN</label>
+    <label class="check"><input type="checkbox" name="take" value="issuer" checked> {{ 'Absender als Erstatter' if incoming else 'Empfänger als Aussteller' }}</label>
+    {% if not incoming %}<label class="check"><input type="checkbox" name="take" value="iban" checked> IBAN</label>{% endif %}
   </fieldset>
   <div class="ff-results" aria-live="polite"></div>
 </details>
@@ -133,7 +158,8 @@ document.querySelectorAll('.ff-form').forEach((form) => form.addEventListener('s
   const panel = document.getElementById('firefly');
   // Formular erst beim Klick suchen – es steht auf der Seite unterhalb dieses Skripts
   const field = (name) => document.querySelector(`form[action$="/confirm"] [name="${name}"]`);
-  const LABELS = { amount: 'Betrag', issuer: 'Aussteller', iban: 'IBAN' };
+  const LABELS = { status: 'Status', paid_on: '„Bezahlt am“', received_on: '„Erhalten am“', amount: 'Betrag',
+    issuer: 'Aussteller', payer: 'Erstatter', iban: 'IBAN' };
   const flash = (el) => { if (el) { el.classList.add('ff-changed'); setTimeout(() => el.classList.remove('ff-changed'), 2500); } };
   // Meldung über den Feldern (bzw. im Firefly-Bereich, falls es kein Formular gibt) und dorthin springen
   const note = (text, toFields) => {
@@ -173,30 +199,31 @@ document.querySelectorAll('.ff-form').forEach((form) => form.addEventListener('s
     try {
       const data = await send(form);
       if (form.matches('.ff-choose')) {
-        const status = field('status'), paid = field('paid_on');
-        if (status) { status.value = 'paid'; flash(status); }
-        if (paid) { paid.value = data.paid_on; flash(paid); }
-        // angehakte Werte überschreiben, egal was drinsteht
-        for (const [name, value] of Object.entries(data.values || {})) {
+        // Felder laut Server setzen (Status, Datum und angehakte Werte) – egal was drinsteht
+        const names = [];
+        for (const [name, value] of Object.entries(data.set || {})) {
           const input = field(name);
           if (!input) continue;
           input.value = name === 'amount' ? Number(value).toFixed(2) : value;
           flash(input);
-          if (name === 'issuer' && window.partySync) partySync(input);
+          names.push(LABELS[name] || name);
+          if (['issuer', 'payer'].includes(name) && window.partySync) partySync(input);
         }
         panel.querySelector('.ff-clear').hidden = false;
         panel.querySelectorAll('.ff-item.current').forEach((li) => li.classList.remove('current'));
         form.closest('.ff-item').classList.add('current');
         note(data.saved
-          ? `${data.label} übernommen und die Rechnung als bezahlt gespeichert` +
-            (Object.keys(data.values || {}).length ? ` (${Object.keys(data.values).map((n) => LABELS[n]).join(', ')} aus der Buchung).` : '.')
-          : `${data.label} übernommen: ${['Status', '„Bezahlt am“', ...Object.keys(data.values || {}).map((n) => LABELS[n])].join(', ')} eingetragen, deine übrigen Eingaben bleiben. Prüfen und bestätigen.`, true);
+          ? `${data.label} übernommen und gespeichert (${names.join(', ')}).`
+          : `${data.label} übernommen: ${names.join(', ')} eingetragen, deine übrigen Eingaben bleiben. Prüfen und bestätigen.`, true);
       } else {
-        const status = field('status'), paid = field('paid_on');
-        if (paid && data.paid_on && paid.value === data.paid_on) { paid.value = ''; flash(paid); if (status) { status.value = 'open'; flash(status); } }
+        const status = field('status'), day = field(data.date_field);
+        if (day && data.previous && day.value === data.previous) {
+          day.value = ''; flash(day);
+          if (status) { status.value = 'open'; flash(status); }
+        }
         form.hidden = true;
         panel.querySelectorAll('.ff-item.current').forEach((li) => li.classList.remove('current'));
-        note('Zuordnung gelöst – diese Buchung wird nicht wieder vorgeschlagen. Status und „Bezahlt am“ sind zurückgesetzt, deine übrigen Eingaben bleiben.');
+        note('Zuordnung gelöst – diese Buchung wird nicht wieder vorgeschlagen. Status und Datum sind zurückgesetzt, deine übrigen Eingaben bleiben.');
       }
     } catch (err) {
       note('Das hat nicht geklappt: ' + err.message);
@@ -258,6 +285,37 @@ document.querySelectorAll('.ff-form').forEach((form) => form.addEventListener('s
     {% elif deadline.anytime %}Jederzeit kündbar – frühestes Vertragsende bei Kündigung heute: <strong>{{ deadline.term_end|d }}</strong>.
     {% elif deadline.cancel_by %}Kündigung muss eingehen bis <strong>{{ deadline.cancel_by|d }}</strong> (Vertragsende {{ deadline.term_end|d }}).
     {% else %}Vertrag {{ 'endete' if deadline.ended else 'endet automatisch' }} am <strong>{{ deadline.term_end|d }}</strong>.{% endif %}
+  </div>
+  {% endif %}
+
+  {% elif doc.kind == 'reimbursement' %}
+  <div class="grid">
+    {{ party('payer', 'Erstatter (Versicherung, Beihilfe …)', values, src, correspondents, doc_correspondent) }}
+    {{ input('statement_date', 'Datum der Abrechnung', values, src, type='date') }}
+    {{ input('amount', 'Erstattet (€)', values, src, type='number', step='0.01') }}
+    {{ select('status', 'Status', values, src, [('open', 'Geld erwartet'), ('received', 'erhalten')]) }}
+    {{ input('received_on', 'Erhalten am', values, src, type='date') }}
+  </div>
+  {% if refund %}
+  <div class="refund-sum">
+    <h3>Zugehörige Rechnungen {{ help("Kommen aus deinen Paperless-Verknüpfungen („" ~ (settings.field_related or 'gehört zu') ~ "“) – auch über ein dazwischenliegendes Dokument wie das Einreichungsschreiben. Im Companion wird nichts doppelt gepflegt.") }}</h3>
+    {% if refund.invoices %}
+    <ul class="plain refund-list">
+      {% for inv, amount in refund.invoices %}
+      <li><a href="/documents/{{ inv.id }}">{{ inv.title or ('#' ~ inv.id) }}</a> <small class="muted">{{ inv.correspondent or '' }} · {{ inv.created|d }}</small>
+        <span class="refund-amount">{{ amount|eur if amount is not none else '–' }}</span></li>
+      {% endfor %}
+    </ul>
+    <dl class="refund-totals">
+      <dt>Summe Rechnungen</dt><dd>{{ refund.invoice_sum|eur if refund.invoice_sum is not none else '–' }}</dd>
+      <dt>Erstattet</dt><dd>{{ refund.reimbursed|eur if refund.reimbursed is not none else '–' }}</dd>
+      <dt>Eigenanteil</dt><dd><strong>{{ refund.own_share|eur if refund.own_share is not none else '–' }}</strong></dd>
+    </dl>
+    {% if refund.own_share is none %}<p class="hint">Eigenanteil erst, wenn alle Beträge bekannt sind.</p>{% endif %}
+    {% else %}
+    <p class="muted">Noch keine Rechnung verknüpft. Verknüpfe in Paperless die Leistungsabrechnung über das Feld
+      „{{ settings.field_related or 'gehört zu' }}“ mit den Arztrechnungen – dann stehen sie hier mit Summe und Eigenanteil.</p>
+    {% endif %}
   </div>
   {% endif %}
 
