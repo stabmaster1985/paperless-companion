@@ -288,3 +288,12 @@ def test_choose_other_payment_for_confirmed_invoice(db):
         inv = s.get(Document, 1).invoice
         assert inv.status == "open" and inv.paid_on is None
         assert {m.state for m in s.query(PaymentMatch)} == {"rejected"}
+
+
+def test_choose_and_clear_without_reload(review_client):
+    data = {"tx_id": "901", "group_id": "501", "date": "2026-10-12", "amount": "79.0", "counterparty": "Stadtwerke"}
+    r = review_client.post("/documents/1/payment", data=data, headers={"X-Requested-With": "fetch"})
+    assert r.json()["paid_on"] == "2026-10-12" and r.json()["amount"] == 79.0 and r.json()["saved"] is False
+    assert r.json()["label"] == "Buchung vom 12.10.2026 (79,00 €)"
+    r = review_client.post("/documents/1/payment/clear", headers={"X-Requested-With": "fetch"})
+    assert r.json()["paid_on"] == "2026-10-12" and "gelöst" in r.json()["msg"]

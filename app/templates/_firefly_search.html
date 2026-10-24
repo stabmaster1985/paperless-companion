@@ -14,7 +14,7 @@
     <div class="ff-actions">
       {{ txlinks(tx.group_id, tx.date) }}
       {% if not f.current %}
-      <form method="post" action="/documents/{{ doc.id }}/payment" class="inline">
+      <form method="post" action="/documents/{{ doc.id }}/payment" class="inline ff-choose">
         {% for k, v in [('tx_id', tx.journal_id), ('group_id', tx.group_id), ('date', tx.date.isoformat()), ('amount', tx.amount),
                         ('counterparty', tx.counterparty), ('iban', tx.iban or ''), ('description', tx.description)] %}
         <input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}

@@ -408,15 +408,22 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         result = payments.choose(session, doc, tx)
         amount = f"{tx.amount:.2f}".replace(".", ",")
         msg = f"Firefly-Buchung vom {tx.date:%d.%m.%Y} ({amount} €) {result}"
+        if request.headers.get("x-requested-with") == "fetch":
+            # Seite nicht neu laden: ungespeicherte Eingaben im Formular bleiben erhalten, das Skript setzt die Felder
+            return {"msg": msg, "label": f"Buchung vom {tx.date:%d.%m.%Y} ({amount} €)", "saved": doc.review_state != "pending",
+                    "paid_on": tx.date.isoformat(), "amount": tx.amount, "tx_id": tx.journal_id}
         return RedirectResponse(f"/documents/{doc_id}?msg={quote(msg)}", status_code=303)
 
     @app.post("/documents/{doc_id}/payment/clear")
-    def document_payment_clear(doc_id: int, session: Session = Depends(get_session)):
+    def document_payment_clear(request: Request, doc_id: int, session: Session = Depends(get_session)):
         doc = session.get(Document, doc_id)
         if doc is None:
             raise HTTPException(404)
+        previous = (payments.payment_for(session, doc) or {}).get("date")
         msg = ("Zuordnung gelöst – diese Buchung wird nicht wieder vorgeschlagen" if payments.clear(session, doc)
                else "Keine Buchung zugeordnet")
+        if request.headers.get("x-requested-with") == "fetch":
+            return {"msg": msg, "paid_on": previous}
         return RedirectResponse(f"/documents/{doc_id}?msg={quote(msg)}#firefly", status_code=303)
 
     @app.post("/documents/{doc_id}/confirm")

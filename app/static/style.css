@@ -660,3 +660,4 @@ body.docview-open { overflow: hidden; }
 .party-field .party-pick { margin-top: .3rem; font-size: .85rem; color: var(--muted); }
 .party-field .party-sync { margin-top: .3rem; align-items: flex-start; }
 .party-field .party-sync input { width: auto; margin-top: .15rem; }
+.ff-changed { outline: 2px solid var(--accent); outline-offset: 1px; transition: outline-color .3s; }
