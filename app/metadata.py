@@ -714,10 +714,15 @@ def apply_value(session: Session, doc: Document, key: str, value: str, new_tag: 
 
 
 def correspondent_names(session: Session, paperless_names: list[str] | None = None) -> list[str]:
-    """Korrespondenten zur Auswahl: aus Paperless und deinem Archiv, häufig benutzte zuerst."""
-    usage = Counter(c for c in session.scalars(select(Document.correspondent).where(Document.correspondent.is_not(None))))
+    """Korrespondenten zur Auswahl: aus Paperless und deinem Archiv (inkl. Vorgemerktem), alphabetisch."""
+    names = set(paperless_names or [])
+    names.update(session.scalars(select(Document.correspondent).where(Document.correspondent.is_not(None))))
     for accepted in session.scalars(select(Document.meta_accepted).where(Document.meta_accepted.is_not(None))):
         if (entry := (accepted or {}).get("correspondent")) and entry.get("value"):
-            usage[entry["value"]] += 1
-    names = {n for n in [*(paperless_names or []), *usage] if n and not str(n).startswith("#")}
-    return sorted(names, key=lambda n: (-usage[n], n.lower()))
+            names.add(entry["value"])
+    return sorted((n for n in names if n and not str(n).startswith("#")), key=locale_key)
+
+
+def locale_key(text: str) -> str:
+    """Deutsche Sortierung ohne Locale: Groß-/Kleinschreibung egal, Umlaute wie Grundbuchstaben (Ä = A)."""
+    return text.lower().translate(str.maketrans({"ä": "a", "ö": "o", "ü": "u", "ß": "ss"}))

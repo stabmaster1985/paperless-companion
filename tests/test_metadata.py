@@ -447,3 +447,13 @@ def test_unexpected_error_shows_readable_page(settings, mock_api, monkeypatch):
             metadata.refresh_pending(d)
         r = c.get("/paperless-changes/similar?doc=3&key=tag:Haus")
     assert r.status_code == 500 and "ZeroDivisionError" in r.text and "docker logs" in r.text
+
+
+def test_correspondent_names_sorted_alphabetically(db):
+    with db() as s:
+        s.add_all([Document(id=i, title="x", tags=[], correspondent=c)
+                   for i, c in enumerate(["Zahnarzt Dr. Muster", "stadtwerke", "Ärztekammer", "Bank", "Bank"], 1)])
+        s.add(Document(id=9, title="x", tags=[], meta_accepted={"correspondent": {"value": "Mobilfunk AG", "source": "manual"}}))
+    with db() as s:
+        assert metadata.correspondent_names(s, ["Amazon", "#12"]) == [
+            "Amazon", "Ärztekammer", "Bank", "Mobilfunk AG", "stadtwerke", "Zahnarzt Dr. Muster"]
