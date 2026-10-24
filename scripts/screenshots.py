@@ -32,6 +32,7 @@ body{margin:0;background:#525659;font-family:Helvetica,Arial,sans-serif}
 h1{font-size:20px;margin:28px 0 4px}.logo{font-weight:bold;font-size:18px;color:#0b6b3a}.r{text-align:right}
 table{width:100%;border-collapse:collapse;margin-top:18px}td,th{border-bottom:1px solid #ddd;padding:6px 4px;text-align:left}
 .sum td{font-weight:bold;border-top:2px solid #333}.muted{color:#777;font-size:10px}
+@media print{body{background:#fff}.page{margin:0;box-shadow:none}}
 </style><div class=page>
 <div class=logo>Stadtwerke Musterstadt</div><div class=muted>Stadtwerke Musterstadt GmbH · Hauptstraße 1 · 12345 Musterstadt · www.stadtwerke-musterstadt.de</div>
 <p style="margin-top:36px">Max Mustermann<br>Beispielweg 7<br>12345 Musterstadt</p>
@@ -69,6 +70,17 @@ def start_demo(data: Path, port: int) -> None:
     router = next(mock)
     start_demo.mock = mock  # Referenz halten, sonst endet der Nachbau beim Aufräumen des Generators
     router.get("http://firefly.test/api/v1/about").respond(json={"data": {"version": "6.2.0"}})
+    def booking(journal, day, amount, name, text):
+        return {"type": "transactions", "id": str(500 + journal), "attributes": {"transactions": [{
+            "transaction_journal_id": str(900 + journal), "type": "withdrawal", "date": f"{day}T00:00:00+02:00",
+            "amount": str(amount), "description": text, "destination_name": name}]}}
+
+    router.get("http://firefly.test/api/v1/transactions").respond(json={"data": [
+        booking(0, "2026-10-10", "78.00", "Stadtwerke Musterstadt", "Abschlag RE-1"),
+        booking(1, "2026-09-10", "78.00", "Stadtwerke Musterstadt", "Abschlag September"),
+        booking(2, "2026-10-14", "79.50", "Stadtwerke Musterstadt", "Nachzahlung Abschlag"),
+        booking(3, "2026-10-03", "78.00", "Fitnessstudio Muster", "Mitgliedsbeitrag Oktober")],
+        "meta": {"pagination": {"total": 4, "current_page": 1, "total_pages": 1}}})
     app = create_app(settings, start_worker=False)
     server = uvicorn.Server(uvicorn.Config(app, port=port, log_level="warning"))
     threading.Thread(target=server.run, daemon=True).start()
@@ -164,6 +176,8 @@ def shoot(base: str) -> None:
         thumb_page = browser.new_page(viewport={"width": 627, "height": 874})
         thumb_page.set_content(FAKE_DOC)
         thumb = thumb_page.screenshot(clip={"x": 16, "y": 16, "width": 595, "height": 842})
+        thumb_page.emulate_media(media="print")
+        pdf = thumb_page.pdf(format="A4", print_background=True)  # Vorschau als echtes PDF (für den pdf.js-Viewer)
         thumb_page.close()
 
         def page(width: int, height: int):
@@ -171,7 +185,7 @@ def shoot(base: str) -> None:
                                  locale="de-DE")
             # Vorschau kommt sonst aus Paperless – hier die Beispielrechnung
             p.route("**/documents/*/preview*", lambda r: r.fulfill(body=thumb, content_type="image/png")
-                    if "kind=thumb" in r.request.url else r.fulfill(body=FAKE_DOC, content_type="text/html"))
+                    if "kind=thumb" in r.request.url else r.fulfill(body=pdf, content_type="application/pdf"))
             return p
 
         warm = page(1280, 960)
@@ -189,9 +203,14 @@ def shoot(base: str) -> None:
 
         p = page(390, 844)
         p.goto(base + "/review?after=703")
+        p.wait_for_selector(".docview-canvas canvas")
         p.wait_for_timeout(400)
-        p.evaluate("window.scrollTo(0, 560)")
-        p.screenshot(path=OUT / "handy-review.png")
+        # Dokumentanfang und Vorschläge zusammen: hoher Ausschnitt ab der Vorschau (nur fürs Bild: Leiste unten
+        # ausblenden, Vorschau etwas kürzer)
+        p.add_style_tag(content=".bottom-nav{display:none!important}.docview-pages{height:560px!important}")
+        p.wait_for_timeout(600)
+        top = p.evaluate("document.querySelector('.docview').getBoundingClientRect().top + scrollY - 12")
+        p.screenshot(path=OUT / "handy-review.png", full_page=True, clip={"x": 0, "y": top, "width": 390, "height": 1180})
         p.close()
 
         p = page(1280, 960)

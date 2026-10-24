@@ -510,8 +510,8 @@ kbd { border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 
 .doc-card .thumb { width: 44px; height: 58px; object-fit: cover; border-radius: 4px; border: 1px solid var(--border); background: var(--bg); }
 .doc-card-body { display: flex; flex-direction: column; gap: .15rem; min-width: 0; overflow-wrap: anywhere; }
 .doc-card-go { color: var(--accent); font-size: .9rem; white-space: nowrap; }
-.viewer.collapsed .viewer-pane { display: none; }
-.viewer.collapsed { padding-bottom: 0; }
+.viewer.viewer-closed .viewer-pane { display: none; }
+.viewer.viewer-closed { padding-bottom: 0; }
 .viewer-hide { margin-left: .25rem; }
 .kbd-hint { margin-left: auto; }
 @media (max-width: 640px) {
@@ -522,7 +522,6 @@ kbd { border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 
   .field input, .field select, .field textarea { font-size: 16px; padding: .55rem .6rem; }  /* kein Zoom auf iOS, bessere Treffer */
   .viewer iframe { height: 50vh; }
 }
-@media (min-width: 641px) { .viewer-hide { display: none; } }
 /* Dunkelmodus: helle Sonderfarben abdunkeln */
 @media (prefers-color-scheme: dark) {
   .badge.src-firefly { background: #2c2142; color: #c4a8ff; }
@@ -616,3 +615,43 @@ table.list tbody tr.overdue:hover, table.list tbody tr.overdue { background: var
 .sugg-extra > summary .kind-pill { font-size: .72rem; }
 .sugg-extra[open] > summary { background: var(--bg); }
 .sugg-extra .sugg-row { opacity: .92; }
+
+/* In Firefly suchen (Dokumentseite) */
+.ff-search > summary { cursor: pointer; font-weight: 600; }
+.ff-search[open] > summary { margin-bottom: .6rem; }
+.ff-search .ff-form { margin: .6rem 0; }
+.ff-list { list-style: none; margin: .4rem 0 0; padding: 0; }
+.ff-item { display: flex; flex-wrap: wrap; gap: .4rem .8rem; justify-content: space-between; align-items: center;
+  padding: .55rem 0; border-top: 1px solid var(--border); }
+.ff-item.current { background: var(--kind-bg, var(--bg)); }
+.ff-main { min-width: 0; flex: 1 1 18rem; overflow-wrap: anywhere; }
+.ff-actions { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+.sim-reasons .pill.ok { color: var(--ok, #17845f); border-color: currentColor; }
+.sim-reasons .pill.warn { color: #b45309; border-color: currentColor; }
+
+/* Dokumentvorschau (pdf.js): Seiten in Fensterbreite, Zoom, „Groß“ als Vollbild */
+.docview { display: flex; flex-direction: column; gap: .4rem; }
+.docview-bar { display: flex; gap: .35rem; align-items: center; flex-wrap: wrap; }
+.docview-bar button { min-width: 2.4rem; }
+.docview-bar .tab-link { margin-left: auto; font-size: .85rem; }
+.docview-zoom { font-size: .8rem; min-width: 3.2rem; text-align: center; }
+.docview-pages { height: 75vh; overflow: auto; background: #525659; border-radius: 4px; padding: 8px; box-sizing: border-box;
+  -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+.docview-canvas { display: flex; flex-direction: column; align-items: center; gap: 8px; width: max-content; min-width: 100%; }
+.docview-canvas canvas { display: block; background: #fff; box-shadow: 0 1px 4px #0006; }
+.docview-img { display: block; width: calc(100% * var(--img-zoom, 1)); max-width: none; margin: 0 auto; background: #fff; }
+.docview-pages iframe { width: 100%; height: 100%; border: 0; background: #fff; }
+.docview-loading, .docview-more { color: #eee; text-align: center; margin: 1rem 0; }
+.docview.full { position: fixed; inset: 0; z-index: 1000; background: var(--surface); padding: .5rem; height: 100dvh; }
+.docview.full .docview-pages { flex: 1; height: auto; }
+body.docview-open { overflow: hidden; }
+@media (min-width: 1100px) { .viewer .docview-pages { height: calc(100vh - 9.5rem); } }
+@media (max-width: 640px) {
+  .docview-pages { height: 78vh; padding: 4px; }
+  .docview-bar .tab-link { font-size: .8rem; }
+  .viewer-hide { margin-left: auto; }
+}
+@media (max-width: 640px) {
+  .viewer-tabs { gap: .3rem; }
+  .viewer-tabs .tab { font-size: .82rem; padding: .3rem .55rem; }
+}

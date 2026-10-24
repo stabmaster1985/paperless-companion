@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import input, select, doclink, txlinks, help %}
+{% from "macros.html" import input, select, doclink, txlinks, help, docviewer %}
 {% block title %}{{ doc.title }} – Paperless Companion{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
@@ -46,11 +46,10 @@
   <nav class="tabs viewer-tabs" role="tablist">
     <button type="button" class="tab active" data-tab="pdf" role="tab">Dokument</button>
     <button type="button" class="tab" data-tab="text" role="tab">Text{% if text_found %} ({{ text_found|length }} Treffer){% endif %}</button>
-    <a class="tab-link" href="/documents/{{ doc.id }}/preview" target="_blank" rel="noopener">in neuem Tab ↗</a>
-    <button type="button" class="tab viewer-hide" id="viewer-hide" aria-pressed="false" title="Vorschau ein-/ausblenden (am Handy mehr Platz für die Felder)">Vorschau ausblenden</button>
+    <button type="button" class="tab viewer-hide" id="viewer-hide" aria-pressed="false" title="Vorschau zu- oder aufklappen (mehr Platz für die Felder)">▴ Zuklappen</button>
   </nav>
   <div class="viewer-pane" data-pane="pdf">
-    <iframe src="/documents/{{ doc.id }}/preview#view=FitH" title="Vorschau von {{ doc.title }}" loading="lazy"></iframe>
+    {{ docviewer(doc.id) }}
   </div>
   <div class="viewer-pane" data-pane="text" hidden>
     {% if text_error %}<p class="bad">Text konnte nicht geladen werden: {{ text_error }}</p>
@@ -91,6 +90,41 @@ document.querySelectorAll('#viewer .tab[data-tab]').forEach((tab) => tab.addEven
   <br><small>{% if linked.reasons %}Treffer über: {{ linked.reasons }}. {% endif %}Buchung prüfen:{{ txlinks(linked.group_id, linked.date) }}</small>
 </div>
 {% endif %}
+{% endif %}
+{% if settings.firefly_url and settings.firefly_token and (doc.kind == 'invoice') %}
+{% set has_pay = pay or (doc.invoice and linked and linked.state != 'prefilled') %}
+{% set ffd = ff_defaults(doc) %}
+<details class="card ff-search" id="firefly">
+  <summary>{{ 'Passt die Buchung nicht? Andere in Firefly suchen' if has_pay else 'In Firefly nach der Zahlung suchen' }}</summary>
+  {% if has_pay %}
+  <form method="post" action="/documents/{{ doc.id }}/payment/clear" class="inline"
+    onsubmit="return confirm('Zuordnung lösen? Diese Buchung wird für das Dokument nicht wieder vorgeschlagen.')">
+    <button class="small">Passt nicht – Zuordnung lösen</button></form>
+  {% endif %}
+  <form class="ff-form" data-url="/documents/{{ doc.id }}/firefly-search">
+    <div class="grid">
+      <label class="field"><span>Betrag (€)</span><input name="amount" inputmode="decimal" value="{{ '%.2f'|format(ffd.amount) if ffd.amount is not none }}" placeholder="leer = egal"></label>
+      <label class="field"><span>Suchtext (Empfänger, Verwendungszweck)</span><input name="q" value="{{ ffd.q }}"></label>
+      <label class="field"><span>von</span><input type="date" name="start" value="{{ ffd.start.isoformat() if ffd.start }}"></label>
+      <label class="field"><span>bis</span><input type="date" name="end" value="{{ ffd.end.isoformat() if ffd.end }}"></label>
+    </div>
+    <button class="small primary">Suchen</button>
+    <small class="muted">Gefunden wird bei gleichem oder ähnlichem Betrag (±5 %), Suchtext, Rechnungsnummer oder IBAN.
+      {{ 'In der Inbox wird die gewählte Buchung nur vorbelegt – du bestätigst wie gewohnt.' if doc.review_state == 'pending' else 'Die gewählte Buchung setzt die Rechnung auf bezahlt.' }}</small>
+  </form>
+  <div class="ff-results" aria-live="polite"></div>
+</details>
+<script>
+document.querySelectorAll('.ff-form').forEach((form) => form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const out = form.parentElement.querySelector('.ff-results');
+  out.innerHTML = '<p class="muted">Suche in Firefly …</p>';
+  try {
+    const r = await fetch(form.dataset.url + '?' + new URLSearchParams(new FormData(form)));
+    out.innerHTML = await r.text();
+  } catch (err) { out.innerHTML = '<p class="bad">Suche fehlgeschlagen.</p>'; }
+}));
+</script>
 {% endif %}
 <form method="post" action="/documents/{{ doc.id }}/confirm" class="card">
   <p class="legend-sources muted">Herkunft:
@@ -187,10 +221,10 @@ document.addEventListener('keydown', (e) => {
 (() => {
   const viewer = document.getElementById('viewer'), btn = document.getElementById('viewer-hide');
   if (!viewer || !btn) return;
-  const set = (hidden) => { viewer.classList.toggle('collapsed', hidden); btn.textContent = hidden ? 'Vorschau anzeigen' : 'Vorschau ausblenden';
+  const set = (hidden) => { viewer.classList.toggle('viewer-closed', hidden); btn.textContent = hidden ? '▾ Dokument aufklappen' : '▴ Zuklappen';
     btn.setAttribute('aria-pressed', String(hidden)); };
   try { set(localStorage.getItem('viewer-hidden') === '1'); } catch (e) {}
-  btn.addEventListener('click', () => { const hidden = !viewer.classList.contains('collapsed'); set(hidden);
+  btn.addEventListener('click', () => { const hidden = !viewer.classList.contains('viewer-closed'); set(hidden);
     try { localStorage.setItem('viewer-hidden', hidden ? '1' : '0'); } catch (e) {} });
 })();
 </script>

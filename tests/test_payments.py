@@ -238,3 +238,53 @@ def test_inbox_prefill_links(review_client, settings):
     page = review_client.get("/documents/1").text
     assert "In Firefly gefunden:" in page and f"{FIREFLY}/transactions/show/" in page
     assert "http://dash.test/#/buchungen?von=2026-10-10&amp;bis=2026-10-10" in page
+
+
+def test_search_choose_and_clear_in_inbox(review_client, mock_api):
+    page = review_client.get("/documents/1").text
+    assert "Passt die Buchung nicht? Andere in Firefly suchen" in page and "Passt nicht – Zuordnung lösen" in page
+    second = {"type": "transactions", "id": "501", "attributes": {"transactions": [{
+        "transaction_journal_id": "901", "type": "withdrawal", "date": "2026-10-12T00:00:00+02:00", "amount": "79.00",
+        "description": "Strom Oktober", "destination_name": "Stadtwerke Musterstadt"}]}}
+    route = mock_api.get(f"{FIREFLY}/api/v1/transactions").respond(json={**FIREFLY_PAGE, "data": [*FIREFLY_PAGE["data"], second]})
+    html = review_client.get("/documents/1/firefly-search", params={"amount": "79,00", "q": "Stadtwerke",
+                                                                    "start": "2026-10-01", "end": "2026-10-31"}).text
+    assert html.index("79,00") < html.index("78,00")  # exakter Betrag zuerst
+    assert "jetzt zugeordnet" in html and "Diese übernehmen" in html and "Betrag ähnlich" in html
+    assert dict(route.calls.last.request.url.params)["start"] == "2026-10-01"
+    r = review_client.post("/documents/1/payment", data={"tx_id": "901", "group_id": "501", "date": "2026-10-12",
+                                                         "amount": "79.0", "counterparty": "Stadtwerke Musterstadt",
+                                                         "description": "Strom Oktober"})
+    assert "vorbelegt" in r.text
+    with session_scope() as s:
+        sugg = s.get(Document, 1).suggestions
+        assert sugg["_payment"]["tx_id"] == "901" and sugg["paid_on"]["value"] == "2026-10-12"
+    review_client.post("/documents/1/payment/clear")
+    with session_scope() as s:
+        doc = s.get(Document, 1)
+        assert "_payment" not in doc.suggestions and "paid_on" not in doc.suggestions
+        assert doc.suggestions["_payment_rejected"] == ["901"]
+        # wird beim nächsten Abgleich nicht wieder vorgeschlagen
+        c = payments.candidate(doc)
+        assert payments.best_payment(c, [tx("901", date(2026, 10, 12), 78.0, "Stadtwerke")], set()) is None
+
+
+def test_choose_other_payment_for_confirmed_invoice(db):
+    with db() as s:
+        inv = add_invoice(s, 1, 78.0, issuer="Stadtwerke")
+        inv.document.review_state = "confirmed"
+        s.flush()
+        s.add(PaymentMatch(invoice_id=inv.id, tx_id="900", tx_group_id="500", tx_date=date(2026, 9, 10), amount=78.0,
+                           counterparty="Stadtwerke", description="falsch", score=70, reasons="Betrag", state="suggested"))
+    with db() as s:
+        doc = s.get(Document, 1)
+        payments.choose(s, doc, tx("901", date(2026, 9, 12), 78.0, "Stadtwerke", "richtig"))
+    with db() as s:
+        states = {m.tx_id: m.state for m in s.query(PaymentMatch)}
+        assert states == {"900": "rejected", "901": "accepted"}
+        assert s.get(Document, 1).invoice.status == "paid" and s.get(Document, 1).invoice.paid_on == date(2026, 9, 12)
+        assert payments.clear(s, s.get(Document, 1))
+    with db() as s:
+        inv = s.get(Document, 1).invoice
+        assert inv.status == "open" and inv.paid_on is None
+        assert {m.state for m in s.query(PaymentMatch)} == {"rejected"}

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import doclink, help %}
+{% from "macros.html" import doclink, help, docviewer %}
 {% block title %}Vorschläge durchgehen – Paperless Companion{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
@@ -20,8 +20,8 @@
 <div class="review-layout">
   <aside class="viewer card">
     <details class="viewer-toggle" open>
-      <summary>Vorschau <a class="tab-link" href="/documents/{{ doc.id }}/preview" target="_blank" rel="noopener">in neuem Tab ↗</a></summary>
-      <iframe src="/documents/{{ doc.id }}/preview#view=FitH" title="Vorschau von {{ doc.title }}" loading="lazy"></iframe>
+      <summary>Vorschau</summary>
+      {{ docviewer(doc.id) }}
     </details>
   </aside>
   <div class="review-main">

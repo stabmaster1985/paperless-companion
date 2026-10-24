@@ -175,9 +175,10 @@ def _used_transactions(session: Session, exclude_doc: int | None = None) -> set[
 
 
 def best_payment(c: Candidate, transactions: list[Transaction], used: set[str]):
+    rejected = set((c.document.suggestions or {}).get("_payment_rejected") or [])  # von dir als „passt nicht“ markiert
     scored = []
     for tx in transactions:
-        if tx.journal_id in used:
+        if tx.journal_id in used or tx.journal_id in rejected:
             continue
         if (result := score_candidate(c, tx)) is not None:
             scored.append((result[0], tx, result[1]))
@@ -331,7 +332,7 @@ def payment_for(session: Session, doc: Document) -> dict | None:
             m = session.scalar(select(PaymentMatch).where(PaymentMatch.invoice_id == inv.id, PaymentMatch.state == state)
                                .order_by(PaymentMatch.score.desc()).limit(1))
             if m is not None:
-                return {"group_id": m.tx_group_id, "date": m.tx_date.isoformat(), "amount": m.amount,
+                return {"tx_id": m.tx_id, "group_id": m.tx_group_id, "date": m.tx_date.isoformat(), "amount": m.amount,
                         "counterparty": m.counterparty, "description": m.description, "reasons": m.reasons, "state": state}
     p = (doc.suggestions or {}).get("_payment")
     if p:
@@ -356,3 +357,112 @@ def suggestions(session: Session) -> list[PaymentMatch]:
         .where(PaymentMatch.state == "suggested", Invoice.status == "open").order_by(PaymentMatch.score.desc())
         .options(selectinload(PaymentMatch.invoice).selectinload(Invoice.document))
     ))
+
+
+# --------------------------------------------------------------------------- Selbst in Firefly suchen und zuordnen
+
+
+def search_defaults(doc: Document) -> dict:
+    """Vorbelegung der Suche: Betrag, Zeitraum und Empfänger aus dem Dokument."""
+    from app import pipeline
+
+    if doc.invoice is not None and doc.review_state != "pending":
+        inv = doc.invoice
+        amount, number, issuer = inv.amount, inv.invoice_number, inv.issuer
+        base, due, iban = inv.invoice_date, inv.due_date, inv.iban
+    else:
+        v = pipeline.parse_values("invoice", pipeline.suggestion_values(doc))
+        # vorbelegter Betrag aus einer (falschen) Buchung zählt nicht
+        amount_src = ((doc.suggestions or {}).get("amount") or {}).get("source")
+        amount = v.get("amount") if amount_src != "firefly" else None
+        number, issuer, base, due, iban = (v.get("invoice_number"), v.get("issuer"), v.get("invoice_date"),
+                                           v.get("due_date"), v.get("iban"))
+    base = base or doc.created or due
+    start = (base - timedelta(days=14)) if base else None
+    end = (max(due or base, base) + timedelta(days=90)) if base else None
+    return {"amount": amount, "start": start, "end": end, "q": issuer or doc.correspondent or "",
+            "invoice_number": number, "iban": iban}
+
+
+def search(session: Session, doc: Document, client: FireflyClient, today: date, amount: float | None,
+           start: date, end: date, q: str = "", limit: int = 30) -> list[dict]:
+    """Abbuchungen im Zeitraum, die zu Betrag, Suchtext, Rechnungsnr. oder IBAN passen – beste zuerst."""
+    d = search_defaults(doc)
+    words = _words(q)
+    used = _used_transactions(session, exclude_doc=doc.id)
+    current = (payment_for(session, doc) or {}).get("tx_id")
+    found = []
+    for tx in client.withdrawals(start, min(end, today)):
+        points, reasons = 0, []
+        if amount is not None:
+            diff = abs(tx.amount - amount)
+            if diff <= 0.005:
+                points, reasons = points + 50, [*reasons, "Betrag"]
+            elif diff <= max(1.0, amount * 0.05):
+                points, reasons = points + 20, [*reasons, "Betrag ähnlich"]
+        if d["invoice_number"] and len(_compact(d["invoice_number"])) >= 3 and _compact(d["invoice_number"]) in _compact(tx.text):
+            points, reasons = points + 40, [*reasons, "Rechnungsnr."]
+        if d["iban"] and tx.iban and d["iban"].replace(" ", "").upper() == tx.iban:
+            points, reasons = points + 30, [*reasons, "IBAN"]
+        if words and words & _words(f"{tx.counterparty} {tx.description} {tx.text}"):
+            points, reasons = points + 25, [*reasons, "Suchtext"]
+        if not reasons:
+            continue
+        found.append({"tx": tx, "score": points, "reasons": reasons, "used": tx.journal_id in used,
+                      "current": tx.journal_id == current,
+                      "diff": abs(tx.amount - amount) if amount is not None else 0.0})
+    found.sort(key=lambda f: (-f["score"], f["diff"], abs((f["tx"].date - (start + (end - start) / 2)).days)))
+    return found[:limit]
+
+
+def choose(session: Session, doc: Document, tx: Transaction) -> str:
+    """Von dir gewählte Buchung zuordnen. In der Inbox nur vorbelegen, sonst als bezahlt übernehmen."""
+    reasons = ["von dir gewählt"]
+    if doc.review_state == "pending":
+        apply_payment(doc, AUTO_MIN, tx, reasons)
+        sugg = dict(doc.suggestions)
+        sugg["_payment_rejected"] = [t for t in sugg.get("_payment_rejected") or [] if t != tx.journal_id] or None
+        doc.suggestions = {k: v for k, v in sugg.items() if v is not None}
+        return "vorbelegt – bitte prüfen und bestätigen"
+    inv = doc.invoice
+    if inv is None:
+        return "keine Rechnung"
+    chosen = None
+    for m in session.scalars(select(PaymentMatch).where(PaymentMatch.invoice_id == inv.id)):
+        if m.tx_id == tx.journal_id:
+            chosen = m
+        elif m.state in ("accepted", "suggested"):
+            m.state = "rejected"
+    if chosen is None:
+        chosen = PaymentMatch(invoice_id=inv.id, tx_id=tx.journal_id, tx_group_id=tx.group_id, tx_date=tx.date,
+                              amount=tx.amount, counterparty=tx.counterparty[:200], description=tx.description[:300],
+                              score=AUTO_MIN, reasons=", ".join(reasons))
+        session.add(chosen)
+    chosen.state = "accepted"
+    inv.status, inv.paid_on = "paid", tx.date
+    doc.writeback_pending = True
+    _mark_firefly(doc, AUTO_MIN, confirmed=True)
+    return "als bezahlt übernommen"
+
+
+def clear(session: Session, doc: Document) -> bool:
+    """„Passt nicht“: zugeordnete bzw. vorgeschlagene Buchung lösen; sie wird nicht wieder vorgeschlagen."""
+    changed = False
+    sugg = dict(doc.suggestions or {})
+    if p := sugg.pop("_payment", None):
+        sugg["_payment_rejected"] = [*(sugg.get("_payment_rejected") or []), p["tx_id"]]
+        for name in ("status", "paid_on", "amount"):
+            if isinstance(sugg.get(name), dict) and sugg[name].get("source") == "firefly":
+                sugg.pop(name)
+        doc.suggestions = sugg
+        changed = True
+    inv = doc.invoice
+    if inv is not None and doc.review_state != "pending":
+        for m in session.scalars(select(PaymentMatch).where(PaymentMatch.invoice_id == inv.id,
+                                                            PaymentMatch.state.in_(("accepted", "suggested")))):
+            if m.state == "accepted" and inv.paid_on == m.tx_date:
+                inv.status, inv.paid_on = "open", None
+                doc.writeback_pending = True
+            m.state = "rejected"
+            changed = True
+    return changed

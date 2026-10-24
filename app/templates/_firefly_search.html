@@ -1,0 +1,30 @@
+{% from "macros.html" import txlinks %}
+{# Ergebnisliste „In Firefly suchen“ – wird per JS in die Dokumentseite geladen #}
+{% if found %}
+<p class="muted"><small>{{ found|length }} Buchungen vom {{ start|d }} bis {{ end|d }}, beste Treffer zuerst.</small></p>
+<ul class="ff-list">
+  {% for f in found %}{% set tx = f.tx %}
+  <li class="ff-item {{ 'current' if f.current }}">
+    <div class="ff-main">
+      <strong>{{ tx.date|d }} · {{ tx.amount|eur }}</strong> an {{ tx.counterparty or 'unbekannt' }}
+      {% if tx.description %}<small class="muted">– „{{ tx.description }}“</small>{% endif %}
+      <span class="sim-reasons">{% for r in f.reasons %}<span class="pill">{{ r }}</span>{% endfor %}
+        {%- if f.current %}<span class="pill ok">jetzt zugeordnet</span>{% elif f.used %}<span class="pill warn" title="Diese Buchung ist schon einem anderen Dokument zugeordnet">anderem Dokument zugeordnet</span>{% endif %}</span>
+    </div>
+    <div class="ff-actions">
+      {{ txlinks(tx.group_id, tx.date) }}
+      {% if not f.current %}
+      <form method="post" action="/documents/{{ doc.id }}/payment" class="inline">
+        {% for k, v in [('tx_id', tx.journal_id), ('group_id', tx.group_id), ('date', tx.date.isoformat()), ('amount', tx.amount),
+                        ('counterparty', tx.counterparty), ('iban', tx.iban or ''), ('description', tx.description)] %}
+        <input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+        <button class="small primary">Diese übernehmen</button>
+      </form>
+      {% endif %}
+    </div>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p class="muted">Keine passende Abbuchung vom {{ start|d }} bis {{ end|d }} gefunden. Zeitraum erweitern oder Betrag/Suchtext ändern.</p>
+{% endif %}

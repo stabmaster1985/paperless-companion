@@ -49,3 +49,17 @@
 {% macro help(text) -%}
   <span class="help" tabindex="0" role="note" aria-label="{{ text }}" data-tip="{{ text }}">?</span>
 {%- endmacro %}
+
+{# Dokumentvorschau mit pdf.js: Seiten in Fensterbreite, +/−, „Groß“ (Vollbild). lazy = erst bei docview.load() laden #}
+{% macro docviewer(doc_id, lazy=False) -%}
+<div class="docview" data-src="/documents/{{ doc_id }}/preview" {{ 'data-lazy' if lazy }}>
+  <div class="docview-bar">
+    <button type="button" class="small" data-act="zoom-out" title="Verkleinern" aria-label="Verkleinern">−</button>
+    <span class="docview-zoom muted" data-act="zoom-label">100 %</span>
+    <button type="button" class="small" data-act="zoom-in" title="Vergrößern" aria-label="Vergrößern">+</button>
+    <button type="button" class="small" data-act="full" title="Dokument bildschirmfüllend anzeigen (Esc schließt)">⤢ Groß</button>
+    <a class="tab-link" href="/documents/{{ doc_id }}/preview" target="_blank" rel="noopener">in neuem Tab ↗</a>
+  </div>
+  <div class="docview-pages"><p class="muted docview-loading">Vorschau wird geladen …</p></div>
+</div>
+{%- endmacro %}

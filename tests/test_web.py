@@ -128,7 +128,7 @@ def test_activity_log(client, mock_api):
 
 def test_review_page_with_preview_and_highlights(client):
     page = client.get("/documents/1").text
-    assert 'src="/documents/1/preview#view=FitH"' in page
+    assert 'class="docview" data-src="/documents/1/preview"' in page and "⤢ Groß" in page
     assert '<mark class="hl hl-amount" title="Betrag">78,00</mark>' in page and "Text (" in page
     response = client.get("/documents/1/preview")
     assert response.status_code == 200 and response.headers["content-type"] == "application/pdf"

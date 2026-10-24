@@ -90,6 +90,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             return payments.payment_for(s, s.get(Document, doc.id))
 
     templates.env.globals["payment_of"] = payment_of
+    templates.env.globals["ff_defaults"] = payments.search_defaults
     templates.env.globals.update(HINTS=metadata.HINTS, META_SOURCES=metadata.SOURCES, KINDS=pipeline.KINDS, link_base=settings.paperless_link_base, auth=bool(settings.app_password))
 
     @app.middleware("http")
@@ -355,6 +356,64 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         return Response(content, media_type=content_type, headers={
             "Content-Disposition": "inline", "Cache-Control": "private, max-age=600",
         })
+
+    @app.get("/documents/{doc_id}/firefly-search", response_class=HTMLResponse)
+    def document_firefly_search(request: Request, doc_id: int, amount: str = "", start: str = "", end: str = "", q: str = "",
+                                session: Session = Depends(get_session)):
+        """Buchungen in Firefly zu diesem Dokument suchen (Ergebnisliste wird in die Seite geladen)."""
+        doc = session.get(Document, doc_id)
+        if doc is None:
+            raise HTTPException(404)
+        d = payments.search_defaults(doc)
+        try:
+            value = float(amount.replace(",", ".")) if amount.strip() else None
+            start_d = date.fromisoformat(start) if start else d["start"]
+            end_d = date.fromisoformat(end) if end else d["end"]
+        except ValueError:
+            return HTMLResponse('<p class="bad">Betrag oder Datum ungültig.</p>')
+        if start_d is None or end_d is None:
+            return HTMLResponse('<p class="bad">Bitte einen Zeitraum angeben.</p>')
+        if value is None and not q.strip():
+            return HTMLResponse('<p class="bad">Bitte Betrag oder Suchtext angeben.</p>')
+        client = make_firefly(settings)
+        if client is None:
+            return HTMLResponse('<p class="bad">Firefly ist nicht eingerichtet (Einstellungen → Firefly).</p>')
+        try:
+            found = payments.search(session, doc, client, today(), value, start_d, end_d, q)
+        except FireflyError as exc:
+            return HTMLResponse(f'<p class="bad">Firefly nicht erreichbar: {exc}</p>')
+        finally:
+            client.close()
+        return render(request, "_firefly_search.html", doc=doc, found=found, start=start_d, end=end_d)
+
+    @app.post("/documents/{doc_id}/payment")
+    async def document_payment_choose(request: Request, doc_id: int, session: Session = Depends(get_session)):
+        doc = session.get(Document, doc_id)
+        if doc is None:
+            raise HTTPException(404)
+        form = await request.form()
+        from app.firefly import Transaction
+
+        try:
+            tx = Transaction(journal_id=str(form["tx_id"]), group_id=str(form["group_id"]),
+                             date=date.fromisoformat(str(form["date"])), amount=float(str(form["amount"])),
+                             counterparty=str(form.get("counterparty") or ""), iban=str(form.get("iban") or "") or None,
+                             description=str(form.get("description") or ""), text="")
+        except (KeyError, ValueError):
+            raise HTTPException(400, "Buchung unvollständig")
+        result = payments.choose(session, doc, tx)
+        amount = f"{tx.amount:.2f}".replace(".", ",")
+        msg = f"Firefly-Buchung vom {tx.date:%d.%m.%Y} ({amount} €) {result}"
+        return RedirectResponse(f"/documents/{doc_id}?msg={quote(msg)}", status_code=303)
+
+    @app.post("/documents/{doc_id}/payment/clear")
+    def document_payment_clear(doc_id: int, session: Session = Depends(get_session)):
+        doc = session.get(Document, doc_id)
+        if doc is None:
+            raise HTTPException(404)
+        msg = ("Zuordnung gelöst – diese Buchung wird nicht wieder vorgeschlagen" if payments.clear(session, doc)
+               else "Keine Buchung zugeordnet")
+        return RedirectResponse(f"/documents/{doc_id}?msg={quote(msg)}#firefly", status_code=303)
 
     @app.post("/documents/{doc_id}/confirm")
     async def document_confirm(request: Request, doc_id: int, session: Session = Depends(get_session)):

@@ -35,8 +35,10 @@ Alle Daten in den Bildern sind frei erfunden. Neu erzeugen mit `python scripts/s
 
 ![Übersicht](docs/screenshots/dashboard.png)
 
-**Dokument prüfen** – das Dokument links, die erkannten Felder rechts. Kleine Marken zeigen die Herkunft
-jedes Werts (Regel, AI, Paperless, Firefly, gelernt). Passt eine Firefly-Buchung, steht sie oben.
+**Dokument prüfen** – das Dokument links (in Fensterbreite, vergrößerbar, mit „Groß“ bildschirmfüllend,
+am Handy zuklappbar), die erkannten Felder rechts. Kleine Marken zeigen die Herkunft jedes Werts (Regel, AI,
+Paperless, Firefly, gelernt). Passt eine Firefly-Buchung, steht sie oben; passt sie nicht, lässt sich die
+Zuordnung lösen oder direkt in Firefly nach der richtigen Buchung suchen.
 
 ![Dokument prüfen](docs/screenshots/dokument.png)
 

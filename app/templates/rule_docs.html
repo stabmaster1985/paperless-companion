@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import doclink %}
+{% from "macros.html" import doclink, docviewer %}
 {% block title %}Dokumente zur Regel – Paperless Companion{% endblock %}
 {% block content %}
 <div class="head">
@@ -38,7 +38,7 @@
       </span>
     </summary>
     <div class="rule-doc-preview">
-      <iframe data-src="/documents/{{ e.id }}/preview#view=FitH" title="Vorschau {{ e.title }}"></iframe>
+      {{ docviewer(e.id, lazy=True) }}
       <div class="actions">
         <a class="button small" href="/documents/{{ e.id }}">Im Companion öffnen</a>
         {{ doclink(e.id) }} <small class="muted">in Paperless</small>
@@ -50,8 +50,8 @@
 <script>
 // Vorschau erst beim Aufklappen laden (spart Datenvolumen am Handy)
 document.querySelectorAll('details.rule-doc').forEach((d) => d.addEventListener('toggle', () => {
-  const f = d.querySelector('iframe[data-src]');
-  if (d.open && f && !f.src) f.src = f.dataset.src;
+  const v = d.querySelector('.docview');
+  if (d.open && v && window.docview) window.docview.load(v);
 }));
 </script>
 {% else %}
