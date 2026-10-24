@@ -29,7 +29,7 @@ Alles läuft lokal. Die Dokumente verlassen dein Netzwerk nicht.
 
 ## Screenshots
 
-Alle Daten in den Bildern sind frei erfunden.
+Alle Daten in den Bildern sind frei erfunden. Neu erzeugen mit `python scripts/screenshots.py` (siehe Skript).
 
 **Übersicht** – was zu tun ist: zu prüfende Dokumente, offene Vorschläge, Fristen, offene Beträge.
 
