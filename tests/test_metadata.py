@@ -265,9 +265,15 @@ def test_filter_open_suggestions(client):
     assert "Titel (1)" in page and "Tags (2)" in page and "Haus (1)" in page
     page = client.get("/paperless-changes?what=tag").text
     open_part = page.split("Offene Vorschläge")[1]
-    assert "Haus" in open_part and "Elektronik" in open_part and "Rechnung Waschmaschine" not in open_part
+    shown, extra = open_part.split('class="sugg-extra"')
+    assert "Haus" in shown and "Elektronik" in shown and "Rechnung Waschmaschine" not in shown
+    assert "Rechnung Waschmaschine" in extra  # Titel desselben Dokuments aufklappbar daneben
     page = client.get("/paperless-changes?what=title").text.split("Offene Vorschläge")[1]
-    assert "Rechnung Waschmaschine September 2026" in page and "Elektronik" not in page.split("Wie gut")[0]
+    assert "Rechnung Waschmaschine September 2026" in page
+    # übrige Vorschläge desselben Dokuments stehen aufklappbar daneben, „alle auswählen“ lässt sie aus
+    main, extra = page.split("Wie gut")[0].split('class="sugg-extra"')
+    assert "Elektronik" not in main and "weitere außerhalb des Filters" in extra
+    assert 'value="3:tag:Elektronik" class="extra"' in extra and "input[name=item]:not(.extra)" in main
     # Alle angezeigten (nur Tag „Haus“) vormerken; Filter bleibt erhalten
     response = client.post("/paperless-changes/meta", data={"action": "accept_all", "what": "tag", "value": "Haus"},
                            follow_redirects=False)

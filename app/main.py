@@ -1269,11 +1269,12 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                     counts["source"][i["source"]] += 1
                     if i["key"].startswith("tag:") and (not source or i["source"] == source):
                         counts["tags"][i["new"]] += 1
-            items = metadata.filter_items(items, what, source, value)
-            if accepted := [i for i in items if i["state"] == "accepted"]:
-                meta_accepted.append((doc, accepted))
-            if opened := [i for i in items if i["state"] == "open"]:
-                meta_open.append((doc, opened))
+            shown = metadata.filter_items(items, what, source, value)
+            for state, target in (("accepted", meta_accepted), ("open", meta_open)):
+                if hit := [i for i in shown if i["state"] == state]:
+                    # übrige Vorschläge desselben Dokuments, die der Filter ausblendet (aufklappbar daneben)
+                    keys = {i["key"] for i in hit}
+                    target.append((doc, hit, [i for i in items if i["state"] == state and i["key"] not in keys]))
         meta_filter = flt
         def newest(values):
             values = [v for v in values if v]
@@ -1284,7 +1285,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             "fields": newest(pipeline.change_info(d, role)["at"] for d, changes in rows for role, _, _ in changes),
             "analysis": session.scalar(select(func.max(Document.analyzed_at))),
             # jüngster offene Metadaten-Vorschlag und überhaupt zuletzt erstellter Vorschlag
-            "meta_open": newest(i["at"] for _, items in meta_open for i in items),
+            "meta_open": newest(i["at"] for _, items, _ in meta_open for i in items),
             "meta_any": newest((s or {}).get("at") for s in session.scalars(
                 select(Document.meta_suggestion).where(Document.meta_suggestion.is_not(None)))),
         }
@@ -1293,7 +1294,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             SOURCE_LABELS=pipeline.SOURCE_LABELS, names=names, msg=msg, create_fields=settings.writeback_create_fields,
             meta_open=meta_open, meta_accepted=meta_accepted, meta_filter=meta_filter, meta_counts=counts,
             mq=lambda **changes: meta_query({**flt, **changes}), NONE=metadata.NONE,
-            meta_open_count=sum(len(i) for _, i in meta_open), meta_query=meta_query(meta_filter), meta_accepted_count=sum(len(i) for _, i in meta_accepted), quality=metadata.quality(session), META_ITEMS=metadata.ITEMS,
+            meta_open_count=sum(len(i) for _, i, _ in meta_open), meta_query=meta_query(meta_filter), meta_accepted_count=sum(len(i) for _, i, _ in meta_accepted), quality=metadata.quality(session), META_ITEMS=metadata.ITEMS,
             META_SOURCES=metadata.SOURCES, hints=metadata.archive_hints(session), HINTS=metadata.HINTS,
             meta_queued=session.scalar(select(func.count()).select_from(Document).where(Document.meta_state.in_(("queued", "running")))),
             meta_status=pipeline.meta_overview(session), unresolved_tags=pipeline.unresolved_tag_count(session), queue_paused=pipeline.kv_get(session, "queue_paused") == "1",

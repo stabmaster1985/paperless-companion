@@ -67,16 +67,33 @@
 {% endif %}
 </section>
 
+{% macro sugg_item(form_id, doc, it, gid, extra=False) %}
+  {% set kind = 'tag' if it.key.startswith('tag:') else it.key %}
+  <div class="sugg-item">
+  <label class="sugg-row k-{{ kind }}">
+    <input type="checkbox" name="item" value="{{ doc.id }}:{{ it.key }}" class="{{ 'extra' if extra }}" onchange="countSel('{{ form_id }}'); similar(this)">
+    <span class="kind-pill">{{ it.label }}</span>
+    <span class="change">{% if it.current %}<span class="old">{{ it.current }}</span> → {% elif kind == 'tag' %}+ {% endif %}<strong>{{ it.new }}</strong>
+      {% if it.new_tag %}<small class="soon" title="{{ TIPS.neuer_tag }}">neuer Tag</small>{% endif %}</span>
+    <span class="when"><span class="badge src-{{ it.source }}" title="{{ TIPS.get(it.source, '') }}">{{ META_SOURCES.get(it.source, it.source) }}</span>
+      {% if it.state == 'accepted' %}vorgemerkt <span class="nowrap">{{ it.at|ts }}</span>{% if it.suggested_at %} · <span class="muted">Vorschlag <span class="nowrap">{{ it.suggested_at|ts }}</span></span>{% endif %}
+      {%- else %}Vorschlag <span class="nowrap">{{ it.at|ts }}</span>{% endif %}</span>
+  </label>
+  <div class="similar-box" hidden data-src="/paperless-changes/similar?doc={{ doc.id }}&amp;key={{ it.key|urlencode }}&amp;gid={{ gid }}"></div>
+  </div>
+{% endmacro %}
+
 {% macro meta_table(form_id, rows) %}
+  {% set fid = form_id|replace('-', '') %}
   <div class="sel-bar">
-    <label class="check"><input type="checkbox" onclick="document.querySelectorAll('#{{ form_id }} input[name=item]').forEach(c => c.checked = this.checked); countSel('{{ form_id }}')"> alle auswählen</label>
+    <label class="check"><input type="checkbox" onclick="document.querySelectorAll('#{{ form_id }} input[name=item]:not(.extra)').forEach(c => c.checked = this.checked); countSel('{{ form_id }}')"> alle auswählen</label>
     <small class="muted">{{ rows|length }} Dokumente</small>
   </div>
-  {% for doc, items in rows %}
+  {% for doc, items, extras in rows %}
   <article class="docblock">
     <header>
-      <input type="checkbox" class="doc-all" aria-label="Alle Vorschläge dieses Dokuments auswählen"
-        onclick="this.closest('.docblock').querySelectorAll('input[name=item]').forEach(c => c.checked = this.checked); countSel('{{ form_id }}')">
+      <input type="checkbox" class="doc-all" aria-label="Alle angezeigten Vorschläge dieses Dokuments auswählen"
+        onclick="this.closest('.docblock').querySelectorAll('input[name=item]:not(.extra)').forEach(c => c.checked = this.checked); countSel('{{ form_id }}')">
       <div class="doc-head">
         <a href="/documents/{{ doc.id }}#metadata">{{ doc.title or ('#' ~ doc.id) }}</a> {{ doclink(doc.id) }}
         <div class="doc-meta">{{ doc.correspondent or 'ohne Korrespondent' }}{% if doc.document_type %} · {{ doc.document_type }}{% endif %}</div>
@@ -84,22 +101,19 @@
       </div>
     </header>
     <div class="sugg-list">
-      {% for it in items %}
-      {% set kind = 'tag' if it.key.startswith('tag:') else it.key %}
-      <div class="sugg-item">
-      <label class="sugg-row k-{{ kind }}">
-        <input type="checkbox" name="item" value="{{ doc.id }}:{{ it.key }}" onchange="countSel('{{ form_id }}'); similar(this)">
-        <span class="kind-pill">{{ it.label }}</span>
-        <span class="change">{% if it.current %}<span class="old">{{ it.current }}</span> → {% elif kind == 'tag' %}+ {% endif %}<strong>{{ it.new }}</strong>
-          {% if it.new_tag %}<small class="soon" title="{{ TIPS.neuer_tag }}">neuer Tag</small>{% endif %}</span>
-        <span class="when"><span class="badge src-{{ it.source }}" title="{{ TIPS.get(it.source, '') }}">{{ META_SOURCES.get(it.source, it.source) }}</span>
-          {% if it.state == 'accepted' %}vorgemerkt <span class="nowrap">{{ it.at|ts }}</span>{% if it.suggested_at %} · <span class="muted">Vorschlag <span class="nowrap">{{ it.suggested_at|ts }}</span></span>{% endif %}
-          {%- else %}Vorschlag <span class="nowrap">{{ it.at|ts }}</span>{% endif %}</span>
-      </label>
-      <div class="similar-box" hidden data-src="/paperless-changes/similar?doc={{ doc.id }}&amp;key={{ it.key|urlencode }}&amp;gid={{ form_id|replace('-', '') }}{{ doc.id }}x{{ loop.index }}"></div>
-      </div>
-      {% endfor %}
+      {% for it in items %}{{ sugg_item(form_id, doc, it, fid ~ doc.id ~ 'x' ~ loop.index) }}{% endfor %}
     </div>
+    {% if extras %}
+    <details class="sugg-extra">
+      <summary title="Vorschläge dieses Dokuments, die der Filter ausblendet – hier gleich mit entscheiden">
+        + {{ extras|length }} weitere{{ ' vorgemerkte' if extras[0].state == 'accepted' else '' }} außerhalb des Filters:
+        {% for it in extras %}<span class="kind-pill k-{{ 'tag' if it.key.startswith('tag:') else it.key }}">{{ it.label }}{% if it.key != 'title' %} {{ it.new }}{% endif %}</span>{% endfor %}
+      </summary>
+      <div class="sugg-list">
+        {% for it in extras %}{{ sugg_item(form_id, doc, it, fid ~ doc.id ~ 'e' ~ loop.index, extra=True) }}{% endfor %}
+      </div>
+    </details>
+    {% endif %}
   </article>
   {% endfor %}
 {% endmacro %}
@@ -108,7 +122,8 @@
 <p class="kind-legend"><span class="kind-pill k-title">Titel</span> <span class="kind-pill k-tag">Tag</span>
   <span class="kind-pill k-correspondent">Korrespondent</span> <span class="kind-pill k-document_type">Dokumenttyp</span>
   <small class="muted">· Tipp: ganze Zeile antippen zum Auswählen, Kästchen am Dokument wählt alle seine Vorschläge.
-    Beim Anhaken eines einzelnen Vorschlags erscheinen darunter ähnliche Dokumente (gleicher Absender, Betreff, IBAN/Kundennr.), die du gleich mit vormerken kannst.</small></p>
+    Beim Anhaken eines einzelnen Vorschlags erscheinen darunter ähnliche Dokumente (gleicher Absender, Betreff, IBAN/Kundennr.), die du gleich mit vormerken kannst.
+    Ist ein Filter gesetzt, zeigt „+ weitere außerhalb des Filters“ die übrigen Vorschläge desselben Dokuments.</small></p>
 <p class="muted">Vorschläge aus dem lokalen Modell (<span class="badge src-llm">AI</span>) und aus deinen übrigen Dokumenten desselben Absenders
   (<span class="badge src-history">Verlauf</span>). <strong>Vormerken</strong> speichert deine Entscheidung nur im Companion – die App lernt sofort daraus
   (vorgemerkte Tags und Titel fließen in die nächsten Vorschläge ein). Nach Paperless geht erst etwas, wenn du <strong>Übertragen</strong> wählst.
