@@ -27,6 +27,49 @@ Paperless archiviert Dokumente und macht sie durchsuchbar. Der Companion leitet 
 
 Alles läuft lokal. Die Dokumente verlassen dein Netzwerk nicht.
 
+## Screenshots
+
+Alle Daten in den Bildern sind frei erfunden.
+
+**Übersicht** – was zu tun ist: zu prüfende Dokumente, offene Vorschläge, Fristen, offene Beträge.
+
+![Übersicht](docs/screenshots/dashboard.png)
+
+**Dokument prüfen** – das Dokument links, die erkannten Felder rechts. Kleine Marken zeigen die Herkunft
+jedes Werts (Regel, AI, Paperless, Firefly, gelernt). Passt eine Firefly-Buchung, steht sie oben.
+
+![Dokument prüfen](docs/screenshots/dokument.png)
+
+**Für Paperless** – Vorschläge für Titel, Tags, Korrespondent und Dokumenttyp werden erst im Companion
+vorgemerkt und später gesammelt übertragen. Ähnliche Dokumente lassen sich gleich mit vormerken.
+
+![Für Paperless](docs/screenshots/fuer-paperless.png)
+
+**Regeln** – aus deinen Daten abgeleitete Vorschläge für Paperless-Regeln, z.B. den Korrespondenten an
+IBAN, Domain oder Kundennummer erkennen. Mit Auswirkung auf dein Archiv, bevor du etwas anlegst.
+
+![Regeln](docs/screenshots/regeln.png)
+
+**Dokumente zur Regel** – welche Dokumente eine Regel trifft, mit Vorschau zum Nachprüfen.
+
+![Dokumente zur Regel](docs/screenshots/regel-dokumente.png)
+
+**Rechnungen** – offen, bezahlt, überfällig; passende Abbuchungen aus Firefly III werden vorgeschlagen.
+
+![Rechnungen](docs/screenshots/rechnungen.png)
+
+**Inbox** – Dokumente, bei denen die Erkennung nicht sicher genug war.
+
+![Inbox](docs/screenshots/inbox.png)
+
+**Am Handy** – Übersicht und Vorschläge einzeln durchgehen.
+
+<p>
+  <img src="docs/screenshots/handy-dashboard.png" alt="Übersicht am Handy" width="280">
+  &nbsp;
+  <img src="docs/screenshots/handy-review.png" alt="Vorschläge am Handy durchgehen" width="280">
+</p>
+
 ## Wie die Erkennung funktioniert
 
 ```
