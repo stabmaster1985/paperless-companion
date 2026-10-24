@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import input, select, doclink, txlinks, help, docviewer %}
+{% from "macros.html" import input, select, doclink, txlinks, help, docviewer, party %}
 {% block title %}{{ doc.title }} – Paperless Companion{% endblock %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
@@ -138,7 +138,7 @@ document.querySelectorAll('.ff-form').forEach((form) => form.addEventListener('s
 
   {% if doc.kind == 'invoice' %}
   <div class="grid">
-    {{ input('issuer', 'Aussteller', values, src) }}
+    {{ party('issuer', 'Aussteller', values, src, correspondents, doc_correspondent) }}
     {{ input('invoice_number', 'Rechnungsnummer', values, src) }}
     {{ input('amount', 'Betrag (€)', values, src, type='number', step='0.01') }}
     {{ input('invoice_date', 'Rechnungsdatum', values, src, type='date') }}
@@ -157,7 +157,7 @@ document.querySelectorAll('.ff-form').forEach((form) => form.addEventListener('s
   {% elif doc.kind == 'contract' %}
   <div class="grid">
     {{ input('name', 'Bezeichnung', values, src) }}
-    {{ input('provider', 'Anbieter', values, src) }}
+    {{ party('provider', 'Anbieter', values, src, correspondents, doc_correspondent) }}
     {{ input('contract_number', 'Vertragsnummer', values, src) }}
     {{ input('monthly_cost', 'Kosten pro Monat (€)', values, src, type='number', step='0.01') }}
     {{ input('start_date', 'Vertragsbeginn', values, src, type='date') }}

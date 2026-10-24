@@ -319,12 +319,14 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             deadline = deadlines.compute(deadlines.terms_from_contract(doc.contract), today())
         open_cases = session.scalars(select(Case).where(Case.status == "open").order_by(Case.title)).all()
         text_html, text_found, text_error = None, set(), None
+        paperless_names: list[str] = []
         paperless = make_paperless(settings, timeout=15)
         try:
             content = paperless.get_document(doc_id).get("content") or ""
             text_html, text_found = highlight.highlight(content, doc.suggestions or {})
+            paperless_names = list(paperless.names("correspondents").values())
         except PaperlessError as exc:
-            text_error = str(exc)
+            text_error = text_error or str(exc)
         finally:
             paperless.close()
         return render(
@@ -336,6 +338,8 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             pf=doc.paperless_fields or {}, settings=settings, msg=msg,
             text_html=text_html, text_found=text_found, text_error=text_error, HL_LABELS=highlight.LABELS,
             meta_items=metadata.pending(doc, everything=True), META_SOURCES=metadata.SOURCES,
+            correspondents=metadata.correspondent_names(session, paperless_names),
+            doc_correspondent=metadata.effective(doc.tags, doc.correspondent, doc.document_type, doc.meta_accepted)[1],
             pending_left=session.scalar(
                 select(func.count()).select_from(Document).where(Document.review_state == "pending", Document.id != doc_id)
             ),
@@ -429,6 +433,10 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             learning.record_accuracy(session, doc, doc.kind, values)  # stimmten die Vorschläge?
         pipeline.apply_values(session, doc, doc.kind, values)
         pipeline.record_confirmation(doc, doc.kind, values, before, before_sources)
+        # Aussteller/Anbieter auch als Paperless-Korrespondent vormerken (nur im Companion, Übertragen später)
+        party = values.get("issuer") or values.get("provider")
+        if form.get("set_correspondent") and party and party in metadata.correspondent_names(session):
+            metadata.apply_value(session, doc, "correspondent", party, source="manual")
         doc.review_state = "confirmed"
         doc.auto_confirmed = False
         payments.record_confirmed_payment(session, doc)

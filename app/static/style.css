@@ -655,3 +655,8 @@ body.docview-open { overflow: hidden; }
   .viewer-tabs { gap: .3rem; }
   .viewer-tabs .tab { font-size: .82rem; padding: .3rem .55rem; }
 }
+
+/* Aussteller/Anbieter mit Korrespondenten-Auswahl */
+.party-field .party-pick { margin-top: .3rem; font-size: .85rem; color: var(--muted); }
+.party-field .party-sync { margin-top: .3rem; align-items: flex-start; }
+.party-field .party-sync input { width: auto; margin-top: .15rem; }

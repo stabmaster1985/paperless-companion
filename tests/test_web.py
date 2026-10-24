@@ -284,3 +284,27 @@ def test_static_assets_are_versioned(client):
     page = client.get("/help").text
     assert re.search(r'/static/style\.css\?v=[0-9a-f]{10}"', page) and re.search(r'/static/collapse\.js\?v=[0-9a-f]{10}"', page)
     assert client.get("/static/style.css").headers["cache-control"] == "no-cache"
+
+
+def test_issuer_from_correspondents_and_mark_for_paperless(client):
+    from app.db import session_scope as scope
+    from app.models import Document
+
+    page = client.get("/documents/1").text
+    assert 'list="corr-list"' in page and "aus Korrespondenten wählen" in page
+    assert '<option value="Mobilfunk AG">Mobilfunk AG</option>' in page and 'data-current="Stadtwerke"' in page
+    # Ohne Haken: nur der Aussteller ändert sich
+    client.post("/documents/1/confirm", data={"issuer": "Mobilfunk AG", "amount": "78.00"})
+    with scope() as s:
+        doc = s.get(Document, 1)
+        assert doc.invoice.issuer == "Mobilfunk AG" and not (doc.meta_accepted or {}).get("correspondent")
+    # Mit Haken: zusätzlich als Korrespondent vorgemerkt, Paperless unverändert
+    client.post("/documents/1/confirm", data={"issuer": "Mobilfunk AG", "amount": "78.00", "set_correspondent": "1"})
+    with scope() as s:
+        doc = s.get(Document, 1)
+        assert doc.meta_accepted["correspondent"]["value"] == "Mobilfunk AG"
+        assert doc.meta_accepted["correspondent"]["source"] == "manual" and doc.correspondent == "Stadtwerke"
+    # Unbekannte Namen werden nicht als Korrespondent vorgemerkt
+    client.post("/documents/2/confirm", data={"provider": "Gibt es nicht GmbH", "set_correspondent": "1"})
+    with scope() as s:
+        assert not (s.get(Document, 2).meta_accepted or {}).get("correspondent")

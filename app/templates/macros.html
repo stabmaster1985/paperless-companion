@@ -63,3 +63,35 @@
   <div class="docview-pages"><p class="muted docview-loading">Vorschau wird geladen …</p></div>
 </div>
 {%- endmacro %}
+
+{# Aussteller/Anbieter: frei tippen oder aus den Korrespondenten wählen; weicht er vom Paperless-Korrespondenten ab,
+   lässt er sich dort gleich vormerken (nur im Companion) #}
+{% macro party(name, label, values, src, names, current) -%}
+  {%- set v = values.get(name) or '' -%}
+  <div class="field party-field">
+    <span>{{ label }} {{ badge(name, src) }}</span>
+    <input type="text" name="{{ name }}" id="f-{{ name }}" value="{{ v }}" list="corr-list" autocomplete="off"
+      data-current="{{ current or '' }}" oninput="partySync(this)">
+    {% if names %}
+    <select class="party-pick" aria-label="{{ label }} aus den Korrespondenten wählen"
+      onchange="if (this.value) { const i = document.getElementById('f-{{ name }}'); i.value = this.value; partySync(i); } this.selectedIndex = 0;">
+      <option value="">aus Korrespondenten wählen …</option>
+      {% for n in names %}<option value="{{ n }}">{{ n }}</option>{% endfor %}
+    </select>
+    {% endif %}
+    <label class="check party-sync" hidden>
+      <input type="checkbox" name="set_correspondent" value="1" checked>
+      <small>auch als Korrespondent in Paperless vormerken <span class="muted">(jetzt: {{ current or 'keiner' }})</span></small>
+    </label>
+  </div>
+  <datalist id="corr-list">{% for n in names %}<option value="{{ n }}">{% endfor %}</datalist>
+  <script>
+  window.partyNames = new Set({{ names|tojson }});
+  function partySync(input) {
+    const box = input.closest('.party-field').querySelector('.party-sync');
+    const v = input.value.trim();
+    box.hidden = !(v && window.partyNames.has(v) && v !== input.dataset.current);
+  }
+  document.querySelectorAll('.party-field input[list]').forEach(partySync);
+  </script>
+{%- endmacro %}

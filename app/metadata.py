@@ -563,6 +563,7 @@ HINTS = {
 # --------------------------------------------------------------------------- Ähnliche Dokumente gemeinsam vormerken
 
 SOURCES["similar"] = "Ähnlich"
+SOURCES["manual"] = "Von dir"
 MIN_SIMILAR_SCORE = 3
 _MONTHS = {"januar", "februar", "märz", "maerz", "april", "mai", "juni", "juli", "august", "september", "oktober",
            "november", "dezember", "jan", "feb", "mär", "apr", "jun", "jul", "aug", "sep", "sept", "okt", "nov", "dez"}
@@ -682,7 +683,8 @@ def similar(session: Session, doc: Document, key: str, value: str, limit: int = 
 _TERM_LABELS = {"iban": "IBAN", "vat": "USt-IdNr.", "domain": "Domain", "number": "Kundennr."}
 
 
-def apply_value(session: Session, doc: Document, key: str, value: str, new_tag: bool = False) -> bool:
+def apply_value(session: Session, doc: Document, key: str, value: str, new_tag: bool = False,
+                source: str = "similar") -> bool:
     """Einen Wert für ein (ähnliches) Dokument vormerken – nur im Companion.
 
     Liegt dort schon derselbe offene Vorschlag, wird dieser vorgemerkt (seine Quelle bleibt), sonst ein
@@ -697,9 +699,9 @@ def apply_value(session: Session, doc: Document, key: str, value: str, new_tag: 
                  if i["key"] == key and i["state"] == "open" and i["new"] == value), None)
     if same:
         return accept(session, doc, [key]) > 0
-    item = {"key": key, "new": value, "source": "similar"}
+    item = {"key": key, "new": value, "source": source}
     accepted = dict(doc.meta_accepted or {})
-    accepted[key] = {"value": value, "source": "similar", "new_tag": new_tag,
+    accepted[key] = {"value": value, "source": source, "new_tag": new_tag,
                      "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
     _record(session, doc, item, "accepted", value)
     doc.meta_accepted = accepted
@@ -707,3 +709,13 @@ def apply_value(session: Session, doc: Document, key: str, value: str, new_tag: 
     doc.meta_dismissed = dismissed or None
     refresh_pending(doc)
     return True
+
+
+def correspondent_names(session: Session, paperless_names: list[str] | None = None) -> list[str]:
+    """Korrespondenten zur Auswahl: aus Paperless und deinem Archiv, häufig benutzte zuerst."""
+    usage = Counter(c for c in session.scalars(select(Document.correspondent).where(Document.correspondent.is_not(None))))
+    for accepted in session.scalars(select(Document.meta_accepted).where(Document.meta_accepted.is_not(None))):
+        if (entry := (accepted or {}).get("correspondent")) and entry.get("value"):
+            usage[entry["value"]] += 1
+    names = {n for n in [*(paperless_names or []), *usage] if n and not str(n).startswith("#")}
+    return sorted(names, key=lambda n: (-usage[n], n.lower()))
