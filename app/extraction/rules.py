@@ -376,9 +376,18 @@ def extract_warranty(text: str, created: date | None = None) -> dict:
 # --------------------------------------------------------------------------- Klassifizierung
 
 
+# Abrechnungen, die keine Rechnungen sind (enthalten „…abrechnung“, sind aber nicht zu bezahlen)
+NOT_INVOICE = re.compile(
+    r"(lohn|gehalts?|entgelt|bezüge|bezuege|verdienst|besoldung|vergütungs?|renten?)\s*-?\s*(und\s+\w+\s*)?abrechnung"
+    r"|abrechnung\s+der\s+(brutto|bezüge|bezuege)|brutto\s*/\s*netto|lohnsteuerbescheinigung"
+    r"|kontoauszug|kreditkartenabrechnung|depotauszug")
+
+
 def classify_by_keywords(title: str, text: str) -> str:
     title = title.lower()
     head = text[:2500].lower()
+    if NOT_INVOICE.search(title) or NOT_INVOICE.search(head[:600]):
+        return "other"
     if re.search(r"rechnung|invoice", title):
         return "invoice"
     if re.search(r"vertrag|police|versicherungsschein", title):

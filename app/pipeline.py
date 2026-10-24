@@ -21,7 +21,7 @@ from app.paperless import PaperlessClient, PaperlessError
 log = logging.getLogger(__name__)
 
 # Bei Erweiterungen der Erkennung erhöhen – die Systemseite bietet dann an, betroffene Dokumente neu zu analysieren
-ANALYSIS_VERSION = 2
+ANALYSIS_VERSION = 3  # 3: Gehaltsabrechnungen/Kontoauszüge nicht mehr als Rechnung
 
 KINDS = {"invoice": "Rechnung", "contract": "Vertrag", "warranty": "Garantie", "other": "Sonstiges"}
 AUTO_THRESHOLD = 0.8

@@ -93,3 +93,9 @@ def test_classification():
     assert classify_by_keywords("Scan", CONTRACT) == "contract"
     assert classify_by_keywords("Scan", INVOICE) == "invoice"
     assert classify_by_keywords("Arztbrief", "Diagnose ...") == "other"
+    # Abrechnungen, die keine Rechnungen sind
+    assert classify_by_keywords("Gehaltsabrechnung März 2026", "") == "other"
+    assert classify_by_keywords("Lohn- und Gehaltsabrechnung 07/2026", "") == "other"
+    assert classify_by_keywords("Scan_0001", "Muster GmbH\nAbrechnung der Brutto/Netto-Bezüge für März 2026") == "other"
+    assert classify_by_keywords("Kreditkartenabrechnung", "Rechnungsdatum 01.03.2026") == "other"
+    assert classify_by_keywords("Nebenkostenabrechnung 2025", "") == "invoice"  # bleibt (Nachzahlung)

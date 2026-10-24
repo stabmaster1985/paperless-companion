@@ -197,6 +197,8 @@ def shoot(base: str) -> None:
                 ("rechnungen", "/invoices", 1280, 760), ("handy-dashboard", "/", 390, 844)]:
             p = page(width, height)
             p.goto(base + path)
+            if p.locator(".docview:not([data-lazy])").count():
+                p.wait_for_selector(".docview-canvas canvas")  # PDF fertig gezeichnet
             p.wait_for_timeout(400)
             p.screenshot(path=OUT / f"{name}.png")
             p.close()

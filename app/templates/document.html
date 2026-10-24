@@ -10,7 +10,7 @@
       {% if doc.tags %}<span class="tags">{% for t in doc.tags %}<span class="tag">{{ t }}</span>{% endfor %}</span>{% endif %}</p>
   </div>
   <form method="post" action="/documents/{{ doc.id }}/kind" class="kind-switch">
-    <label>Art
+    <label>Art {{ help("Falsch erkannt (z.B. Gehaltsabrechnung als Rechnung)? Hier die richtige Art wählen. „Sonstiges“ nimmt das Dokument aus der Prüfung; deine Wahl bleibt auch bei neuen Analysen erhalten. Paperless wird nicht geändert.") }}
       <select name="kind" onchange="this.form.submit()">
         {% for key, text in KINDS.items() %}<option value="{{ key }}" {{ 'selected' if doc.kind == key }}>{{ text }}</option>{% endfor %}
       </select>
