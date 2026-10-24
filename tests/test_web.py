@@ -304,6 +304,13 @@ def test_issuer_from_correspondents_and_mark_for_paperless(client):
         doc = s.get(Document, 1)
         assert doc.meta_accepted["correspondent"]["value"] == "Mobilfunk AG"
         assert doc.meta_accepted["correspondent"]["source"] == "manual" and doc.correspondent == "Stadtwerke"
+    # Schreibweise egal: vorgemerkt wird der Name wie in Paperless
+    client.post("/documents/1/confirm", data={"issuer": "  stadtWERKE ", "amount": "78.00", "set_correspondent": "1"})
+    with scope() as s:
+        assert not s.get(Document, 1).meta_accepted  # wieder der Paperless-Korrespondent: Vormerkung zurückgenommen
+    client.post("/documents/1/confirm", data={"issuer": "mobilfunk  ag", "amount": "78.00", "set_correspondent": "1"})
+    with scope() as s:
+        assert s.get(Document, 1).meta_accepted["correspondent"]["value"] == "Mobilfunk AG"
     # Unbekannte Namen werden nicht als Korrespondent vorgemerkt
     client.post("/documents/2/confirm", data={"provider": "Gibt es nicht GmbH", "set_correspondent": "1"})
     with scope() as s:

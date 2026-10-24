@@ -690,6 +690,8 @@ def apply_value(session: Session, doc: Document, key: str, value: str, new_tag: 
     Liegt dort schon derselbe offene Vorschlag, wird dieser vorgemerkt (seine Quelle bleibt), sonst ein
     eigener Eintrag mit Quelle „Ähnlich“.
     """
+    if key in (doc.meta_accepted or {}) and _in_paperless(doc, key, value):
+        return withdraw(session, doc, [key]) > 0  # zurück auf den Wert in Paperless: Vormerkung zurücknehmen
     current = _effective_value(doc, key)
     if current and current.strip().lower() == value.strip().lower():
         return False

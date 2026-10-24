@@ -435,8 +435,12 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         pipeline.record_confirmation(doc, doc.kind, values, before, before_sources)
         # Aussteller/Anbieter auch als Paperless-Korrespondent vormerken (nur im Companion, Übertragen später)
         party = values.get("issuer") or values.get("provider")
-        if form.get("set_correspondent") and party and party in metadata.correspondent_names(session):
-            metadata.apply_value(session, doc, "correspondent", party, source="manual")
+        if form.get("set_correspondent") and party:
+            # Schreibweise egal (Groß-/Kleinschreibung, Leerzeichen) – vorgemerkt wird der Name wie in Paperless
+            simple = lambda n: " ".join(n.lower().split())
+            name = next((n for n in metadata.correspondent_names(session) if simple(n) == simple(party)), None)
+            if name:
+                metadata.apply_value(session, doc, "correspondent", name, source="manual")
         doc.review_state = "confirmed"
         doc.auto_confirmed = False
         payments.record_confirmed_payment(session, doc)
