@@ -462,11 +462,23 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         doc = session.get(Document, doc_id)
         if doc is None or kind not in pipeline.KINDS:
             raise HTTPException(404)
+        was_pending = doc.review_state == "pending"
         doc.kind, doc.kind_source = kind, "manual"
-        doc.extraction_state = "queued"
         doc.review_state = "none"
-        request_worker(app)
-        return RedirectResponse(f"/documents/{doc_id}", status_code=303)
+        if kind != "other":
+            doc.extraction_state = "queued"  # mit der neuen Art neu auswerten
+            request_worker(app)
+            return RedirectResponse(f"/documents/{doc_id}", status_code=303)
+        # Sonstiges: nicht mehr auswerten, angelegte Rechnung/Vertrag/Garantie entfernen (Paperless bleibt unverändert)
+        doc.invoice = doc.contract = doc.warranty = None
+        msg = f"„{doc.title or doc_id}“ ist jetzt „Sonstiges“ und wird nicht mehr ausgewertet"
+        if not was_pending:
+            return RedirectResponse(f"/documents/{doc_id}?msg={quote(msg)}", status_code=303)
+        following = session.scalars(select(Document).where(Document.review_state == "pending", Document.id != doc_id)
+                                    .order_by(Document.created.desc()).limit(1)).first()
+        if following is None:
+            return RedirectResponse(f"/inbox?msg={quote(msg + ' – die Inbox ist leer')}", status_code=303)
+        return RedirectResponse(f"/documents/{following.id}?msg={quote(msg + ' – nächstes Dokument')}", status_code=303)
 
     @app.post("/documents/{doc_id}/reanalyze")
     def document_reanalyze(doc_id: int, session: Session = Depends(get_session)):

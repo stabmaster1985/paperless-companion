@@ -1,5 +1,8 @@
+from datetime import date
+
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from app.db import session_scope
 from app.main import create_app
@@ -315,3 +318,26 @@ def test_issuer_from_correspondents_and_mark_for_paperless(client):
     client.post("/documents/2/confirm", data={"provider": "Gibt es nicht GmbH", "set_correspondent": "1"})
     with scope() as s:
         assert not (s.get(Document, 2).meta_accepted or {}).get("correspondent")
+
+
+def test_kind_other_moves_on_and_removes_records(client):
+    with session_scope() as s:
+        for doc_id in (2, 3):
+            s.get(Document, doc_id).review_state = "pending"
+        s.get(Document, 2).created = date(2020, 1, 1)
+    # aus der Prüfung: weiter zum nächsten zu prüfenden Dokument statt dasselbe erneut zu zeigen
+    r = client.post("/documents/3/kind", data={"kind": "other"}, follow_redirects=False)
+    assert r.headers["location"].startswith("/documents/2?msg=") and "n%C3%A4chstes%20Dokument" in r.headers["location"]
+    r = client.post("/documents/2/kind", data={"kind": "other"}, follow_redirects=False)
+    assert r.headers["location"].startswith("/inbox?msg=")
+    with session_scope() as s:
+        doc = s.get(Document, 3)
+        assert doc.kind == "other" and doc.review_state == "none" and doc.extraction_state != "queued"
+        assert not s.scalars(select(Document).where(Document.review_state == "pending")).all()
+    # bestätigte Rechnung: Datensatz verschwindet aus den Rechnungen, die Seite bleibt
+    assert "Stadtwerke" in client.get("/invoices?status=all").text
+    r = client.post("/documents/1/kind", data={"kind": "other"}, follow_redirects=False)
+    assert r.headers["location"].startswith("/documents/1?msg=")
+    with session_scope() as s:
+        assert s.get(Document, 1).invoice is None
+    assert "Stadtwerke" not in client.get("/invoices?status=all").text
