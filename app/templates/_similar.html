@@ -1,5 +1,11 @@
 {# Ähnliche Dokumente zu einem Vorschlag – wird per JS unter die angehakte Zeile geladen #}
 {% set kind = 'tag' if it.key.startswith('tag:') else it.key %}
+{# Titel je Dokument änderbar; Tippen hakt das Dokument an #}
+{% macro title_input(doc_id, value) -%}
+  <input class="sim-title" name="sim_{{ gid }}_title_{{ doc_id }}" value="{{ value }}" aria-label="Titel für #{{ doc_id }}"
+    oninput="this.closest('li').querySelector('input[type=checkbox]').checked = true"
+    onkeydown="if (event.key === 'Enter') { event.preventDefault(); this.closest('.similar-inner').querySelector('button[name=sim_group]').click(); }">
+{%- endmacro %}
 {% if items %}
 <div class="similar-inner k-{{ kind }}">
   <p class="similar-head"><strong>{{ items|length }}{{ '+' if more }} {{ 'ähnliches Dokument' if items|length == 1 and not more else 'ähnliche Dokumente' }}</strong> ohne {{ it.label }} „{{ it.new }}“
@@ -11,18 +17,19 @@
   <ul class="similar-list">
     {% if it.state == 'open' %}
     <li><label class="sim-row"><input type="checkbox" name="sim_{{ gid }}" value="{{ src.id }}" checked>
-      <span><strong>dieses Dokument</strong> <small class="muted">#{{ src.id }}</small></span></label></li>
+      <span><strong>dieses Dokument</strong> <small class="muted">#{{ src.id }}</small></span></label>
+      {% if kind == 'title' %}{{ title_input(src.id, it.new) }}{% endif %}</li>
     {% endif %}
     {% for f in items %}
     <li><label class="sim-row"><input type="checkbox" name="sim_{{ gid }}" value="{{ f.doc.id }}" {{ 'checked' if f.preselect }}>
       <span class="sim-main">
         <a href="/documents/{{ f.doc.id }}" target="_blank" rel="noopener">{{ f.doc.title or ('#' ~ f.doc.id) }}</a>
         <small class="muted">{{ f.doc.correspondent or 'ohne Korrespondent' }}{% if f.doc.document_type %} · {{ f.doc.document_type }}{% endif %} · #{{ f.doc.id }}</small>
-        {% if f.own_title %}<small class="sim-current">bekommt seinen eigenen Vorschlag: <strong>{{ f.own_title }}</strong></small>
-        {% elif kind == 'title' %}<small class="sim-current">bekommt: <strong>{{ it.new }}</strong></small>
+        {% if kind == 'title' %}<small class="sim-current">{{ 'eigener Vorschlag' if f.own_title else 'Titel wie oben' }} – unten änderbar</small>
         {% elif f.current %}<small class="sim-current">jetzt: {{ f.current }}</small>{% endif %}
         <span class="sim-reasons">{% for r in f.reasons %}<span class="pill">{{ r }}</span>{% endfor %}</span>
-      </span></label></li>
+      </span></label>
+      {% if kind == 'title' %}{{ title_input(f.doc.id, f.own_title or it.new) }}{% endif %}</li>
     {% endfor %}
   </ul>
   {% if more %}<p class="muted"><small>… und {{ more }} weitere mit geringerer Ähnlichkeit.</small></p>{% endif %}

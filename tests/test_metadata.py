@@ -495,3 +495,25 @@ def test_correct_suggestions(client):
     # neuer Tag wird beim Übertragen angelegt
     with session_scope() as s:
         assert metadata.correct(s, s.get(Document, 901), "tag:Haus", "Neu erfunden") == "Tag „Neu erfunden“ statt „Haus“ vorgemerkt (neuer Tag)"
+
+
+def test_similar_titles_editable_per_document(client):
+    with session_scope() as s:
+        for i, sugg in ((821, "Lohnabrechnung März 2026"), (822, "Lohnabrechnung April 2026"), (823, None)):
+            d = Document(id=i, title=f"Scan_{i}" if i != 823 else "Scan_0823", tags=[])
+            d.meta_suggestion = {"tags": [], "at": "2026-10-01T00:00:00+00:00",
+                                 **({"title": {"value": sugg, "source": "llm"}} if sugg else {})}
+            metadata.refresh_pending(d)
+            s.add(d)
+    frag = client.get("/paperless-changes/similar?doc=821&key=title&gid=t1").text
+    assert 'name="sim_t1_title_822" value="Lohnabrechnung April 2026"' in frag and 'name="sim_t1_title_821"' in frag
+    client.post("/paperless-changes/similar", data={
+        "sim_group": "t1", "sim_t1_src": "821", "sim_t1_key": "title", "sim_t1": ["821", "822", "823"],
+        "sim_t1_title_821": "Lohnabrechnung März 2026", "sim_t1_title_822": "Gehaltsabrechnung April 2026 (korrigiert)",
+        "sim_t1_title_823": "Lohnabrechnung Mai 2026"})
+    with session_scope() as s:
+        titles = {i: s.get(Document, i).meta_accepted["title"] for i in (821, 822, 823)}
+        assert titles[821]["value"] == "Lohnabrechnung März 2026"
+        assert titles[822]["value"] == "Gehaltsabrechnung April 2026 (korrigiert)"
+        assert titles[823]["value"] == "Lohnabrechnung Mai 2026" and titles[823]["source"] == "manual"
+        assert s.query(MetaDecision).filter_by(document_id=822, key="title").one().decision == "edited"

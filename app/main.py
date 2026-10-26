@@ -1522,7 +1522,15 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             doc = session.get(Document, doc_id)
             if doc is None:
                 continue
-            if doc_id == source.id:
+            title = " ".join(str(form.get(f"sim_{gid}_title_{doc_id}") or "").split()) if key == "title" else ""
+            if title:
+                # Titel je Dokument (ggf. von dir geändert)
+                if any(i["key"] == "title" for i in metadata.pending(doc, everything=True)):
+                    count += metadata.accept(session, doc, ["title"], title)
+                else:
+                    count += metadata.apply_value(session, doc, "title", title,
+                                                  source="similar" if title == item["new"] else "manual")
+            elif doc_id == source.id:
                 count += metadata.accept(session, doc, [key]) if item["state"] == "open" else 0
             else:
                 count += metadata.apply_value(session, doc, key, item["new"], item["new_tag"])
@@ -1566,7 +1574,8 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             msg = "Nichts ausgewählt"
         else:
             item, count = result
-            msg = f"{item['label']} „{item['new']}“ für {count} Dokumente vorgemerkt – noch nichts in Paperless geändert"
+            what = "Titel" if item["key"] == "title" else f"{item['label']} „{item['new']}“"  # Titel: je Dokument eigener
+            msg = f"{what} für {count} {'Dokument' if count == 1 else 'Dokumente'} vorgemerkt – noch nichts in Paperless geändert"
         query = meta_query(flt)
         return RedirectResponse(f"/paperless-changes?{query}{'&' if query else ''}msg={quote(msg)}#metadata", status_code=303)
 
