@@ -517,3 +517,12 @@ def test_similar_titles_editable_per_document(client):
         assert titles[822]["value"] == "Gehaltsabrechnung April 2026 (korrigiert)"
         assert titles[823]["value"] == "Lohnabrechnung Mai 2026" and titles[823]["source"] == "manual"
         assert s.query(MetaDecision).filter_by(document_id=822, key="title").one().decision == "edited"
+
+
+def test_many_fields_and_disabled_editors(client):
+    page = client.get("/paperless-changes").text
+    # Korrekturfelder werden erst beim Öffnen mitgeschickt
+    assert 'name="edit_' in page and all(" disabled" in line for line in page.splitlines() if 'name="edit_' in line)
+    data = {"action": "accept", "item": [f"{i}:tag:X" for i in range(1500)] + ["3:tag:Haus"]}
+    r = client.post("/paperless-changes/meta", data=data, follow_redirects=False)
+    assert r.status_code == 303 and "1%20Vorschl" in r.headers["location"]

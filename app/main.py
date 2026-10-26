@@ -34,6 +34,8 @@ from app.worker import Worker, make_firefly, make_ollama, make_paperless
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logging.getLogger("httpx").setLevel(logging.WARNING)
 log = logging.getLogger(__name__)
+# Viele Haken auf einmal (Für Paperless, Dokumentliste) – Standard des Frameworks wären 1000 Felder
+MAX_FORM_FIELDS = 50_000
 BASE = Path(__file__).parent
 PUBLIC_PATHS = ("/login", "/static", "/favicon.ico", "/api/webhook", "/calendar.ics", "/health")
 
@@ -223,7 +225,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     @app.post("/documents/analyze")
     async def documents_analyze(request: Request, session: Session = Depends(get_session)):
         """Ausgewählte oder alle gefilterten Dokumente zur Analyse einreihen."""
-        form = await request.form()
+        form = await request.form(max_fields=MAX_FORM_FIELDS)
         flt = selection.Filter.from_mapping(form)
         if form.get("scope") == "selected":
             ids = [int(i) for i in form.getlist("doc") if str(i).isdigit()]
@@ -248,7 +250,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     @app.post("/documents/suggest-meta")
     async def documents_suggest_meta(request: Request, session: Session = Depends(get_session)):
         """Für ausgewählte oder alle gefilterten Dokumente Metadaten-Vorschläge anfordern."""
-        form = await request.form()
+        form = await request.form(max_fields=MAX_FORM_FIELDS)
         flt = selection.Filter.from_mapping(form)
         if form.get("scope") == "selected":
             ids = [int(i) for i in form.getlist("doc") if str(i).isdigit()]
@@ -270,7 +272,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         doc = session.get(Document, doc_id)
         if doc is None:
             raise HTTPException(404)
-        form = await request.form()
+        form = await request.form(max_fields=MAX_FORM_FIELDS)
         action, keys = form.get("action"), [str(k) for k in form.getlist("item")]
         if action == "suggest":
             doc.meta_state = "queued"
@@ -401,7 +403,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         doc = session.get(Document, doc_id)
         if doc is None:
             raise HTTPException(404)
-        form = await request.form()
+        form = await request.form(max_fields=MAX_FORM_FIELDS)
         from app.firefly import Transaction
 
         try:
@@ -446,7 +448,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         doc = session.get(Document, doc_id)
         if doc is None or doc.kind not in pipeline.FIELD_TYPES:
             raise HTTPException(404)
-        form = dict(await request.form())
+        form = dict(await request.form(max_fields=MAX_FORM_FIELDS))
         before = form_values(doc)[0] if doc.review_state == "confirmed" else {}
         before_sources = dict(doc.field_sources or {})
         first_confirmation = doc.review_state == "pending"
@@ -749,7 +751,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
 
     @app.post("/settings/app")
     async def settings_app(request: Request, session: Session = Depends(get_session)):
-        form = await request.form()
+        form = await request.form(max_fields=MAX_FORM_FIELDS)
         changed, errors = appsettings.save(session, settings, env_settings, form)
         settings_changed()
         labels = [appsettings.FIELDS[n][0] for n in changed]
@@ -785,7 +787,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
 
     @app.post("/settings/doctypes")
     async def settings_doctypes(request: Request, session: Session = Depends(get_session)):
-        form = await request.form()
+        form = await request.form(max_fields=MAX_FORM_FIELDS)
         names = form.getlist("name")
         kinds = {n: form.get(f"kind:{n}", "") for n in names}
         tax_types = [n for n in names if form.get(f"tax:{n}")]
@@ -978,7 +980,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
 
     @app.post("/retention/apply")
     async def retention_apply(request: Request, session: Session = Depends(get_session)):
-        form = await request.form()
+        form = await request.form(max_fields=MAX_FORM_FIELDS)
         action = form.get("action")
         ids = [int(i) for i in form.getlist("doc") if str(i).isdigit()]
         if not ids or action not in ("tag", "delete", "hold"):
@@ -1364,7 +1366,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         proposal = session.get(RuleProposal, proposal_id)
         if proposal is None:
             raise HTTPException(404)
-        form = await request.form()
+        form = await request.form(max_fields=MAX_FORM_FIELDS)
         action = form.get("action")
         if form.get("own_term") and not action:
             # Manche Browser ignorieren „formaction“ – dann landet „gehört mir“ hier
@@ -1462,7 +1464,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
 
     @app.post("/paperless-changes/meta")
     async def paperless_changes_meta(request: Request, session: Session = Depends(get_session)):
-        form = await request.form()
+        form = await request.form(max_fields=MAX_FORM_FIELDS)
         selected: dict[int, list[str]] = {}
         for item in form.getlist("item"):
             doc_id, _, key = str(item).partition(":")
@@ -1539,7 +1541,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     @app.post("/paperless-changes/edit")
     async def paperless_changes_edit(request: Request, session: Session = Depends(get_session)):
         """Vorschlag mit eigenem Wert vormerken (Titel, Tag, Korrespondent, Dokumenttyp) – nur im Companion."""
-        form = await request.form()
+        form = await request.form(max_fields=MAX_FORM_FIELDS)
         gid = str(form.get("edit") or "")
         flt = {k: str(form.get(k) or "") for k in metadata.FILTER_KEYS}
         doc_id = str(form.get(f"edit_{gid}_doc") or "")
@@ -1567,7 +1569,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     @app.post("/paperless-changes/similar")
     async def paperless_changes_similar_apply(request: Request, session: Session = Depends(get_session)):
         """Den Wert eines Vorschlags für ausgewählte ähnliche Dokumente vormerken (nur im Companion)."""
-        form = await request.form()
+        form = await request.form(max_fields=MAX_FORM_FIELDS)
         flt = {k: str(form.get(k) or "") for k in metadata.FILTER_KEYS}
         result = apply_similar(session, form, str(form.get("sim_group") or ""))
         if result is None:
@@ -1592,7 +1594,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
 
     @app.post("/review/{doc_id}")
     async def review_action(doc_id: int, request: Request, session: Session = Depends(get_session)):
-        form = await request.form()
+        form = await request.form(max_fields=MAX_FORM_FIELDS)
         flt = {k: str(form.get(k) or "") for k in metadata.FILTER_KEYS}
         doc = session.get(Document, doc_id)
         if doc is None:
@@ -1623,7 +1625,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
 
     @app.post("/paperless-changes")
     async def paperless_changes_apply(request: Request, session: Session = Depends(get_session)):
-        form = await request.form()
+        form = await request.form(max_fields=MAX_FORM_FIELDS)
         action = form.get("action")
         selected: dict[int, list[str]] = {}
         for item in form.getlist("change"):
@@ -1710,7 +1712,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         if "json" in request.headers.get("content-type", ""):
             payload = await request.json()
         else:
-            payload = dict(await request.form()) or dict(request.query_params)
+            payload = dict(await request.form(max_fields=MAX_FORM_FIELDS)) or dict(request.query_params)
         doc_id = extract_doc_id(payload)
         if doc_id is None:
             # Ohne ID: einfach eine Synchronisation anstoßen
@@ -1732,8 +1734,10 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         body = ics.render(events.collect(session, today()), settings.paperless_link_base)
         return Response(body, media_type="text/calendar; charset=utf-8")
 
-    @app.exception_handler(HTTPException)
-    async def http_error(request: Request, exc: HTTPException):
+    from starlette.exceptions import HTTPException as StarletteHTTPException
+
+    @app.exception_handler(StarletteHTTPException)  # auch Fehler des Frameworks (z.B. zu großes Formular) lesbar
+    async def http_error(request: Request, exc: StarletteHTTPException):
         return PlainTextResponse(str(exc.detail), status_code=exc.status_code)
 
     @app.exception_handler(Exception)

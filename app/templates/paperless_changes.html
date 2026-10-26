@@ -81,19 +81,20 @@
       {% if it.state == 'accepted' %}vorgemerkt <span class="nowrap">{{ it.at|ts }}</span>{% if it.suggested_at %} · <span class="muted">Vorschlag <span class="nowrap">{{ it.suggested_at|ts }}</span></span>{% endif %}
       {%- else %}Vorschlag <span class="nowrap">{{ it.at|ts }}</span>{% endif %}</span>
   </label>
+  {# Felder bleiben deaktiviert (werden nicht mitgeschickt), bis die Korrektur geöffnet wird #}
   <div class="sugg-edit" hidden>
-    <input type="hidden" name="edit_{{ gid }}_doc" value="{{ doc.id }}"><input type="hidden" name="edit_{{ gid }}_key" value="{{ it.key }}">
+    <input type="hidden" name="edit_{{ gid }}_doc" value="{{ doc.id }}" disabled><input type="hidden" name="edit_{{ gid }}_key" value="{{ it.key }}" disabled>
     {% if kind == 'document_type' %}
-    <select name="edit_{{ gid }}_value" aria-label="Dokumenttyp wählen">
+    <select name="edit_{{ gid }}_value" aria-label="Dokumenttyp wählen" disabled>
       {% for n in META_CHOICES.document_types %}<option {{ 'selected' if n == it.new }}>{{ n }}</option>{% endfor %}
     </select>
     {% else %}
-    <input name="edit_{{ gid }}_value" value="{{ it.new }}" autocomplete="off" aria-label="{{ it.label }} korrigieren"
+    <input name="edit_{{ gid }}_value" value="{{ it.new }}" autocomplete="off" aria-label="{{ it.label }} korrigieren" disabled
       {% if kind == 'tag' %}list="tag-choices"{% elif kind == 'correspondent' %}list="corr-choices"{% endif %}
       onkeydown="if (event.key === 'Enter') { event.preventDefault(); this.closest('.sugg-edit').querySelector('button[name=edit]').click(); }">
     {% endif %}
     <button type="submit" class="small primary" name="edit" value="{{ gid }}" formaction="/paperless-changes/edit">So vormerken</button>
-    <button type="button" class="small link" onclick="this.closest('.sugg-edit').hidden = true">Abbrechen</button>
+    <button type="button" class="small link" onclick="toggleBox(this.closest('.sugg-edit'), false)">Abbrechen</button>
     {% if kind == 'tag' %}<small class="muted">Der vorgeschlagene Tag wird dabei verworfen; ein neuer Name wird beim Übertragen als Tag angelegt.</small>
     {% elif kind in ('correspondent', 'document_type') %}<small class="muted">Nur vorhandene {{ 'Korrespondenten' if kind == 'correspondent' else 'Dokumenttypen' }}.</small>{% endif %}
   </div>
@@ -304,14 +305,19 @@ function editSugg(event, el) {
   event.preventDefault();
   event.stopPropagation();
   const box = el.closest('.sugg-item').querySelector('.sugg-edit');
-  box.hidden = !box.hidden;
+  toggleBox(box, box.hidden);
   if (!box.hidden) { const f = box.querySelector('input:not([type=hidden]), select'); f.focus(); if (f.select) f.select(); }
+}
+// Zugeklappte Bereiche schicken ihre Felder nicht mit (sonst wird das Formular bei vielen Vorschlägen zu groß)
+function toggleBox(box, show) {
+  box.hidden = !show;
+  box.querySelectorAll('input, select, textarea, button[name]').forEach((el) => { el.disabled = !show; });
 }
 // Ähnliche Dokumente unter einem angehakten Vorschlag zeigen (nur bei einzelnem Anhaken, nicht bei „alle“)
 async function similar(cb) {
   const box = cb.closest('.sugg-item').querySelector('.similar-box');
-  if (!cb.checked) { box.hidden = true; return; }
-  box.hidden = false;
+  if (!cb.checked) { toggleBox(box, false); return; }
+  toggleBox(box, true);
   if (box.dataset.loaded) return;
   box.innerHTML = '<p class="similar-empty muted"><small>Suche ähnliche Dokumente …</small></p>';
   try {
