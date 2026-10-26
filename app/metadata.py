@@ -652,6 +652,8 @@ def similar(session: Session, doc: Document, key: str, value: str, limit: int = 
         if (d.meta_dismissed or {}).get(key) == value:
             continue  # für dieses Dokument schon verworfen
         own_title = _own_title(d) if key == "title" else None
+        if key == "title" and not own_title and title_words(current):
+            continue  # hat schon einen sprechenden Titel und keinen eigenen Vorschlag – nichts zu ändern
         _, corr, doctype = effective(d.tags, d.correspondent, d.document_type, d.meta_accepted)
         score, reasons = 0, []
         if key != "correspondent" and src_corr and corr == src_corr:
@@ -670,12 +672,12 @@ def similar(session: Session, doc: Document, key: str, value: str, limit: int = 
             score, reasons = score + 1, [*reasons, "gleicher Typ"]
         if score >= MIN_SIMILAR_SCORE:
             # Vorauswahl nur bei starker Ähnlichkeit und ohne vorhandenen anderen Wert
-            if key == "title":
-                has_other = not own_title and bool(title_words(current))  # sprechender Titel ohne eigenen Vorschlag
-            else:
-                has_other = bool(current)
-            found.append({"doc": d, "score": score, "reasons": reasons, "current": None if key.startswith("tag:") else current,
-                          "own_title": own_title, "preselect": score >= 4 and not has_other})
+            has_other = bool(current) and key != "title"  # Titel: hier nur eigene Vorschläge bzw. nichtssagende Titel
+            # Beim Titel steht der jetzige Titel schon als Link da – „jetzt: …“ wäre doppelt
+            found.append({"doc": d, "score": score, "reasons": reasons,
+                          "current": None if key.startswith("tag:") or key == "title" else current,
+                          "own_title": own_title,
+                          "preselect": score >= 4 and not has_other and (key != "title" or bool(own_title))})
     found.sort(key=lambda f: (-f["score"], -f["doc"].id))
     return {"items": found[:limit], "more": max(0, len(found) - limit)}
 

@@ -409,7 +409,8 @@ def test_similar_by_nearly_same_title_without_correspondent(db):
         assert set(tag) == {2, 3, 4} and tag[2]["preselect"] and tag[3]["preselect"] and not tag[4]["preselect"]
         title = {f["doc"].id: f for f in metadata.similar(s, src, "title", "Lohnabrechnung März 2026")["items"]}
         assert title[2]["own_title"] == "Lohnabrechnung April 2026" and title[2]["preselect"]
-        assert not title[3]["preselect"]  # sprechender Titel ohne eigenen Vorschlag wird nicht überschrieben
+        assert 3 not in title  # sprechender Titel ohne eigenen Vorschlag: nichts zu ändern, nicht in der Liste
+        assert title[2]["current"] is None  # jetziger Titel steht schon als Link da
         assert metadata.apply_value(s, s.get(Document, 2), "title", "Lohnabrechnung März 2026")
         assert s.get(Document, 2).meta_accepted["title"]["value"] == "Lohnabrechnung April 2026"
 

@@ -2,7 +2,7 @@
 {% set kind = 'tag' if it.key.startswith('tag:') else it.key %}
 {% if items %}
 <div class="similar-inner k-{{ kind }}">
-  <p class="similar-head"><strong>{{ items|length }}{{ '+' if more }} ähnliche Dokumente</strong> ohne {{ it.label }} „{{ it.new }}“
+  <p class="similar-head"><strong>{{ items|length }}{{ '+' if more }} {{ 'ähnliches Dokument' if items|length == 1 and not more else 'ähnliche Dokumente' }}</strong> ohne {{ it.label }} „{{ it.new }}“
     <small class="muted">– zusammen vormerken? Vorausgewählt sind sehr ähnliche{{ ' ohne eigenen Wert' if kind != 'tag' }}.
     {%- if it.state == 'open' %} Angehakte nimmt auch „Ausgewählte vormerken“ unten mit.{% endif %}</small></p>
   <input type="hidden" name="sim_{{ gid }}_src" value="{{ src.id }}">
@@ -19,6 +19,7 @@
         <a href="/documents/{{ f.doc.id }}" target="_blank" rel="noopener">{{ f.doc.title or ('#' ~ f.doc.id) }}</a>
         <small class="muted">{{ f.doc.correspondent or 'ohne Korrespondent' }}{% if f.doc.document_type %} · {{ f.doc.document_type }}{% endif %} · #{{ f.doc.id }}</small>
         {% if f.own_title %}<small class="sim-current">bekommt seinen eigenen Vorschlag: <strong>{{ f.own_title }}</strong></small>
+        {% elif kind == 'title' %}<small class="sim-current">bekommt: <strong>{{ it.new }}</strong></small>
         {% elif f.current %}<small class="sim-current">jetzt: {{ f.current }}</small>{% endif %}
         <span class="sim-reasons">{% for r in f.reasons %}<span class="pill">{{ r }}</span>{% endfor %}</span>
       </span></label></li>
