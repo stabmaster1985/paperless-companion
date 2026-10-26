@@ -1443,6 +1443,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             request, "paperless_changes.html", rows=rows, last=last, change_info=pipeline.change_info,
             SOURCE_LABELS=pipeline.SOURCE_LABELS, names=names, msg=msg, create_fields=settings.writeback_create_fields,
             meta_open=meta_open, meta_accepted=meta_accepted, meta_filter=meta_filter, meta_counts=counts,
+            META_CHOICES=metadata.choices(session),
             mq=lambda **changes: meta_query({**flt, **changes}), NONE=metadata.NONE,
             meta_open_count=sum(len(i) for _, i, _ in meta_open), meta_query=meta_query(meta_filter), meta_accepted_count=sum(len(i) for _, i, _ in meta_accepted), quality=metadata.quality(session), META_ITEMS=metadata.ITEMS,
             META_SOURCES=metadata.SOURCES, hints=metadata.archive_hints(session), HINTS=metadata.HINTS,
@@ -1526,6 +1527,22 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             else:
                 count += metadata.apply_value(session, doc, key, item["new"], item["new_tag"])
         return item, count
+
+    @app.post("/paperless-changes/edit")
+    async def paperless_changes_edit(request: Request, session: Session = Depends(get_session)):
+        """Vorschlag mit eigenem Wert vormerken (Titel, Tag, Korrespondent, Dokumenttyp) – nur im Companion."""
+        form = await request.form()
+        gid = str(form.get("edit") or "")
+        flt = {k: str(form.get(k) or "") for k in metadata.FILTER_KEYS}
+        doc_id = str(form.get(f"edit_{gid}_doc") or "")
+        doc = session.get(Document, int(doc_id)) if doc_id.isdigit() else None
+        if doc is None:
+            msg = "Nichts geändert"
+        else:
+            msg = f"„{doc.title or doc.id}“: " + metadata.correct(session, doc, str(form.get(f"edit_{gid}_key") or ""),
+                                                                  str(form.get(f"edit_{gid}_value") or ""))
+        query = meta_query(flt)
+        return RedirectResponse(f"/paperless-changes?{query}{'&' if query else ''}msg={quote(msg)}#metadata", status_code=303)
 
     @app.get("/paperless-changes/similar", response_class=HTMLResponse)
     def paperless_changes_similar(request: Request, doc: int, key: str, gid: str = "0", session: Session = Depends(get_session)):

@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from app import metadata
 from app.db import session_scope
 from app.main import create_app
-from app.models import Document
+from app.models import Document, MetaDecision
 from app.ollama import OllamaClient
 from app.paperless import PaperlessClient
 from tests.conftest import OLLAMA, PAPERLESS
@@ -458,3 +458,40 @@ def test_correspondent_names_sorted_alphabetically(db):
     with db() as s:
         assert metadata.correspondent_names(s, ["Amazon", "#12"]) == [
             "Amazon", "Ärztekammer", "Bank", "Mobilfunk AG", "stadtwerke", "Zahnarzt Dr. Muster"]
+
+
+def test_correct_suggestions(client):
+    with session_scope() as s:
+        s.add(Document(id=900, title="x", tags=["Haus"], correspondent="Stadtwerke", document_type="Rechnung"))
+        d = Document(id=901, title="Scan_0901", tags=[], correspondent=None, document_type=None)
+        d.meta_suggestion = {"tags": [{"name": "Strom", "source": "llm"}], "title": {"value": "Stromrechnung", "source": "llm"},
+                             "correspondent": {"value": "Mobilfunk AG", "source": "llm"},
+                             "document_type": {"value": "Vertrag", "source": "llm"}, "at": "2026-10-01T00:00:00+00:00"}
+        metadata.refresh_pending(d)
+        s.add(d)
+    page = client.get("/paperless-changes").text
+    assert "✎ ändern" in page and 'name="edit_' in page and '<datalist id="corr-choices">' in page
+
+    def edit(key, value):
+        gid = "g1"
+        return client.post("/paperless-changes/edit", data={"edit": gid, f"edit_{gid}_doc": "901", f"edit_{gid}_key": key,
+                                                            f"edit_{gid}_value": value, "what": "tag"}, follow_redirects=False)
+
+    r = edit("title", "Stromrechnung  Oktober 2026")
+    assert r.headers["location"].startswith("/paperless-changes?what=tag&msg=")  # Filter bleibt
+    edit("correspondent", "stadtwerke")  # Schreibweise wie in Paperless
+    assert "gibt es nicht" in client.get(edit("document_type", "Gibt es nicht").headers["location"]).text
+    edit("document_type", "rechnung")
+    edit("tag:Strom", "haus")
+    with session_scope() as s:
+        doc = s.get(Document, 901)
+        acc = doc.meta_accepted
+        assert acc["title"]["value"] == "Stromrechnung Oktober 2026"
+        assert acc["correspondent"]["value"] == "Stadtwerke" and acc["document_type"]["value"] == "Rechnung"
+        assert acc["tag:Haus"]["source"] == "manual" and "tag:Strom" not in acc and doc.meta_dismissed["tag:Strom"] == "Strom"
+        decisions = {r.key: r.decision for r in s.query(MetaDecision).filter_by(document_id=901)}
+        assert decisions == {"title": "edited", "correspondent": "edited", "document_type": "edited",
+                             "tag:Strom": "dismissed", "tag:Haus": "accepted"}
+    # neuer Tag wird beim Übertragen angelegt
+    with session_scope() as s:
+        assert metadata.correct(s, s.get(Document, 901), "tag:Haus", "Neu erfunden") == "Tag „Neu erfunden“ statt „Haus“ vorgemerkt (neuer Tag)"

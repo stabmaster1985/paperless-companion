@@ -74,11 +74,29 @@
     <input type="checkbox" name="item" value="{{ doc.id }}:{{ it.key }}" class="{{ 'extra' if extra }}" onchange="countSel('{{ form_id }}'); similar(this)">
     <span class="kind-pill">{{ it.label }}</span>
     <span class="change">{% if it.current %}<span class="old">{{ it.current }}</span> → {% elif kind == 'tag' %}+ {% endif %}<strong>{{ it.new }}</strong>
-      {% if it.new_tag %}<small class="soon" title="{{ TIPS.neuer_tag }}">neuer Tag</small>{% endif %}</span>
+      {% if it.new_tag %}<small class="soon" title="{{ TIPS.neuer_tag }}">neuer Tag</small>{% endif %}
+      <span class="edit-btn" role="button" tabindex="0" title="Vorschlag korrigieren und so vormerken"
+        onclick="editSugg(event, this)" onkeydown="if (event.key === 'Enter' || event.key === ' ') editSugg(event, this)">✎ ändern</span></span>
     <span class="when"><span class="badge src-{{ it.source }}" title="{{ TIPS.get(it.source, '') }}">{{ META_SOURCES.get(it.source, it.source) }}</span>
       {% if it.state == 'accepted' %}vorgemerkt <span class="nowrap">{{ it.at|ts }}</span>{% if it.suggested_at %} · <span class="muted">Vorschlag <span class="nowrap">{{ it.suggested_at|ts }}</span></span>{% endif %}
       {%- else %}Vorschlag <span class="nowrap">{{ it.at|ts }}</span>{% endif %}</span>
   </label>
+  <div class="sugg-edit" hidden>
+    <input type="hidden" name="edit_{{ gid }}_doc" value="{{ doc.id }}"><input type="hidden" name="edit_{{ gid }}_key" value="{{ it.key }}">
+    {% if kind == 'document_type' %}
+    <select name="edit_{{ gid }}_value" aria-label="Dokumenttyp wählen">
+      {% for n in META_CHOICES.document_types %}<option {{ 'selected' if n == it.new }}>{{ n }}</option>{% endfor %}
+    </select>
+    {% else %}
+    <input name="edit_{{ gid }}_value" value="{{ it.new }}" autocomplete="off" aria-label="{{ it.label }} korrigieren"
+      {% if kind == 'tag' %}list="tag-choices"{% elif kind == 'correspondent' %}list="corr-choices"{% endif %}
+      onkeydown="if (event.key === 'Enter') { event.preventDefault(); this.closest('.sugg-edit').querySelector('button[name=edit]').click(); }">
+    {% endif %}
+    <button type="submit" class="small primary" name="edit" value="{{ gid }}" formaction="/paperless-changes/edit">So vormerken</button>
+    <button type="button" class="small link" onclick="this.closest('.sugg-edit').hidden = true">Abbrechen</button>
+    {% if kind == 'tag' %}<small class="muted">Der vorgeschlagene Tag wird dabei verworfen; ein neuer Name wird beim Übertragen als Tag angelegt.</small>
+    {% elif kind in ('correspondent', 'document_type') %}<small class="muted">Nur vorhandene {{ 'Korrespondenten' if kind == 'correspondent' else 'Dokumenttypen' }}.</small>{% endif %}
+  </div>
   <div class="similar-box" hidden data-src="/paperless-changes/similar?doc={{ doc.id }}&amp;key={{ it.key|urlencode }}&amp;gid={{ gid }}"></div>
   </div>
 {% endmacro %}
@@ -119,11 +137,14 @@
 {% endmacro %}
 
 <h2 id="metadata">Titel, Tags, Korrespondent, Dokumenttyp</h2>
+<datalist id="tag-choices">{% for n in META_CHOICES.tags %}<option value="{{ n }}">{% endfor %}</datalist>
+<datalist id="corr-choices">{% for n in META_CHOICES.correspondents %}<option value="{{ n }}">{% endfor %}</datalist>
 <p class="kind-legend"><span class="kind-pill k-title">Titel</span> <span class="kind-pill k-tag">Tag</span>
   <span class="kind-pill k-correspondent">Korrespondent</span> <span class="kind-pill k-document_type">Dokumenttyp</span>
   <small class="muted">· Tipp: ganze Zeile antippen zum Auswählen, Kästchen am Dokument wählt alle seine Vorschläge.
     Beim Anhaken eines einzelnen Vorschlags erscheinen darunter ähnliche Dokumente (gleicher Absender, Betreff, IBAN/Kundennr.), die du gleich mit vormerken kannst.
-    Ist ein Filter gesetzt, zeigt „+ weitere außerhalb des Filters“ die übrigen Vorschläge desselben Dokuments.</small></p>
+    Ist ein Filter gesetzt, zeigt „+ weitere außerhalb des Filters“ die übrigen Vorschläge desselben Dokuments.
+    Passt ein Vorschlag nicht ganz, korrigierst du ihn mit „✎ ändern“.</small></p>
 <p class="muted">Vorschläge aus dem lokalen Modell (<span class="badge src-llm">AI</span>) und aus deinen übrigen Dokumenten desselben Absenders
   (<span class="badge src-history">Verlauf</span>). <strong>Vormerken</strong> speichert deine Entscheidung nur im Companion – die App lernt sofort daraus
   (vorgemerkte Tags und Titel fließen in die nächsten Vorschläge ein). Nach Paperless geht erst etwas, wenn du <strong>Übertragen</strong> wählst.
@@ -277,6 +298,14 @@ function countSel(formId) {
   if (!form) return;
   const n = form.querySelectorAll('input[name=item]:checked, input[name=change]:checked').length;
   form.querySelectorAll('.sel-count').forEach((el) => { el.textContent = n ? n + ' ausgewählt' : ''; });
+}
+// Vorschlag korrigieren: Eingabefeld unter der Zeile auf- und zuklappen (ohne die Zeile anzuhaken)
+function editSugg(event, el) {
+  event.preventDefault();
+  event.stopPropagation();
+  const box = el.closest('.sugg-item').querySelector('.sugg-edit');
+  box.hidden = !box.hidden;
+  if (!box.hidden) { const f = box.querySelector('input:not([type=hidden]), select'); f.focus(); if (f.select) f.select(); }
 }
 // Ähnliche Dokumente unter einem angehakten Vorschlag zeigen (nur bei einzelnem Anhaken, nicht bei „alle“)
 async function similar(cb) {

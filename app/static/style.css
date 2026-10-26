@@ -678,3 +678,11 @@ body.docview-open { overflow: hidden; }
 
 /* „hidden“ gilt immer – auch bei Elementen mit eigener display-Regel (z.B. .check, form.inline) */
 [hidden] { display: none !important; }
+
+/* Vorschlag korrigieren */
+.edit-btn { margin-left: .4rem; font-size: .75rem; color: var(--accent); cursor: pointer; white-space: nowrap; }
+.edit-btn:hover, .edit-btn:focus { text-decoration: underline; }
+.sugg-edit { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; padding: .4rem .7rem .6rem 2.2rem; background: var(--bg); }
+.sugg-edit input:not([type=hidden]), .sugg-edit select { flex: 1 1 14rem; min-width: 0; width: auto; }
+.sugg-edit small { flex-basis: 100%; }
+@media (max-width: 640px) { .sugg-edit { padding-left: .5rem; padding-right: .5rem; } }

@@ -728,3 +728,51 @@ def correspondent_names(session: Session, paperless_names: list[str] | None = No
 def locale_key(text: str) -> str:
     """Deutsche Sortierung ohne Locale: Groß-/Kleinschreibung egal, Umlaute wie Grundbuchstaben (Ä = A)."""
     return text.lower().translate(str.maketrans({"ä": "a", "ö": "o", "ü": "u", "ß": "ss"}))
+
+
+def choices(session: Session) -> dict[str, list[str]]:
+    """Auswahl für Korrekturen: Tags, Korrespondenten, Dokumenttypen aus dem Archiv (inkl. Vorgemerktem), alphabetisch."""
+    tags, types = set(), set()
+    for _, doc_tags, _, doctype in _archive(session):
+        tags.update(t for t in doc_tags if not is_unresolved_tag(t))
+        if doctype:
+            types.add(doctype)
+    return {"tags": sorted(tags, key=locale_key), "correspondents": correspondent_names(session),
+            "document_types": sorted(types, key=locale_key)}
+
+
+def correct(session: Session, doc: Document, key: str, value: str) -> str:
+    """Vorschlag mit deinem Wert vormerken (nur im Companion). Gibt eine Meldung zurück.
+
+    Titel/Korrespondent/Dokumenttyp werden mit deinem Wert vorgemerkt (Entscheidung „geändert“). Bei einem Tag wird
+    der vorgeschlagene verworfen (kommt für den Absender nicht wieder) und dein Tag vorgemerkt.
+    """
+    value = " ".join(value.split())
+    item = next((i for i in pending(doc, everything=True) if i["key"] == key), None)
+    if item is None or not value:
+        return "Nichts geändert"
+    if key == "title":
+        accept(session, doc, ["title"], value)
+        return f"Titel „{value}“ vorgemerkt"
+    opts = choices(session)
+    if key in ("correspondent", "document_type"):
+        names = opts["correspondents" if key == "correspondent" else "document_types"]
+        name = next((n for n in names if n.lower() == value.lower()), None)
+        if name is None:
+            return f"„{value}“ gibt es nicht als {ITEMS[key]} – bitte zuerst in Paperless anlegen"
+        accepted = dict(doc.meta_accepted or {})
+        accepted[key] = {"value": name, "source": item["source"], "new_tag": False,
+                         "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+        _record(session, doc, item, "edited" if name != item["new"] else "accepted", name)
+        doc.meta_accepted = accepted
+        refresh_pending(doc)
+        return f"{ITEMS[key]} „{name}“ vorgemerkt"
+    # Tag: vorhandenen Namen in seiner Schreibweise nehmen, sonst neuer Tag (wird beim Übertragen angelegt)
+    name = next((t for t in opts["tags"] if t.lower() == value.lower()), value)
+    if name.lower() == item["new"].lower():
+        accept(session, doc, [key])
+        return f"Tag „{name}“ vorgemerkt"
+    dismiss(session, doc, [key])
+    new_tag = name.lower() not in {t.lower() for t in opts["tags"]}
+    apply_value(session, doc, f"tag:{name}", name, new_tag=new_tag, source="manual")
+    return f"Tag „{name}“ statt „{item['new']}“ vorgemerkt" + (" (neuer Tag)" if new_tag else "")
