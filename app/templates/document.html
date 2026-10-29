@@ -240,7 +240,7 @@ document.querySelectorAll('.ff-form').forEach((form) => form.addEventListener('s
     <span class="badge src-firefly">Firefly</span> Bankbuchung ·
     <span class="badge src-learned">Gelernt</span> wie bei früheren Rechnungen ·
     <span class="badge src-manual">manuell</span> von dir eingegeben · ✓ = von dir bestätigt</p>
-  <input type="hidden" name="next" value="{{ '/inbox' if doc.review_state == 'pending' else '/documents/' ~ doc.id }}">
+  <input type="hidden" name="next" value="{{ '/inbox' if doc.review_state == 'pending' else (back or '/documents/' ~ doc.id) }}">
 
   {% if doc.kind == 'invoice' %}
   <div class="grid">
@@ -387,7 +387,9 @@ document.addEventListener('keydown', (e) => {
       <tbody>
       {% for it in meta_items %}
         <tr class="{{ 'accepted' if it.state == 'accepted' }}">
-          <td><input type="checkbox" name="item" value="{{ it.key }}" aria-label="{{ it.label }} auswählen" {{ 'checked' if it.useful }}></td>
+          {# Vorauswahl nur, solange zu diesem Dokument noch nichts entschieden ist – Abgewähltes bleibt abgewählt #}
+          <td><input type="checkbox" name="item" value="{{ it.key }}" aria-label="{{ it.label }} auswählen"
+            {{ 'checked' if it.useful and it.state == 'open' and not (doc.meta_accepted or doc.meta_dismissed) }}></td>
           <td>{{ it.label }}{% if it.new_tag %} <small class="soon" title="{{ TIPS.neuer_tag }}">neuer Tag</small>{% endif %}</td>
           <td>{% if it.current %}{{ it.current }}{% elif it.key.startswith('tag:') %}<span class="muted">fehlt</span>{% else %}<span class="muted">leer</span>{% endif %}</td>
           <td>
@@ -435,7 +437,11 @@ document.addEventListener('keydown', (e) => {
       {% if doc.summary_state in ('queued', 'running') %}<span class="tag">{{ 'wird erstellt' if doc.summary_state == 'running' else 'in Warteschlange' }}</span>{% endif %}
       {% set summary_text = (doc.proposed_fields or {}).get('summary') or pf.get('summary') or doc.summary %}
       {% if 'summary' in (doc.proposed_fields or {}) %}<small class="soon">(neu – noch nicht in Paperless)</small>{% endif %}
-      <p class="{{ 'muted' if not summary_text }}">{{ summary_text or 'Noch keine Zusammenfassung.' }}</p>
+      <p class="{{ 'muted' if not summary_text }}" id="summary-text">{{ summary_text or 'Noch keine Zusammenfassung.' }}</p>
+      {% if summary_text and settings.field_comment %}
+      <button type="button" class="small" title="Text in das Feld „{{ settings.field_comment }}“ darunter eintragen – danach „Kommentar vormerken“"
+        onclick="summaryToComment()">Als {{ settings.field_comment }} übernehmen</button>
+      {% endif %}
       {% if doc.summary_state == 'error' %}<p class="bad">{{ doc.extraction_error }}</p>{% endif %}
       {% if settings.llm_enabled and settings.summary_mode != 'off' and doc.summary_state not in ('queued', 'running') %}
       <form method="post" action="/documents/{{ doc.id }}/summary" class="inline">
@@ -450,7 +456,7 @@ document.addEventListener('keydown', (e) => {
       {% set proposed = doc.proposed_fields or {} %}
       <label class="field"><span>{{ settings.field_comment }}
         {% if 'comment' in proposed %}<small class="soon">(geändert – noch nicht in Paperless)</small>{% endif %}</span>
-        <textarea name="comment" rows="2" maxlength="128">{{ proposed['comment'] if 'comment' in proposed else (pf.get('comment') or '') }}</textarea></label>
+        <textarea name="comment" id="comment-field" rows="2" maxlength="128">{{ proposed['comment'] if 'comment' in proposed else (pf.get('comment') or '') }}</textarea></label>
       <div><button class="small">Kommentar vormerken</button> <small class="muted">Übernahme nach Paperless unter „Für Paperless“</small></div>
     </form>
     {% endif %}
@@ -458,10 +464,16 @@ document.addEventListener('keydown', (e) => {
     {% if settings.field_related %}
     <div>
       <strong>{{ settings.field_related }}</strong>
+      {% if related_field == 'missing' %}
+      <p class="bad"><small>Paperless liefert kein Feld „{{ settings.field_related }}“. Entweder heißt es dort anders
+        (Name unter <a href="/settings#app-settings">Einstellungen → Paperless-Felder</a> anpassen) oder der Paperless-Benutzer
+        des Companion darf Custom Fields nicht sehen (Recht „Custom Field anzeigen“).</small></p>
+      {% endif %}
       {% if related %}
       <ul class="plain">
         {% for rid, rdoc in related %}
-        <li>{% if rdoc %}<a href="/documents/{{ rid }}">{{ rdoc.title }}</a> <small>{{ rdoc.correspondent or '' }} {{ rdoc.created|d }}</small>{% else %}Dokument #{{ rid }}{% endif %} {{ doclink(rid) }}</li>
+        <li>{% if rdoc %}<a href="/documents/{{ rid }}">{{ rdoc.title }}</a> <small>{{ rdoc.correspondent or '' }} {{ rdoc.created|d }}</small>
+          {%- else %}Dokument #{{ rid }} <small class="muted" title="Nicht im Archiv-Index – evtl. darf der Paperless-Benutzer des Companion es nicht sehen">(nicht im Index)</small>{% endif %} {{ doclink(rid) }}</li>
         {% endfor %}
       </ul>
       <form method="post" action="/documents/{{ doc.id }}/case-from-links" class="inline"><button class="small">Als Vorgang übernehmen</button></form>
@@ -473,6 +485,20 @@ document.addEventListener('keydown', (e) => {
   </div>
 </section>
 
+<script>
+// Zusammenfassung ins Kommentarfeld (höchstens 128 Zeichen, an einer Wortgrenze gekürzt)
+function summaryToComment() {
+  const field = document.getElementById('comment-field');
+  let text = document.getElementById('summary-text').textContent.trim();
+  const max = Number(field.maxLength) || 128;
+  if (text.length > max) text = text.slice(0, max - 1).replace(/\s+\S*$/, '') + '…';
+  field.value = text;
+  field.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  field.focus();
+  field.classList.add('ff-changed');
+  setTimeout(() => field.classList.remove('ff-changed'), 2500);
+}
+</script>
 <section class="card">
   <h2>Vorgänge</h2>
   {% if doc_cases %}

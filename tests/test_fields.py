@@ -182,6 +182,9 @@ def client(my_settings, mock_api):
 
 
 def test_document_page_comment_and_links(client, mock_api):
+    # Feldwerte kommen beim Öffnen frisch aus Paperless
+    mock_api.get(f"{PAPERLESS}/api/documents/1/").respond(json={"id": 1, "content": "", "custom_fields": [
+        {"field": 42, "value": "alt"}, {"field": 43, "value": [2]}]})
     page = client.get("/documents/1").text
     assert "Gutachten" in page and "Als Vorgang übernehmen" in page and ">alt</textarea>" in page
 
@@ -219,3 +222,16 @@ def test_summary_button_queues(client):
     client.post("/system/summaries")
     with session_scope() as s:
         assert s.get(Document, 3).summary_state == "queued"
+
+
+def test_document_page_refreshes_links_and_reports_missing_field(client, mock_api, my_settings):
+    mock_api.get(f"{PAPERLESS}/api/documents/3/").respond(json={"id": 3, "content": "", "custom_fields": [
+        {"field": 43, "value": [1, 99]}]})
+    page = client.get("/documents/3").text
+    assert "Schaden" in page and "Dokument #99" in page and "(nicht im Index)" in page
+    with session_scope() as s:
+        assert s.get(Document, 3).paperless_fields == {"related": [1, 99]}
+    my_settings.field_related = "Gibt es nicht"
+    app = create_app(my_settings, start_worker=False)
+    with TestClient(app) as c:
+        assert "Paperless liefert kein Feld „Gibt es nicht“" in c.get("/documents/2").text

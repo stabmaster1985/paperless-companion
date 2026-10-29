@@ -314,6 +314,30 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             paperless.close()
         return f"{done} vorgemerkte Änderungen nach Paperless übertragen" + (f". Probleme: {'; '.join(errors[:5])}" if errors else "")
 
+    def back_link(request: Request, doc_id: int) -> str | None:
+        """Seite, von der aus das Dokument geöffnet wurde (z.B. Rechnungen) – dorthin geht es nach dem Speichern zurück."""
+        from urllib.parse import parse_qsl, urlencode, urlsplit
+
+        ref = urlsplit(request.headers.get("referer") or "")
+        if ref.netloc and ref.netloc != request.url.netloc:
+            return None
+        if not ref.path or ref.path.startswith(f"/documents/{doc_id}") or not ref.path.startswith("/"):
+            return None
+        query = urlencode([(k, v) for k, v in parse_qsl(ref.query) if k != "msg"])  # alte Meldung nicht wiederholen
+        return ref.path + (f"?{query}" if query else "")
+
+    field_cache: dict = {"at": 0.0, "defs": None}
+
+    def field_definitions(paperless) -> dict | None:
+        """Custom-Field-Definitionen (5 Minuten zwischengespeichert); None, wenn Paperless sie nicht liefert."""
+        if time.monotonic() - field_cache["at"] > 300 or field_cache["defs"] is None:
+            try:
+                field_cache["defs"] = fields.resolve(paperless.custom_field_definitions(), settings)
+                field_cache["at"] = time.monotonic()
+            except PaperlessError:
+                return None
+        return field_cache["defs"]
+
     @app.get("/documents/{doc_id}", response_class=HTMLResponse)
     def document_detail(request: Request, doc_id: int, msg: str = "", session: Session = Depends(get_session)):
         doc = session.get(Document, doc_id)
@@ -327,11 +351,21 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         open_cases = session.scalars(select(Case).where(Case.status == "open").order_by(Case.title)).all()
         text_html, text_found, text_error = None, set(), None
         paperless_names: list[str] = []
+        related_field = None  # gefunden | fehlt | None (unbekannt)
         paperless = make_paperless(settings, timeout=15)
         try:
-            content = paperless.get_document(doc_id).get("content") or ""
+            data = paperless.get_document(doc_id)
+            content = data.get("content") or ""
             text_html, text_found = highlight.highlight(content, doc.suggestions or {})
             paperless_names = list(paperless.names("correspondents").values())
+            # Feldwerte frisch aus Paperless (z.B. gerade gesetztes „gehört zu“), ohne auf den nächsten Abgleich zu warten
+            defs = field_definitions(paperless)
+            if defs is not None:
+                related_field = "found" if "related" in defs else "missing"
+                if "custom_fields" in data:  # nur auffrischen, wenn Paperless die Feldwerte mitliefert
+                    live = fields.extract(data["custom_fields"], defs)
+                    if live != (doc.paperless_fields or {}):
+                        doc.paperless_fields = live
         except PaperlessError as exc:
             text_error = text_error or str(exc)
         finally:
@@ -347,6 +381,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             meta_items=metadata.pending(doc, everything=True), META_SOURCES=metadata.SOURCES,
             correspondents=metadata.correspondent_names(session, paperless_names),
             refund=reimbursements.summary(session, doc) if doc.kind == "reimbursement" else None,
+            related_field=related_field, back=back_link(request, doc_id),
             doc_correspondent=metadata.effective(doc.tags, doc.correspondent, doc.document_type, doc.meta_accepted)[1],
             pending_left=session.scalar(
                 select(func.count()).select_from(Document).where(Document.review_state == "pending", Document.id != doc_id)
@@ -480,8 +515,12 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             if following is not None:
                 return RedirectResponse(f"/documents/{following.id}?msg={quote('Bestätigt – nächstes Dokument')}", status_code=303)
             return RedirectResponse(f"/inbox?msg={quote('Bestätigt – die Inbox ist leer')}", status_code=303)
-        target = form.get("next") or "/inbox"
-        return RedirectResponse(target if target.startswith("/") else "/inbox", status_code=303)
+        target = str(form.get("next") or "/inbox")
+        target = target if target.startswith("/") and not target.startswith("//") else "/inbox"
+        msg = "Bestätigt" if first_confirmation else "Gespeichert"
+        title = f"„{doc.title}“ " if not target.startswith(f"/documents/{doc_id}") else ""
+        return RedirectResponse(f"{target}{'&' if '?' in target else '?'}msg={quote(title + msg.lower() if title else msg)}",
+                                status_code=303)
 
     @app.post("/documents/{doc_id}/kind")
     def document_kind(doc_id: int, kind: str = Form(...), session: Session = Depends(get_session)):
@@ -1228,6 +1267,23 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             client.close()
         return RedirectResponse(f"/receipts?msg={quote(msg)}", status_code=303)
 
+    def ensure_indexed(session: Session, doc_id: int) -> str | None:
+        """Dokument im lokalen Index sicherstellen (fehlt es, direkt aus Paperless holen). Gibt einen Fehlertext zurück."""
+        if session.get(Document, doc_id) is not None:
+            return None
+        paperless = make_paperless(settings, timeout=30)
+        try:
+            pipeline.import_single(session, paperless, doc_id, settings)
+            session.get(Document, doc_id).extraction_state = "skipped"  # nur in den Index, nicht analysieren
+            return None
+        except PaperlessError as exc:
+            if "404" in str(exc) or "403" in str(exc):
+                return (f"Paperless liefert Dokument #{doc_id} nicht: Es gibt die ID nicht oder der Paperless-Benutzer des "
+                        "Companion darf es nicht sehen (Berechtigung „Anzeigen“ – siehe paperless_grant_view.py in der Hilfe).")
+            return f"Paperless nicht erreichbar: {exc}"
+        finally:
+            paperless.close()
+
     @app.post("/receipts/{row_id}/{action}")
     def receipts_action(row_id: int, action: str, doc_id: str = Form(""), state: str = Form("open"),
                         session: Session = Depends(get_session)):
@@ -1236,8 +1292,15 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             raise HTTPException(404)
         if action == "link":
             ids = selection.parse_ids(doc_id)
-            msg = "Beleg zugeordnet (nur im Companion)" if ids and receipts.link(session, row, ids[0]) \
-                else "Dokument nicht gefunden – Paperless-ID prüfen (ggf. Archiv-Index neu einlesen)"
+            if not ids:
+                msg = "Bitte eine Paperless-ID eingeben"
+            else:
+                problem = ensure_indexed(session, ids[0])
+                if problem:
+                    msg = problem
+                else:
+                    receipts.link(session, row, ids[0])
+                    msg = "Beleg zugeordnet (nur im Companion)"
         elif action == "ignore":
             receipts.ignore(row)
             msg = "Als „kein Beleg nötig“ markiert"

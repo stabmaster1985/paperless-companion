@@ -344,3 +344,31 @@ def test_kind_other_moves_on_and_removes_records(client):
     with session_scope() as s:
         assert s.get(Document, 1).invoice is None
     assert "Stadtwerke" not in client.get("/invoices?status=all").text
+
+
+def test_save_returns_to_previous_page(client):
+    page = client.get("/documents/1", headers={"referer": "http://testserver/invoices?status=all&msg=alt"}).text
+    assert 'name="next" value="/invoices?status=all"' in page  # alte Meldung fällt weg
+    r = client.post("/documents/1/confirm", data={"amount": "78.00", "next": "/invoices?status=all"}, follow_redirects=False)
+    assert r.headers["location"].startswith("/invoices?status=all&msg=") and "gespeichert" in r.headers["location"]
+    # fremde Seiten und das Dokument selbst zählen nicht als „zurück“
+    page = client.get("/documents/1", headers={"referer": "https://example.org/x"}).text
+    assert 'name="next" value="/documents/1"' in page
+    r = client.post("/documents/1/confirm", data={"amount": "78.00", "next": "//evil.example"}, follow_redirects=False)
+    assert r.headers["location"].startswith("/inbox?msg=")
+
+
+def test_meta_checkboxes_keep_your_choice(client):
+    from app import metadata
+
+    with session_scope() as s:
+        d = s.get(Document, 3)
+        d.meta_suggestion = {"tags": [{"name": "Haus", "source": "llm"}, {"name": "Garten", "source": "llm"}],
+                             "at": "2026-10-01T00:00:00+00:00"}
+        metadata.refresh_pending(d)
+    page = client.get("/documents/3").text
+    assert 'value="tag:Haus" aria-label="Tag auswählen"\n            checked' in page  # noch nichts entschieden
+    client.post("/documents/3/meta", data={"action": "accept", "item": ["tag:Haus"]})
+    page = client.get("/documents/3").text
+    assert "checked" not in page.split('value="tag:Garten"')[1].split(">")[0]  # abgewählt bleibt abgewählt
+    assert "checked" not in page.split('value="tag:Haus"')[1].split(">")[0]  # vorgemerkt: nicht erneut anhaken

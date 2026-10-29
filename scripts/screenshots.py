@@ -120,6 +120,7 @@ def start_demo(data: Path, port: int) -> None:
         s.get(Document, 1).paperless_fields = {
             "due_date": "2026-10-19", "comment": "Abschlag wurde angepasst", "related": [3, 100],
             "summary": "Stadtwerke Musterstadt: Stromabschlag Oktober 78,00 €, fällig 19.10.2026, Überweisung nötig."}
+        s.get(Document, 1).summary = "Stadtwerke Musterstadt: Stromabschlag Oktober 78,00 €, fällig 19.10.2026, Überweisung nötig."
         for j in range(3):
             s.add(Document(id=200 + j, title=f"Rechnung Online-Shop {j}", created=date(2026, 9, 1 + j),
                            correspondent="Elektronikversand Großhandel GmbH", tags=["Steuer: Werbungskosten", "Elektronik", "Garantie"],
