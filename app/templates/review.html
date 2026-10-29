@@ -41,6 +41,8 @@
           <span class="change">
             {% if it.current %}<span class="old">{{ it.current }}</span> → {% elif kind == 'tag' %}+ {% endif %}
             {% if kind == 'title' %}<input name="title" value="{{ it.new }}" aria-label="Neuer Titel" class="title-edit">
+              {% if it.current %}<button type="submit" name="action" value="keep_title" class="small link"
+                title="Jetzigen Titel behalten – für dieses Dokument wird kein Titel mehr vorgeschlagen">Titel behalten</button>{% endif %}
             {% else %}<strong>{{ it.new }}</strong>{% endif %}
             {% if it.new_tag %}<small class="soon">neuer Tag</small>{% endif %}
           </span>

@@ -526,3 +526,50 @@ def test_many_fields_and_disabled_editors(client):
     data = {"action": "accept", "item": [f"{i}:tag:X" for i in range(1500)] + ["3:tag:Haus"]}
     r = client.post("/paperless-changes/meta", data=data, follow_redirects=False)
     assert r.status_code == 303 and "1%20Vorschl" in r.headers["location"]
+
+
+@pytest.mark.parametrize("title, file_name, needed", [
+    ("Scan_0012", "Scan_0012.pdf", True),
+    ("IMG 2024-01-03", None, True),
+    ("Lohnabrechnung Mai 2026", "Lohnabrechnung Mai 2026.pdf", False),  # sprechender Dateiname: kein Vorschlag
+    ("scan_dokument_neu", "scan_dokument_neu.pdf", True),  # nur Scanner-Wörter
+    ("", None, True),
+])
+def test_title_needs_suggestion(title, file_name, needed):
+    assert metadata.title_needs_suggestion(title, file_name) is needed
+
+
+def test_keep_title(client):
+    with session_scope() as s:
+        d = Document(id=830, title="Scan_0830", tags=[], original_file_name="Scan_0830.pdf")
+        d.meta_suggestion = {"tags": [], "title": {"value": "Irgendwas", "source": "llm"}, "at": "2026-10-01T00:00:00+00:00"}
+        metadata.refresh_pending(d)
+        s.add(d)
+    page = client.get("/paperless-changes").text
+    assert 'data-doc="830"' in page and "Titel behalten" in page and "jetzigen einsetzen" in page
+    r = client.post("/documents/830/keep-title", headers={"X-Requested-With": "fetch"})
+    assert "bleibt" in r.json()["msg"]
+    with session_scope() as s:
+        doc = s.get(Document, 830)
+        assert not [i for i in metadata.pending(doc, everything=True) if i["key"] == "title"]
+        assert doc.meta_dismissed["title"] == "Irgendwas" and not doc.meta_pending
+        # auch ein neuer Vorschlag kommt nicht wieder
+        doc.meta_suggestion = {**doc.meta_suggestion, "title": {"value": "Ganz anders", "source": "llm"}}
+        assert not [i for i in metadata.pending(doc, everything=True) if i["key"] == "title"]
+    assert "Titelvorschläge wieder zulassen" in client.get("/documents/830").text
+    client.post("/documents/830/keep-title", data={"undo": "1"})
+    with session_scope() as s:
+        assert [i["new"] for i in metadata.pending(s.get(Document, 830)) if i["key"] == "title"] == ["Ganz anders"]
+
+
+def test_keep_title_in_review(client):
+    with session_scope() as s:
+        d = Document(id=831, title="Scan_0831", tags=[], original_file_name="Scan_0831.pdf")
+        d.meta_suggestion = {"tags": [{"name": "Haus", "source": "llm"}], "title": {"value": "Irgendwas", "source": "llm"},
+                             "at": "2026-10-01T00:00:00+00:00"}
+        metadata.refresh_pending(d)
+        s.add(d)
+    r = client.post("/review/831", data={"action": "keep_title"}, follow_redirects=False)
+    assert "after=830" in r.headers["location"]  # dasselbe Dokument (Tag noch offen) wird wieder gezeigt
+    with session_scope() as s:
+        assert [i["key"] for i in metadata.pending(s.get(Document, 831))] == ["tag:Haus"]

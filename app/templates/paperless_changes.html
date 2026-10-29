@@ -76,7 +76,12 @@
     <span class="change">{% if it.current %}<span class="old">{{ it.current }}</span> → {% elif kind == 'tag' %}+ {% endif %}<strong>{{ it.new }}</strong>
       {% if it.new_tag %}<small class="soon" title="{{ TIPS.neuer_tag }}">neuer Tag</small>{% endif %}
       <span class="edit-btn" role="button" tabindex="0" title="Vorschlag korrigieren und so vormerken"
-        onclick="editSugg(event, this)" onkeydown="if (event.key === 'Enter' || event.key === ' ') editSugg(event, this)">✎ ändern</span></span>
+        onclick="editSugg(event, this)" onkeydown="if (event.key === 'Enter' || event.key === ' ') editSugg(event, this)">✎ ändern</span>
+      {%- if kind == 'title' and it.current %}
+      <span class="edit-btn keep-btn" role="button" tabindex="0" data-doc="{{ doc.id }}"
+        title="Jetzigen Titel behalten – für dieses Dokument wird kein Titel mehr vorgeschlagen (auf der Dokumentseite rückgängig zu machen)"
+        onclick="keepTitle(event, this)" onkeydown="if (event.key === 'Enter' || event.key === ' ') keepTitle(event, this)">Titel behalten</span>
+      {%- endif %}</span>
     <span class="when"><span class="badge src-{{ it.source }}" title="{{ TIPS.get(it.source, '') }}">{{ META_SOURCES.get(it.source, it.source) }}</span>
       {% if it.state == 'accepted' %}vorgemerkt <span class="nowrap">{{ it.at|ts }}</span>{% if it.suggested_at %} · <span class="muted">Vorschlag <span class="nowrap">{{ it.suggested_at|ts }}</span></span>{% endif %}
       {%- else %}Vorschlag <span class="nowrap">{{ it.at|ts }}</span>{% endif %}</span>
@@ -93,6 +98,9 @@
       {% if kind == 'tag' %}list="tag-choices"{% elif kind == 'correspondent' %}list="corr-choices"{% endif %}
       onkeydown="if (event.key === 'Enter') { event.preventDefault(); this.closest('.sugg-edit').querySelector('button[name=edit]').click(); }">
     {% endif %}
+    {% if kind == 'title' and it.current %}<button type="button" class="small"
+      onclick="const f = this.closest('.sugg-edit').querySelector('input[name$=_value]'); f.value = this.dataset.current; f.focus();"
+      data-current="{{ it.current }}" title="Jetzigen Titel ins Feld übernehmen, um ihn anzupassen">jetzigen einsetzen</button>{% endif %}
     <button type="submit" class="small primary" name="edit" value="{{ gid }}" formaction="/paperless-changes/edit">So vormerken</button>
     <button type="button" class="small link" onclick="toggleBox(this.closest('.sugg-edit'), false)">Abbrechen</button>
     {% if kind == 'tag' %}<small class="muted">Der vorgeschlagene Tag wird dabei verworfen; ein neuer Name wird beim Übertragen als Tag angelegt.</small>
@@ -307,6 +315,18 @@ function editSugg(event, el) {
   const box = el.closest('.sugg-item').querySelector('.sugg-edit');
   toggleBox(box, box.hidden);
   if (!box.hidden) { const f = box.querySelector('input:not([type=hidden]), select'); f.focus(); if (f.select) f.select(); }
+}
+// Jetzigen Titel behalten: ohne Neuladen, Zeile verschwindet
+async function keepTitle(event, el) {
+  event.preventDefault();
+  event.stopPropagation();
+  const r = await fetch(`/documents/${el.dataset.doc}/keep-title`, { method: 'POST', headers: { 'X-Requested-With': 'fetch' } });
+  if (!r.ok) { alert('Das hat nicht geklappt.'); return; }
+  const item = el.closest('.sugg-item'), form = el.closest('form');
+  const block = item.closest('.docblock');
+  item.remove();
+  if (block && !block.querySelector('.sugg-item')) block.remove();
+  if (form) countSel(form.id);
 }
 // Zugeklappte Bereiche schicken ihre Felder nicht mit (sonst wird das Formular bei vielen Vorschlägen zu groß)
 function toggleBox(box, show) {

@@ -1538,6 +1538,24 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                 count += metadata.apply_value(session, doc, key, item["new"], item["new_tag"])
         return item, count
 
+    @app.post("/documents/{doc_id}/keep-title")
+    def document_keep_title(request: Request, doc_id: int, undo: str = Form(""), session: Session = Depends(get_session)):
+        """Jetzigen Titel behalten (nie wieder einen Titel vorschlagen) bzw. das wieder zulassen."""
+        doc = session.get(Document, doc_id)
+        if doc is None:
+            raise HTTPException(404)
+        if undo:
+            dismissed = {k: v for k, v in (doc.meta_dismissed or {}).items() if k != metadata.KEEP_TITLE}
+            doc.meta_dismissed = dismissed or None
+            metadata.refresh_pending(doc)
+            msg = "Titelvorschläge für dieses Dokument wieder zugelassen"
+        else:
+            metadata.keep_title(session, doc)
+            msg = f"Titel „{doc.title}“ bleibt – es wird kein anderer mehr vorgeschlagen"
+        if request.headers.get("x-requested-with") == "fetch":
+            return {"msg": msg}
+        return RedirectResponse(f"/documents/{doc_id}?msg={quote(msg)}#metadata", status_code=303)
+
     @app.post("/paperless-changes/edit")
     async def paperless_changes_edit(request: Request, session: Session = Depends(get_session)):
         """Vorschlag mit eigenem Wert vormerken (Titel, Tag, Korrespondent, Dokumenttyp) – nur im Companion."""
@@ -1610,6 +1628,12 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                 msg += f", {metadata.dismiss(session, doc, rest)} verworfen" if rest else ""
         elif action == "dismiss":
             msg = f"{metadata.dismiss(session, doc, keys or open_keys)} verworfen"
+        elif action == "keep_title":
+            metadata.keep_title(session, doc)
+            query = meta_query(flt)
+            msg = f"„{doc.title}“: Titel bleibt, es wird kein anderer mehr vorgeschlagen"
+            # dasselbe Dokument erneut zeigen, falls es noch andere Vorschläge hat
+            return RedirectResponse(f"/review?{query}{'&' if query else ''}after={doc_id - 1}&msg={quote(msg)}", status_code=303)
         elif action == "skip":
             msg = "übersprungen"
         else:

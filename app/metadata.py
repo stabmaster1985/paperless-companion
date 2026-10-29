@@ -53,6 +53,18 @@ def is_generic_title(title: str | None, original_file_name: str | None = None) -
     return False
 
 
+# Wörter aus Scanner-/Kamera-Dateinamen – ein Titel nur aus solchen Wörtern sagt nichts über den Inhalt
+SCANNER_WORDS = {"scan", "scanned", "img", "image", "bild", "foto", "photo", "dok", "doc", "document", "dokument", "datei",
+                 "file", "unbenannt", "untitled", "neu", "new", "brother", "canon", "epson", "xerox", "pdf", "kopie", "copy"}
+KEEP_TITLE = "title_keep"  # in meta_dismissed: Titel behalten, nie wieder vorschlagen
+
+
+def title_needs_suggestion(title: str | None, original_file_name: str | None = None) -> bool:
+    """Lohnt ein Titelvorschlag? Nur bei nichtssagenden Titeln – ein Titel gleich dem Dateinamen zählt nicht,
+    wenn er echte Wörter enthält (Paperless übernimmt oft den sprechenden Dateinamen, z.B. „Lohnabrechnung Mai 2026“)."""
+    return is_generic_title(title, original_file_name) and not (title_words(title) - SCANNER_WORDS)
+
+
 # --------------------------------------------------------------------------- Kontext aus dem Archiv
 
 
@@ -331,7 +343,9 @@ def pending(doc: Document, everything: bool = False) -> list[dict]:
         value, current = entry["value"], _current(doc, key)
         if _in_paperless(doc, key, value) or dismissed.get(key) == value:
             continue
-        useful = is_generic_title(current, doc.original_file_name) if key == "title" else not current
+        if key == "title" and dismissed.get(KEEP_TITLE):
+            continue  # „Titel behalten“: für dieses Dokument nie wieder einen Titel vorschlagen
+        useful = title_needs_suggestion(current, doc.original_file_name) if key == "title" else not current
         if useful or everything:
             items.append({"key": key, "label": ITEMS[key], "current": current, "new": value, "source": entry["source"],
                           "new_tag": False, "state": "open", "useful": useful, "at": sugg.get("at")})
@@ -649,8 +663,8 @@ def similar(session: Session, doc: Document, key: str, value: str, limit: int = 
         current = _effective_value(d, key)
         if current and current.strip().lower() == value.strip().lower():
             continue
-        if (d.meta_dismissed or {}).get(key) == value:
-            continue  # für dieses Dokument schon verworfen
+        if (d.meta_dismissed or {}).get(key) == value or (key == "title" and (d.meta_dismissed or {}).get(KEEP_TITLE)):
+            continue  # für dieses Dokument schon verworfen bzw. Titel behalten
         own_title = _own_title(d) if key == "title" else None
         if key == "title" and not own_title and title_words(current):
             continue  # hat schon einen sprechenden Titel und keinen eigenen Vorschlag – nichts zu ändern
@@ -776,3 +790,15 @@ def correct(session: Session, doc: Document, key: str, value: str) -> str:
     new_tag = name.lower() not in {t.lower() for t in opts["tags"]}
     apply_value(session, doc, f"tag:{name}", name, new_tag=new_tag, source="manual")
     return f"Tag „{name}“ statt „{item['new']}“ vorgemerkt" + (" (neuer Tag)" if new_tag else "")
+
+
+def keep_title(session: Session, doc: Document) -> bool:
+    """Jetzigen Titel behalten: offenen bzw. vorgemerkten Titelvorschlag verwerfen und nie wieder einen vorschlagen."""
+    item = next((i for i in pending(doc, everything=True) if i["key"] == "title"), None)
+    if item is not None:
+        dismiss(session, doc, ["title"])
+    dismissed = dict(doc.meta_dismissed or {})
+    dismissed[KEEP_TITLE] = True
+    doc.meta_dismissed = dismissed
+    refresh_pending(doc)
+    return item is not None

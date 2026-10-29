@@ -375,6 +375,11 @@ document.addEventListener('keydown', (e) => {
   {% elif doc.meta_state == 'error' %}
     <p class="bad">{{ doc.extraction_error }}</p>
   {% endif %}
+  {% if (doc.meta_dismissed or {}).get('title_keep') %}
+  <div class="muted"><small>Der Titel wird beibehalten – es werden keine Titel vorgeschlagen.</small>
+    <form method="post" action="/documents/{{ doc.id }}/keep-title" class="inline"><input type="hidden" name="undo" value="1">
+      <button class="small link">Titelvorschläge wieder zulassen</button></form></div>
+  {% endif %}
   {% if meta_items %}
   <form method="post" action="/documents/{{ doc.id }}/meta">
     <div class="table-wrap"><table class="list">
@@ -387,6 +392,8 @@ document.addEventListener('keydown', (e) => {
           <td>{% if it.current %}{{ it.current }}{% elif it.key.startswith('tag:') %}<span class="muted">fehlt</span>{% else %}<span class="muted">leer</span>{% endif %}</td>
           <td>
             {% if it.key == 'title' %}<input name="title" value="{{ it.new }}" maxlength="128" aria-label="Neuer Titel">
+              <button type="submit" class="small link" formaction="/documents/{{ doc.id }}/keep-title" formnovalidate
+                title="Jetzigen Titel behalten – kein Titel wird mehr vorgeschlagen">Titel behalten</button>
             {% else %}<strong>{{ it.new }}</strong>{% endif %}
             <span class="badge src-{{ it.source }}">{{ META_SOURCES.get(it.source, it.source) }}</span>
             {% if it.state == 'accepted' %}<span class="tag tag-ok" title="{{ TIPS.vorgemerkt }}">vorgemerkt</span>{% endif %}
