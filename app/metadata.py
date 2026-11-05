@@ -802,3 +802,15 @@ def keep_title(session: Session, doc: Document) -> bool:
     doc.meta_dismissed = dismissed
     refresh_pending(doc)
     return item is not None
+
+
+def open_counts(session: Session) -> tuple[int, int]:
+    """(offene, vorgemerkte) Metadaten-Vorschläge über alle Dokumente – für Übersicht und Home Assistant."""
+    opened = accepted = 0
+    for doc in session.scalars(select(Document).where(Document.meta_pending.is_(True))):
+        for item in pending(doc):
+            if item["state"] == "open":
+                opened += 1
+            else:
+                accepted += 1
+    return opened, accepted

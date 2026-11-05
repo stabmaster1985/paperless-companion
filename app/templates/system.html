@@ -133,6 +133,18 @@ setInterval(async () => {
     {% endif %}
   </div>
 
+  {% set mq = request.app.state.mqtt %}
+  <div class="card">
+    <h2>Home Assistant (MQTT) {{ help("Kennzahlen per MQTT-Discovery: Home Assistant legt das Gerät „Paperless Companion“ mit seinen Sensoren selbst an.") }}</h2>
+    {% if not settings.mqtt_enabled or not settings.mqtt_host %}
+      <p class="muted">Aus. Einschalten unter <a href="/settings#app-settings">Einstellungen → Home Assistant (MQTT)</a> (Broker eintragen).</p>
+    {% elif mq and mq.connected %}
+      <p>{{ settings.mqtt_host }}:{{ settings.mqtt_port }}</p><p class="ok">✔ verbunden – Topics unter <code>{{ settings.mqtt_base_topic }}/…</code></p>
+    {% else %}
+      <p>{{ settings.mqtt_host }}:{{ settings.mqtt_port }}</p>
+      <p class="bad">nicht verbunden{% if mq and mq.last_error %}: {{ mq.last_error }}{% endif %} – neuer Versuch läuft automatisch</p>
+    {% endif %}
+  </div>
   <div class="card">
     <h2>Firefly III</h2>
     {% if firefly_status is none %}

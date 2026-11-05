@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import appsettings, cases, reimbursements, help as helptexts, identifiers, learning, paperless_rules, receipts, rules as rule_proposals, deadlines, events, fields, highlight, ics, metadata, notify, payments, pipeline, reminders, retention, selection, tax
+from app import appsettings, cases, mqtt, reimbursements, help as helptexts, identifiers, learning, paperless_rules, receipts, rules as rule_proposals, deadlines, events, fields, highlight, ics, metadata, notify, payments, pipeline, reminders, retention, selection, tax
 from app.config import Settings, get_settings
 from app.db import get_session, init_db, session_scope
 from app.models import Case, CaseDocument, CaseEntry, Contract, Document, Invoice, KeyValue, ReceiptCheck, RuleProposal, RetentionLog, RetentionRule, Warranty
@@ -59,9 +59,16 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         settings_changed()
         worker = Worker(settings, version)
         app.state.worker = worker
+        # Home Assistant (MQTT): läuft immer mit, verbindet sich aber nur, wenn eingeschaltet
+        bridge = mqtt.MqttBridge(settings, sw_version=lambda: (version.current() or {}).get("commit", "")[:7] or None,
+                                 on_sync=lambda: (worker.request_sync(), worker.wake.set()), today=today)
+        app.state.mqtt = bridge
+        worker.on_change = bridge.notify  # nach Abgleich und Zahlungsabgleich neu senden
         if start_worker:
             worker.start()
+        bridge.start()
         yield
+        await bridge.stop()
         if start_worker:
             worker.stop()
 
@@ -106,6 +113,14 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     # Muss nach require_login registriert werden, damit request.session dort verfügbar ist
     app.add_middleware(SessionMiddleware, secret_key=settings.secret_key, max_age=60 * 60 * 24 * 30, same_site="lax")
     app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
+
+    @app.middleware("http")
+    async def publish_changes(request: Request, call_next):
+        """Nach jeder Änderung über die Oberfläche (Rechnungen, Fristen, Erstattungen, Vorschläge) neu an MQTT senden."""
+        response = await call_next(request)
+        if request.method != "GET" and response.status_code < 400 and (bridge := getattr(app.state, "mqtt", None)):
+            bridge.notify()
+        return response
 
     @app.middleware("http")
     async def static_revalidate(request: Request, call_next):
@@ -189,13 +204,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             ),
         }
         # „Heute zu tun“: was auf dich wartet, je Bereich
-        meta_open = meta_accepted = 0
-        for doc in session.scalars(select(Document).where(Document.meta_pending.is_(True))):
-            for item in metadata.pending(doc):
-                if item["state"] == "open":
-                    meta_open += 1
-                else:
-                    meta_accepted += 1
+        meta_open, meta_accepted = metadata.open_counts(session)
         rule_counts = Counter(session.scalars(select(RuleProposal.state)))
         todo = {
             "fields": len(pipeline.documents_with_changes(session, settings, t)),
@@ -715,9 +724,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         inv = session.get(Invoice, invoice_id)
         if inv is None:
             raise HTTPException(404)
-        inv.status, inv.paid_on = "paid", today()
-        inv.document.writeback_pending = True
-        pipeline.set_source(inv.document, ["status", "paid_on"], "manual", confirmed=True)
+        mqtt.mark_paid(session, inv.document_id, today())  # dieselbe Aktion wie „bezahlt“ aus Home Assistant
         request_worker(app)
         return RedirectResponse("/invoices", status_code=303)
 

@@ -24,6 +24,7 @@ Paperless archiviert Dokumente und macht sie durchsuchbar. Der Companion leitet 
   Archiv mit Protokoll.
 - **Dashboard:** anstehende Fristen, offene Beträge, monatliche Fixkosten.
 - **Erinnerungen** per ntfy oder E-Mail sowie ein **Kalender-Feed (ICS)** für Handy und Outlook.
+- **Home Assistant:** Kennzahlen per MQTT-Discovery (offene Rechnungen, Fristen, Erstattungen …), optional.
 - **Paperless bleibt unangetastet:** Vorschläge für deine Custom Fields übernimmst du gezielt
   auf der Seite „Für Paperless“.
 
@@ -448,6 +449,65 @@ nach Eintippen von „LÖSCHEN“ möglich. Gelöschte Dokumente landen im Papie
 Paperless. Jede Aktion wird protokolliert.
 
 Die mitgelieferten Regeln sind Beispiele für Privathaushalte und keine Rechtsberatung.
+
+## Home Assistant (MQTT)
+
+Optional sendet der Companion seine wichtigsten Kennzahlen per MQTT an den Broker im Heimnetz. Über die
+**MQTT-Discovery** legt Home Assistant das Gerät **„Paperless Companion“** mit allen Sensoren selbst an – ohne YAML,
+ohne Neustart, ohne API-Token. Standardmäßig ist das aus; ohne Broker arbeitet die App wie bisher, und ist der
+Broker nicht erreichbar, verbindet sie sich im Hintergrund mit Wartezeit neu (5 s bis 5 min).
+
+**Einschalten** in der `.env` (oder in der App unter *Einstellungen → Home Assistant (MQTT)*):
+
+```env
+MQTT_ENABLED=true
+MQTT_HOST=192.168.0.102
+PUBLIC_URL=http://192.168.0.114:8010
+```
+
+| Variable | Standard | Bedeutung |
+|---|---|---|
+| `MQTT_ENABLED` | `false` | MQTT-Export ein/aus |
+| `MQTT_HOST`, `MQTT_PORT` | –, `1883` | Broker |
+| `MQTT_USER`, `MQTT_PASSWORD` | leer | optional |
+| `MQTT_BASE_TOPIC` | `paperless_companion` | Präfix für Status und Daten |
+| `MQTT_DISCOVERY_PREFIX` | `homeassistant` | Home-Assistant-Standard |
+| `MQTT_PUBLISH_INTERVAL` | `900` | Sekunden zwischen regelmäßigen Veröffentlichungen |
+| `PUBLIC_URL` | leer | Adresse des Companion, für `configuration_url` und Dokument-Links |
+
+**Topics** (alle retained):
+
+| Topic | Inhalt |
+|---|---|
+| `paperless_companion/status` | `online` / `offline` (Last Will) |
+| `paperless_companion/state` | Kennzahlen als JSON (siehe unten) |
+| `paperless_companion/rechnungen` | bis zu 15 offene Rechnungen nach Fälligkeit (Attribute von „Offene Rechnungen“) |
+| `paperless_companion/fristen` | bis zu 15 kommende Fristen (Attribute von „Fristen (30 Tage)“) |
+| `homeassistant/<komponente>/paperless_companion/<objekt>/config` | Discovery-Configs |
+
+Gesendet wird nach jedem Abgleich, nach Änderungen in der App (z.B. Rechnung bezahlt, Vorschlag vorgemerkt),
+nach Analysen und zusätzlich alle `MQTT_PUBLISH_INTERVAL` Sekunden. Startet Home Assistant neu
+(`homeassistant/status` = `online`), werden alle Configs und Werte neu gesendet.
+
+```json
+{"offene_rechnungen": 3, "offene_rechnungen_summe": 412.8, "ueberfaellige_rechnungen": 1,
+ "naechste_faelligkeit": "2026-11-12", "naechste_faelligkeit_titel": "Stadtwerke", "naechste_faelligkeit_betrag": 89.0,
+ "fristen_30_tage": 2, "naechste_frist": "2026-11-30", "naechste_frist_titel": "Handyvertrag",
+ "garantien_30_tage": 0, "erstattungen_offen": 1, "erstattungen_summe": 54.2, "zur_pruefung": 7,
+ "letzter_sync": "2026-11-05T09:30:00+01:00"}
+```
+
+Die Werte kommen aus derselben Logik wie die Übersicht: offene Rechnungen ohne Lastschriften, Fristen =
+Kündigungsfristen, Vertragsenden und Wiedervorlagen, Erstattungen = „Geld erwartet“, „zur Prüfung“ = Dokumente
+in der Inbox plus offene Metadaten-Vorschläge.
+
+**Entitäten:** Offene Rechnungen (+ Summe), Überfällige Rechnungen, Nächste Fälligkeit, Fristen (30 Tage),
+Nächste Frist, Garantien laufen ab (30 Tage), Offene Erstattungen, Vorschläge zur Prüfung, Letzter Abgleich,
+Binärsensor „Rechnung überfällig“ und der Knopf **„Jetzt abgleichen“** (`paperless_companion/cmd/sync`).
+
+**Als bezahlt markieren aus Home Assistant:** `paperless_companion/cmd/bezahlt` mit `{"doc_id": 1234}` markiert die
+Rechnung wie „Bezahlt“ in der App. Nach Paperless geht dabei – wie sonst auch – nichts ohne deine Zustimmung unter
+„Für Paperless“. Den Verbindungsstatus zeigt die Systemseite.
 
 ## Zuordnung der Dokumente
 

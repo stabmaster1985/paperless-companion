@@ -52,6 +52,7 @@ class Worker:
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name="companion-worker", daemon=True)
         self._last_sync = 0.0
+        self.on_change = None  # z.B. MQTT: nach Abgleich neu senden
         self._last_payments = -3600.0
         self._last_tidy = 0.0
         self._last_llm_retry = 0.0
@@ -130,6 +131,7 @@ class Worker:
                     self.sync_requested = False
                     self._last_sync = time.monotonic()
                     self._sync(paperless)
+                    self._changed()
                 self._index_sync(paperless)
                 self._payments()
                 self._tidy_changes()
@@ -138,6 +140,8 @@ class Worker:
                     self.version.refresh()  # höchstens stündlich bei GitHub
                 self._reminders()
                 worked = self._next_job(paperless, ollama)
+                if worked:
+                    self._changed()  # Analyse kann Rechnungen/Fristen anlegen
             except Exception as exc:  # noqa: BLE001 - Thread darf nicht sterben
                 log.exception("Fehler im Hintergrundprozess")
                 self.last_error = str(exc)
@@ -145,6 +149,13 @@ class Worker:
             if not worked:
                 self.wake.wait(10)
                 self.wake.clear()
+
+    def _changed(self) -> None:
+        if self.on_change is not None:
+            try:
+                self.on_change()
+            except Exception:  # noqa: BLE001 - Benachrichtigung darf den Worker nie stören
+                log.exception("Benachrichtigung nach Änderung fehlgeschlagen")
 
     def _sync(self, paperless: PaperlessClient) -> None:
         if not self.settings.paperless_token:
@@ -218,6 +229,7 @@ class Worker:
         try:
             with session_scope() as session:
                 counts = payments.run(session, client, self.settings, datetime.now(self.tz).date())
+            self._changed()
             with session_scope() as session:
                 found = receipts.run(session, client, self.settings, datetime.now(self.tz).date())
             with session_scope() as session:

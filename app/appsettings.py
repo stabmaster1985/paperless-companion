@@ -93,6 +93,17 @@ SECTIONS: list[tuple[str, list[tuple[str, str, str]]]] = [
         ("smtp_to", "Empfänger", ""),
         ("smtp_starttls", "STARTTLS", ""),
     ]),
+    ("Home Assistant (MQTT)", [
+        ("mqtt_enabled", "Kennzahlen per MQTT an Home Assistant senden", "Discovery: Home Assistant legt die Sensoren selbst an"),
+        ("mqtt_host", "MQTT-Broker", "z.B. 192.168.0.102"),
+        ("mqtt_port", "Port", ""),
+        ("mqtt_user", "Benutzer", "leer = ohne Anmeldung"),
+        ("mqtt_password", "Passwort", ""),
+        ("mqtt_base_topic", "Topic-Präfix", ""),
+        ("mqtt_discovery_prefix", "Discovery-Präfix", "Home-Assistant-Standard: homeassistant"),
+        ("mqtt_publish_interval", "Regelmäßig senden alle … Sekunden", "zusätzlich nach jeder Änderung"),
+        ("public_url", "Adresse des Companion", "für Links in Home Assistant, z.B. http://192.168.0.114:8010"),
+    ]),
     ("Zugänge und Updates", [
         ("webhook_token", "Token für den Paperless-Webhook", ""),
         ("ics_token", "Token für den Kalender-Link", ""),
@@ -105,7 +116,7 @@ SECTIONS: list[tuple[str, list[tuple[str, str, str]]]] = [
     ]),
 ]
 FIELDS = {name: (label, hint) for _, items in SECTIONS for name, label, hint in items}
-SECRETS = {"paperless_token", "firefly_token", "ntfy_token", "smtp_password", "update_github_token",
+SECRETS = {"paperless_token", "firefly_token", "ntfy_token", "smtp_password", "update_github_token", "mqtt_password",
            "update_webhook_secret", "webhook_token", "ics_token"}
 CHOICES = {
     "llm_provider": [("ollama", "ja (Ollama)"), ("none", "nein, nur Regeln")],

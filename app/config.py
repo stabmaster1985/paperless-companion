@@ -37,6 +37,17 @@ class Settings(BaseSettings):
     doctypes_other: str = ""  # nie auswerten (z.B. Gehaltsabrechnung, Kontoauszug)
     # Rechnungen mit diesem Tag gelten als erstattungsfähig (z.B. Arztrechnungen): ohne verknüpfte Erstattung „noch offen“
     reimbursable_tag: str = ""
+
+    # Home Assistant per MQTT (Discovery) – optional, standardmäßig aus
+    mqtt_enabled: bool = False
+    mqtt_host: str = ""
+    mqtt_port: int = 1883
+    mqtt_user: str = ""
+    mqtt_password: str = ""
+    mqtt_base_topic: str = "paperless_companion"
+    mqtt_discovery_prefix: str = "homeassistant"
+    mqtt_publish_interval: int = 900  # Sekunden zwischen regelmäßigen Veröffentlichungen
+    public_url: str = ""  # Adresse des Companion im Heimnetz, für Links in Home Assistant
     keyword_classification: bool = True
 
     # LLM
