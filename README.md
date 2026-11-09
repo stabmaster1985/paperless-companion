@@ -1,6 +1,7 @@
 # Paperless Companion
 
 [![Tests](https://github.com/stabmaster1985/paperless-companion/actions/workflows/tests.yml/badge.svg)](https://github.com/stabmaster1985/paperless-companion/actions/workflows/tests.yml)
+[![Unterstützen mit PayPal](https://img.shields.io/badge/Unterst%C3%BCtzen-PayPal-00457C?logo=paypal&logoColor=white)](https://www.paypal.me/FrankTylinski)
 
 Fristen-, Rechnungs- und Vertragscockpit für [Paperless NGX](https://docs.paperless-ngx.com/).
 
@@ -593,3 +594,11 @@ Verzeichnis.
 - Abgleich mit Kontoauszügen als CSV (ohne Firefly III)
 - Optionale Cloud-API, pro Dokumenttyp freischaltbar
 - Haushaltsnahe Dienstleistungen (§ 35a EStG): Arbeitskosten aus Handwerkerrechnungen erkennen
+
+## Unterstützen
+
+Dir hilft der Paperless Companion? Über eine kleine Unterstützung freue ich mich sehr –
+sie fließt in die Weiterentwicklung:
+
+[![Unterstützen mit PayPal](https://img.shields.io/badge/Unterst%C3%BCtzen-PayPal-00457C?logo=paypal&logoColor=white)](https://www.paypal.me/FrankTylinski)
+**[paypal.me/FrankTylinski](https://www.paypal.me/FrankTylinski)**
