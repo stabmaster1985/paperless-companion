@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% from "macros.html" import help %}
+{% block content %}
+<div class="head">
+  <h1>Serien</h1>
+  <form method="post" action="/series/refresh" class="inline"><button class="small">Serien neu berechnen</button></form>
+</div>
+{% if msg %}<div class="notice">{{ msg }}</div>{% endif %}
+<p class="muted">Wiederkehrende Dokumente – gleicher Absender, gleicher Betreff (Titel ohne Monat, Jahr und Zahlen). Aus den schon
+  abgelegten Dokumenten einer Serie, einschließlich allem Vorgemerkten, leitet die App Titelmuster, Tags und Dokumenttyp ab und
+  schlägt sie für die übrigen vor – ohne AI. Zuletzt berechnet: {{ computed_at|ts }}.</p>
+{% if series_list %}
+<div class="series-cards">
+  {% for sc in series_list %}{% set c = counts.get(sc.id) %}
+  <article class="series-card {{ 'has-open' if c }}">
+    <div class="series-head">
+      <a href="/series/{{ sc.id }}"><strong>{{ sc.name }}</strong></a>
+      <small class="muted">{{ sc.correspondent or 'ohne Korrespondent' }} · {{ sc.size }} Dokumente, {{ sc.refs }} schon abgelegt</small>
+    </div>
+    <div class="series-what">
+      {% if sc.pattern %}<span class="kind-pill k-title">Titel: {{ sc.pattern }}</span>{% endif %}
+      {% for t in sc.tags %}<span class="kind-pill k-tag">{{ t }}</span>{% endfor %}
+      {% if sc.document_type %}<span class="kind-pill k-document_type">{{ sc.document_type }}</span>{% endif %}
+      {% if not sc.pattern and not sc.tags and not sc.document_type %}<small class="muted">noch kein einheitliches Muster – erst wenige Dokumente abgelegt</small>{% endif %}
+    </div>
+    <div class="series-actions">
+      {% if c %}<a class="button small primary" href="/paperless-changes?series={{ sc.id }}#metadata">{{ c.docs }} {{ 'Dokument' if c.docs == 1 else 'Dokumente' }} mit offenen Vorschlägen</a>
+      {% else %}<small class="muted">nichts offen</small>{% endif %}
+      <a class="small" href="/series/{{ sc.id }}">Dokumente und Regel-Vorlage</a>
+    </div>
+  </article>
+  {% endfor %}
+</div>
+{% else %}
+<p class="empty">Noch keine Serien erkannt. Eine Serie entsteht ab drei Dokumenten mit gleichem Absender und Betreff.</p>
+{% endif %}
+{% endblock %}

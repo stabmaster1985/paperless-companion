@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import appsettings, cases, mqtt, reimbursements, help as helptexts, identifiers, learning, paperless_rules, receipts, rules as rule_proposals, deadlines, events, fields, highlight, ics, metadata, notify, payments, pipeline, reminders, retention, selection, tax
+from app import appsettings, cases, mqtt, reimbursements, series, help as helptexts, identifiers, learning, paperless_rules, receipts, rules as rule_proposals, deadlines, events, fields, highlight, ics, metadata, notify, payments, pipeline, reminders, retention, selection, tax
 from app.config import Settings, get_settings
 from app.db import get_session, init_db, session_scope
 from app.models import Case, CaseDocument, CaseEntry, Contract, Document, Invoice, KeyValue, ReceiptCheck, RuleProposal, RetentionLog, RetentionRule, Warranty
@@ -1255,9 +1255,21 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         rows = session.scalars(query).all()
         titles = {d.id: d.title for d in session.scalars(select(Document).where(
             Document.id.in_([r.document_id for r in rows if r.document_id] or [-1])))}
+        fixed = receipts.fixed_documents(session)
         return render(request, "receipts.html", rows=rows, state=state, msg=msg, STATES=receipts.STATES,
                       overview=receipts.overview(session), ignored=receipts.ignored_counterparties(session),
-                      titles=titles, settings=settings)
+                      titles=titles, settings=settings, fixed=fixed, party_key=receipts.party_key,
+                      fixed_titles={k: (session.get(Document, v).title if session.get(Document, v) else f"#{v}")
+                                    for k, v in fixed.items()})
+
+    @app.get("/receipts/{row_id}/search", response_class=HTMLResponse)
+    def receipts_search(request: Request, row_id: int, q: str = "", state: str = "open",
+                        session: Session = Depends(get_session)):
+        """Dokumente für die Buchungskarte suchen (Titel, Absender, ID) – Ergebnis wird in die Karte geladen."""
+        row = session.get(ReceiptCheck, row_id)
+        if row is None:
+            raise HTTPException(404)
+        return render(request, "_receipt_search.html", row=row, docs=receipts.search_documents(session, row, q), q=q, state=state)
 
     @app.post("/receipts/run")
     def receipts_run(session: Session = Depends(get_session)):
@@ -1265,7 +1277,11 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         if client is None:
             return RedirectResponse(f"/receipts?msg={quote('Firefly ist nicht eingerichtet (Einstellungen → Firefly III)')}", status_code=303)
         try:
-            found = receipts.run(session, client, settings, today())
+            paperless = make_paperless(settings, timeout=30)
+            try:
+                found = receipts.run(session, client, settings, today(), paperless)
+            finally:
+                paperless.close()
             msg = (f"{found['checked']} Abbuchungen geprüft: {found['missing']} ohne Beleg, "
                    f"{found['candidate']} mit möglichem Beleg, {found['linked']} zugeordnet")
         except FireflyError as exc:
@@ -1317,6 +1333,16 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                 if other.counterparty.lower() == row.counterparty.lower():
                     other.state, other.note = "ignored", "Empfänger ausgeblendet"
             msg = f"„{row.counterparty}“ wird künftig ausgeblendet"
+        elif action == "always" and row.document_id:
+            receipts.set_fixed(session, row.counterparty, row.document_id)
+            for other in session.scalars(select(ReceiptCheck).where(ReceiptCheck.decided.is_(False))):
+                if receipts.party_key(other.counterparty) == receipts.party_key(row.counterparty):
+                    other.state, other.document_id, other.candidates = "linked", row.document_id, None
+                    other.note = "Dauerauftrag: immer dieses Dokument"
+            msg = f"Buchungen an „{row.counterparty}“ werden künftig immer diesem Dokument zugeordnet"
+        elif action == "always-off":
+            receipts.set_fixed(session, row.counterparty, None)
+            msg = f"Feste Zuordnung für „{row.counterparty}“ aufgehoben"
         elif action == "reopen":
             receipts.reopen(row)
             msg = "Wieder offen"
@@ -1467,7 +1493,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     def paperless_changes(request: Request, msg: str = "", session: Session = Depends(get_session)):
         flt = {k: str(request.query_params.get(k) or "").strip() for k in metadata.FILTER_KEYS}
         what, source, value = flt["what"], flt["source"], flt["value"]
-        doc_flt = {k: flt[k] for k in ("has_tag", "correspondent", "doctype", "q")}
+        doc_flt = {k: flt[k] for k in ("has_tag", "correspondent", "doctype", "q", "series")}
         rows = pipeline.documents_with_changes(session, settings, today())
         names = fields.role_names(settings)
         meta_open, meta_accepted = [], []
@@ -1492,12 +1518,22 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                     if i["key"].startswith("tag:") and (not source or i["source"] == source):
                         counts["tags"][i["new"]] += 1
             shown = metadata.filter_items(items, what, source, value)
+            if flt["check"]:
+                shown = [i for i in shown if metadata.questionable(doc, i, settings.year_tags)]
             for state, target in (("accepted", meta_accepted), ("open", meta_open)):
                 if hit := [i for i in shown if i["state"] == state]:
                     # übrige Vorschläge desselben Dokuments, die der Filter ausblendet (aufklappbar daneben)
                     keys = {i["key"] for i in hit}
                     target.append((doc, hit, [i for i in items if i["state"] == state and i["key"] not in keys]))
         meta_filter = flt
+        # Serien wiederkehrender Dokumente mit offenen Vorschlägen (Karten oben) und fragliche Vormerkungen
+        series_open = series.open_counts(session)
+        series_cards = [{**s, **series_open[s["id"]]} for s in series.stored(session)["series"] if s["id"] in series_open]
+        series_cards.sort(key=lambda s: -s["docs"])
+        questionable_count = sum(
+            1 for doc in session.scalars(select(Document).where(Document.meta_accepted.is_not(None)))
+            for i in metadata.pending(doc) if i["state"] == "accepted" and metadata.questionable(doc, i, settings.year_tags))
+
         def newest(values):
             values = [v for v in values if v]
             return max(values) if values else None
@@ -1515,7 +1551,8 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             request, "paperless_changes.html", rows=rows, last=last, change_info=pipeline.change_info,
             SOURCE_LABELS=pipeline.SOURCE_LABELS, names=names, msg=msg, create_fields=settings.writeback_create_fields,
             meta_open=meta_open, meta_accepted=meta_accepted, meta_filter=meta_filter, meta_counts=counts,
-            META_CHOICES=metadata.choices(session),
+            META_CHOICES=metadata.choices(session), series_cards=series_cards, questionable_count=questionable_count,
+            series_name=next((s["name"] for s in series.stored(session)["series"] if s["id"] == flt["series"]), None),
             mq=lambda **changes: meta_query({**flt, **changes}), NONE=metadata.NONE,
             meta_open_count=sum(len(i) for _, i, _ in meta_open), meta_query=meta_query(meta_filter), meta_accepted_count=sum(len(i) for _, i, _ in meta_accepted), quality=metadata.quality(session), META_ITEMS=metadata.ITEMS,
             META_SOURCES=metadata.SOURCES, hints=metadata.archive_hints(session), HINTS=metadata.HINTS,
@@ -1524,6 +1561,32 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             llm_now=settings.llm_allowed_at(datetime.now(ZoneInfo(settings.timezone)).hour),
             settings=settings,
         )
+
+    @app.get("/series", response_class=HTMLResponse)
+    def series_page(request: Request, msg: str = "", session: Session = Depends(get_session)):
+        data = series.stored(session)
+        counts = series.open_counts(session)
+        return render(request, "series.html", msg=msg, series_list=data["series"], computed_at=data["at"], counts=counts)
+
+    @app.post("/series/refresh")
+    def series_refresh(back: str = Form("/series"), session: Session = Depends(get_session)):
+        result = series.refresh(session, settings.year_tags, settings.series_auto_accept)
+        msg = (f"{result['series']} Serien erkannt, Vorschläge bei {result['changed']} Dokumenten aktualisiert"
+               + (f", {result['accepted']} Werte vorgemerkt" if result["accepted"] else ""))
+        target = back if back.startswith("/") and not back.startswith("//") else "/series"
+        return RedirectResponse(f"{target}{'&' if '?' in target else '?'}msg={quote(msg)}", status_code=303)
+
+    @app.get("/series/{series_id}", response_class=HTMLResponse)
+    def series_detail(request: Request, series_id: str, session: Session = Depends(get_session)):
+        current = next((s for s in series.build(session) if s.id == series_id), None)
+        if current is None:
+            raise HTTPException(404, "Serie nicht gefunden – evtl. hat sie sich geändert (Serien neu berechnen)")
+        members = []
+        for doc in reversed(current.members):
+            items = [i for i in metadata.pending(doc, everything=True) if i["source"] == "series"]
+            members.append((doc, [i for i in items if i["state"] == "open"], [i for i in items if i["state"] == "accepted"]))
+        return render(request, "series_detail.html", s=current, members=members,
+                      workflow=series.workflow(current.as_dict(), settings.rules_review_tag))
 
     @app.post("/paperless-changes/meta-backfill")
     def paperless_changes_meta_backfill(session: Session = Depends(get_session)):
@@ -1545,7 +1608,8 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         if action.endswith("_all"):
             # alle mit dem aktuellen Filter angezeigten (vorgemerkte bzw. offene)
             state = "accepted" if action == "transfer_all" else "open"
-            selected = {doc.id: [i["key"] for i in items] for doc, items in metadata.pending_rows(session, state, **flt)}
+            selected = {doc.id: [i["key"] for i in items]
+                        for doc, items in metadata.pending_rows(session, state, **flt, year_mode=settings.year_tags)}
             action = action.removesuffix("_all")
         groups = similar_groups(form) if action == "accept" else {}
         if not any(selected.values()) or action not in ("accept", "dismiss", "withdraw", "transfer"):
@@ -1674,7 +1738,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     @app.get("/review", response_class=HTMLResponse)
     def review_page(request: Request, after: int = 0, msg: str = "", session: Session = Depends(get_session)):
         flt = {k: str(request.query_params.get(k) or "").strip() for k in metadata.FILTER_KEYS}
-        rows = metadata.pending_rows(session, "open", **flt)
+        rows = metadata.pending_rows(session, "open", **flt, year_mode=settings.year_tags)
         nxt = next(((d, items) for d, items in rows if d.id > after), None) or (rows[0] if rows and after else None)
         position = [d.id for d, _ in rows].index(nxt[0].id) + 1 if nxt else 0
         return render(request, "review.html", current=nxt, total=len(rows), position=position, msg=msg,

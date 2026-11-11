@@ -77,6 +77,15 @@ class PaperlessClient:
     def get_document(self, doc_id: int) -> dict:
         return self._get(f"/api/documents/{doc_id}/")
 
+    def search(self, query: str, start=None, end=None, limit: int = 10) -> list[dict]:
+        """Volltextsuche (nur lesend), optional auf einen Zeitraum des Dokumentdatums begrenzt."""
+        params = {"query": query, "page_size": limit, "fields": "id,title,correspondent,created"}
+        if start:
+            params["created__date__gte"] = start.isoformat()
+        if end:
+            params["created__date__lte"] = end.isoformat()
+        return list(self._get("/api/documents/", **params).get("results", []))[:limit]
+
     def all_documents_metadata(self) -> tuple[int, Iterator[dict]]:
         """Alle Dokumente ohne Inhalt (für den Archiv-Index). Liefert (Anzahl, Iterator)."""
         params = {

@@ -539,7 +539,7 @@ main > h1, main > .head h1 { border-left: 5px solid var(--page, var(--accent)); 
 .area-warranties { --page: #c2410c; }
 .area-receipts { --page: #b91c1c; }
 .area-paperless-changes, .area-review { --page: #17845f; }
-.area-rules { --page: #7c3aed; }
+.area-rules, .area-series { --page: #7c3aed; }
 .area-documents, .area-cases { --page: #1d4ed8; }
 .area-tax, .area-retention { --page: #b45309; }
 .area-settings, .area-system, .area-help { --page: #64748b; }
@@ -687,3 +687,21 @@ body.docview-open { overflow: hidden; }
 .sugg-edit small { flex-basis: 100%; }
 @media (max-width: 640px) { .sugg-edit { padding-left: .5rem; padding-right: .5rem; } }
 .similar-list .sim-title { display: block; width: 100%; margin: .1rem 0 .4rem 1.6rem; max-width: calc(100% - 1.6rem); font-size: .9rem; }
+
+/* Serien */
+.section-series { border-top: 3px solid #7c3aed; }
+.series-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr)); gap: .6rem; }
+.series-card { border: 1px solid var(--border); border-left: 5px solid #7c3aed; border-radius: var(--radius); padding: .6rem .75rem;
+  background: var(--surface); display: flex; flex-direction: column; gap: .4rem; min-width: 0; }
+.series-head { display: flex; flex-direction: column; overflow-wrap: anywhere; }
+.series-what { display: flex; flex-wrap: wrap; gap: .3rem; }
+.series-what .kind-pill { font-size: .78rem; }
+.series-actions { display: flex; flex-wrap: wrap; gap: .4rem .6rem; align-items: center; margin-top: auto; }
+.series-profile { max-width: 34rem; margin-left: 0; }
+.series-profile dd { text-align: left; }
+.rule-steps li { margin: .3rem 0; }
+
+/* Belegsuche in der Buchungskarte */
+.receipt-search input { width: 100%; }
+.receipt-hit-list li { display: flex; flex-wrap: wrap; gap: .3rem .6rem; justify-content: space-between; align-items: center;
+  padding: .35rem 0; border-top: 1px dashed var(--border); }

@@ -182,6 +182,46 @@
 {% set mf_active = mf.values()|select|list|length > 0 %}
 {% macro mf_hidden(mf) %}{% for k, v in mf.items() if v %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}{% endmacro %}
 {% macro none_label(v) %}{{ '(ohne)' if v == NONE else v }}{% endmacro %}
+{% if questionable_count and not mf.check %}
+<div class="notice warn">{{ questionable_count }} vorgemerkte Einträge würden heute nicht mehr vorgeschlagen
+  (Jahres-Tag ohne Bezug zum Dokumentdatum, englischer Titel oder Tag).
+  <a href="/paperless-changes?check=1#metadata">Ansehen</a> – dort kannst du sie zurücknehmen, ändern oder so lassen. Es wird nichts automatisch entfernt.</div>
+{% endif %}
+{% if mf.check %}<div class="notice">Angezeigt werden nur Einträge, die heute nicht mehr vorgeschlagen würden (Jahres-Tags, Englisch).
+  <a href="/paperless-changes#metadata">Alle anzeigen</a></div>{% endif %}
+{% if mf.series %}<div class="notice">Nur Serie <strong>{{ series_name or mf.series }}</strong> –
+  <a href="/series/{{ mf.series }}">Serie ansehen</a> · <a href="/paperless-changes#metadata">alle anzeigen</a></div>{% endif %}
+
+{% if series_cards and not mf.series and not mf.check %}
+<section class="card section-series">
+  <h3>Serien – wiederkehrende Dokumente gemeinsam einordnen ({{ series_cards|length }}) {{ help("Dokumente desselben Absenders mit gleichem Betreff. Die Werte kommen aus den schon abgelegten Dokumenten der Serie (auch aus Vorgemerktem), nicht von der AI. „Alle vormerken“ merkt nur im Companion vor.") }}</h3>
+  <div class="series-cards">
+    {% for sc in series_cards[:12] %}
+    <article class="series-card">
+      <div class="series-head">
+        <a href="/series/{{ sc.id }}"><strong>{{ sc.name }}</strong></a>
+        <small class="muted">{{ sc.correspondent or 'ohne Korrespondent' }} · {{ sc.size }} Dokumente, {{ sc.refs }} schon abgelegt</small>
+      </div>
+      <div class="series-what">
+        {% if sc.pattern %}<span class="kind-pill k-title">Titel: {{ sc.pattern }}</span>{% endif %}
+        {% for t in sc.tags %}<span class="kind-pill k-tag">{{ t }}</span>{% endfor %}
+        {% if sc.document_type %}<span class="kind-pill k-document_type">{{ sc.document_type }}</span>{% endif %}
+      </div>
+      <div class="series-actions">
+        <form method="post" action="/paperless-changes/meta" class="inline"
+          onsubmit="return confirm('{{ sc['items'] }} Serienvorschläge bei {{ sc.docs }} Dokumenten vormerken? (Nur im Companion.)')">
+          <input type="hidden" name="series" value="{{ sc.id }}"><input type="hidden" name="source" value="series">
+          <button name="action" value="accept_all" class="small primary">{{ 'Alle ' ~ sc['items'] if sc['items'] != 1 else '1 Vorschlag' }} vormerken</button>
+        </form>
+        <a class="button small" href="/paperless-changes?series={{ sc.id }}#metadata">{{ sc.docs }} {{ 'Dokument' if sc.docs == 1 else 'Dokumente' }} ansehen</a>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  {% if series_cards|length > 12 %}<p class="muted"><a href="/series">Alle {{ series_cards|length }} Serien mit offenen Vorschlägen</a></p>{% endif %}
+</section>
+{% endif %}
+
 <form method="get" action="/paperless-changes#metadata" class="card filter-card meta-filter">
   <nav class="tabs" aria-label="Art des Vorschlags">
     {% set total_open = meta_counts.what.values()|sum %}

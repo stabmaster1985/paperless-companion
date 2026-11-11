@@ -52,6 +52,7 @@ class Worker:
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name="companion-worker", daemon=True)
         self._last_sync = 0.0
+        self._last_series = 0.0
         self.on_change = None  # z.B. MQTT: nach Abgleich neu senden
         self._last_payments = -3600.0
         self._last_tidy = 0.0
@@ -133,6 +134,7 @@ class Worker:
                     self._sync(paperless)
                     self._changed()
                 self._index_sync(paperless)
+                self._series()
                 self._payments()
                 self._tidy_changes()
                 self._retry_llm_errors(ollama)
@@ -192,6 +194,20 @@ class Worker:
                 retry = datetime.now(timezone.utc) - timedelta(hours=23)
                 pipeline.kv_set(session, "last_index_sync", retry.isoformat())
 
+    def _series(self) -> None:
+        """Alle 15 Minuten Serien wiederkehrender Dokumente neu berechnen und ihre Vorschläge einarbeiten (ohne AI)."""
+        if time.monotonic() - self._last_series < 900:
+            return
+        self._last_series = time.monotonic()
+        from app import series
+
+        with session_scope() as session:
+            result = series.refresh(session, self.settings.year_tags, self.settings.series_auto_accept)
+        if result["accepted"]:
+            self.note(f"Serien: {result['accepted']} Werte einheitlicher Serien vorgemerkt")
+        if result["changed"] or result["accepted"]:
+            self._changed()
+
     def _retry_llm_errors(self, ollama: OllamaClient | None) -> None:
         """Ist Ollama (wieder) erreichbar, Dokumente erneut analysieren, bei denen die AI fehlte."""
         if ollama is None or time.monotonic() - self._last_llm_retry < 600 or not self.llm_allowed_now():
@@ -230,8 +246,12 @@ class Worker:
             with session_scope() as session:
                 counts = payments.run(session, client, self.settings, datetime.now(self.tz).date())
             self._changed()
-            with session_scope() as session:
-                found = receipts.run(session, client, self.settings, datetime.now(self.tz).date())
+            paperless = make_paperless(self.settings, timeout=30)  # Betrag im Volltext suchen (nur lesend)
+            try:
+                with session_scope() as session:
+                    found = receipts.run(session, client, self.settings, datetime.now(self.tz).date(), paperless)
+            finally:
+                paperless.close()
             with session_scope() as session:
                 # Eigene IBANs nie als Merkmal eines Absenders verwenden (Regeln „Korrespondent aus Text“)
                 identifiers.set_own_terms(session, identifiers.FIREFLY_OWN_KEY, [f"iban:{i}" for i in client.own_ibans()])

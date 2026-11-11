@@ -89,6 +89,10 @@ class Settings(BaseSettings):
     # Metadaten-Vorschläge (Titel, Tags, Korrespondent, Dokumenttyp): off | manual | new (= für jedes neu analysierte Dokument)
     meta_mode: Literal["off", "manual", "new"] = "new"
     meta_max_input_chars: int = 2500
+    # Jahres-Tags (z.B. „2026“): nie vorschlagen oder nur passend zum Dokumentdatum – nie, weil die Zahl im Text steht
+    year_tags: Literal["off", "date"] = "date"
+    # Serien wiederkehrender Dokumente: Werte einheitlicher Serien selbst vormerken (du überträgst weiterhin selbst)
+    series_auto_accept: bool = False
     summary_max_input_chars: int = 3500
 
     # Steuer-Export: Tags (auch „Steuer: Kategorie“) und Dokumenttypen, die steuerrelevant sind

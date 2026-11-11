@@ -178,6 +178,10 @@ def start_demo(data: Path, port: int) -> None:
                        kind="reimbursement", tags=[], created=date(2026, 10, 15), review_state="confirmed", extraction_state="done",
                        reimbursement=Reimbursement(payer="Beihilfestelle", amount=58.5, statement_date=date(2026, 10, 15))))
     settings.reimbursable_tag = "Krankheitskosten"
+    from app import series
+
+    with session_scope() as s:
+        series.refresh(s)  # Serien wiederkehrender Dokumente (Abschläge, Lohnabrechnungen)
 
 
 def launch(pw):
@@ -222,6 +226,7 @@ def shoot(base: str) -> None:
         for name, path, width, height in [
                 ("dashboard", "/", 1280, 960), ("inbox", "/inbox", 1280, 720), ("dokument", "/documents/1", 1280, 960),
                 ("rechnungen", "/invoices", 1280, 760), ("erstattungen", "/reimbursements", 1280, 900),
+                ("serien", "/series", 1280, 620),
                 ("erstattung", "/documents/600", 1280, 1100), ("handy-dashboard", "/", 390, 844)]:
             p = page(width, height)
             p.goto(base + path)

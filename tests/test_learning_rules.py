@@ -509,3 +509,77 @@ def test_rule_documents_page(client):
     page = client.get(f"/rules/{tid}/docs").text
     assert "Erkannt (3)" in page and "Nicht erkannt" in page
     assert client.get("/rules/9999/docs").status_code == 404
+
+
+class FakeSearch:
+    """Paperless-Volltextsuche: merkt sich die Anfragen und liefert vorgegebene Treffer."""
+
+    def __init__(self, hits):
+        self.hits, self.queries = hits, []
+
+    def search(self, query, start=None, end=None, limit=10):
+        self.queries.append((query, start, end))
+        return self.hits.get(query, [])
+
+
+def test_receipts_text_search_learning_and_fixed(db, settings):
+    settings.receipts_min_amount = 20
+    with db() as s:
+        s.add(Document(id=201, title="Kassenbon Fahrrad", correspondent=None, created=date(2026, 9, 8), tags=[]))
+        s.add(Document(id=202, title="Bestellung Kopfhörer", correspondent="Amazon", created=date(2026, 9, 20), tags=[]))
+        s.add(Document(id=203, title="Bestellung Kabel", correspondent="Amazon", created=date(2026, 10, 2), tags=[]))
+        s.add(Document(id=204, title="Mietvertrag", correspondent="Vermieter", created=date(2020, 1, 1), tags=[]))
+    first = [tx("1", date(2026, 9, 10), 349.0, "Kartenzahlung 4711", "Zweirad"),  # nur über den Betrag im Text zu finden
+             tx("2", date(2026, 9, 21), 59.99, "AMZN Mktp DE*2K4", ""),
+             tx("3", date(2026, 9, 1), 900.0, "Vermieter Meier", "Miete September")]
+    paperless = FakeSearch({'"349,00"': [{"id": 201, "title": "Kassenbon Fahrrad"}]})
+    with db() as s:
+        counts = receipts.check(s, first, settings, paperless)
+        rows = {r.tx_id: r for r in s.query(ReceiptCheck)}
+        assert counts["candidate"] == 1 and rows["1"].candidates == [
+            {"id": 201, "title": "Kassenbon Fahrrad", "reason": "Betrag 349,00 € im Dokumenttext"}]
+        assert paperless.queries[0] == ('"349,00"', date(2026, 7, 27), date(2026, 9, 20))
+        assert rows["2"].state == "missing" and rows["2"].text_searched
+        # du ordnest zu: Amazon-Buchung -> Amazon-Dokument, Miete -> Mietvertrag (künftig immer)
+        assert receipts.link(s, rows["2"], 202) and receipts.link(s, rows["3"], 204)
+        receipts.set_fixed(s, rows["3"].counterparty, 204)
+        assert receipts.aliases(s)["amzn mktp"] == {"Amazon": 1}
+    asked = len(paperless.queries)
+    later = [*first, tx("4", date(2026, 10, 3), 12.49 + 20, "AMZN Mktp DE*9X1", ""),  # anderer Zusatz, gleicher Händler
+             tx("5", date(2026, 10, 1), 900.0, "Vermieter Meier", "Miete Oktober")]
+    with db() as s:
+        receipts.check(s, later, settings, paperless)
+        rows = {r.tx_id: r for r in s.query(ReceiptCheck)}
+        assert rows["4"].state == "candidate" and rows["4"].candidates[0]["id"] == 203
+        assert "früher so zugeordnet" in rows["4"].candidates[0]["reason"]
+        assert rows["5"].state == "linked" and rows["5"].document_id == 204 and "Dauerauftrag" in rows["5"].note
+        assert rows["1"].candidates[0]["id"] == 201  # Treffer der Textsuche bleibt, ohne erneut zu suchen
+        assert len(paperless.queries) == asked
+        hits = receipts.search_documents(s, rows["4"], "amazon")
+        assert [d.id for d in hits] == [203, 202]  # zeitlich nächstes zuerst
+        receipts.set_fixed(s, "Vermieter Meier", None)
+        assert receipts.fixed_documents(s) == {}
+
+
+def test_receipt_search_and_always_in_ui(client, mock_api):
+    mock_api.get(f"{FIREFLY}/api/v1/transactions").respond(json={"data": [
+        {"type": "transactions", "id": "600", "attributes": {"transactions": [{
+            "transaction_journal_id": "950", "type": "withdrawal", "date": "2026-10-01T00:00:00+02:00", "amount": "900.00",
+            "description": "Miete Oktober", "destination_name": "Vermieter Meier"}]}}],
+        "meta": {"pagination": {"total_pages": 1}}})
+    mock_api.get(url__regex=r".*/api/documents/\?.*query=.*").respond(json={"count": 0, "results": []})
+    client.post("/receipts/run")
+    with session_scope() as s:
+        row_id = s.query(ReceiptCheck).filter_by(tx_id="950").one().id
+    page = client.get("/receipts").text
+    assert "Beleg suchen: Titel, Absender oder Paperless-ID" in page and "Feste Zuordnungen (0)" in page
+    hits = client.get(f"/receipts/{row_id}/search?q=handy").text
+    assert "Handyvertrag" in hits and "Das ist der Beleg" in hits
+    assert "trotzdem aus Paperless holen" in client.get(f"/receipts/{row_id}/search?q=98765").text
+    client.post(f"/receipts/{row_id}/link", data={"doc_id": "2"})
+    assert "künftig immer so" in client.get("/receipts?state=linked").text
+    client.post(f"/receipts/{row_id}/always")
+    page = client.get("/receipts?state=linked").text
+    assert "feste Zuordnung aufheben" in page and "Feste Zuordnungen (1)" in page
+    client.post(f"/receipts/{row_id}/always-off")
+    assert "Feste Zuordnungen (0)" in client.get("/receipts").text

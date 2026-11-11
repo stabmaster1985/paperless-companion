@@ -1,0 +1,23 @@
+{% from "macros.html" import doclink %}
+{# Treffer der Belegsuche in einer Buchungskarte – wird per JS geladen #}
+{% if docs %}
+<ul class="plain receipt-hit-list">
+  {% for d in docs %}
+  <li>
+    <span class="cand-doc"><a href="/documents/{{ d.id }}" target="_blank" rel="noopener">{{ d.title or ('#' ~ d.id) }}</a> {{ doclink(d.id) }}
+      <small class="muted">{{ d.correspondent or 'ohne Korrespondent' }} · {{ d.created|d }} · #{{ d.id }}</small></span>
+    <form method="post" action="/receipts/{{ row.id }}/link" class="inline">
+      <input type="hidden" name="doc_id" value="{{ d.id }}"><input type="hidden" name="state" value="{{ state }}">
+      <button class="small">Das ist der Beleg</button>
+    </form>
+  </li>
+  {% endfor %}
+</ul>
+{% elif q.strip().isdigit() %}
+<form method="post" action="/receipts/{{ row.id }}/link" class="inline">
+  <input type="hidden" name="doc_id" value="{{ q.strip() }}"><input type="hidden" name="state" value="{{ state }}">
+  <small class="muted">#{{ q.strip() }} steht nicht im Index –</small> <button class="small">trotzdem aus Paperless holen und zuordnen</button>
+</form>
+{% else %}
+<small class="muted">Nichts gefunden. Tipp: Absender oder ein Wort aus dem Titel, oder die Paperless-ID.</small>
+{% endif %}

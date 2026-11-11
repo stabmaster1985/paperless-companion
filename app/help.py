@@ -67,7 +67,20 @@ PAGES: dict[str, tuple[str, list[str]]] = {
         "wenn ein Kassenbon oder eine Rechnung fehlt (Garantie, Steuer).",
         "„Möglicher Beleg“ heißt: Es gibt eine Rechnung mit gleichem Betrag oder ein Dokument desselben Absenders aus den Tagen um die Buchung. "
         "Mit „Das ist der Beleg“ bestätigst du die Zuordnung. „Kein Beleg nötig“ und „immer ausblenden“ räumen die Liste auf.",
+        "Findet die App keinen Beleg, sucht sie den Betrag einmal im Volltext deiner Dokumente (Paperless-Suche, nur lesend). "
+        "Über das Suchfeld in der Karte findest du Belege nach Titel, Absender oder Paperless-ID.",
+        "Die App lernt aus deinen Zuordnungen: Ordnest du „AMZN Mktp“ einem Amazon-Dokument zu, schlägt sie künftig "
+        "Amazon-Dokumente vor. Mit „künftig immer so“ (Miete, Abo, Dauerauftrag) wird ein Empfänger immer demselben Dokument zugeordnet.",
         "Alles bleibt im Companion; Paperless und Firefly werden nicht verändert.",
+    ]),
+    "/series": ("Serien", [
+        "Eine Serie sind wiederkehrende Dokumente: gleicher Absender und gleicher Betreff (Titel ohne Monat, Jahr und Zahlen), "
+        "z.B. Lohnabrechnungen, Kontoauszüge oder Abschläge.",
+        "Aus den schon abgelegten Dokumenten einer Serie – Werte in Paperless und alles, was du vorgemerkt hast – entsteht ein "
+        "Profil: Titelmuster (z.B. „Lohnabrechnung {Monat} {JJJJ}“), übliche Tags und Dokumenttyp. Die übrigen Dokumente der "
+        "Serie bekommen daraus Vorschläge mit der Quelle „Serie“ – ohne AI, einheitlich und auf Deutsch.",
+        "In „Für Paperless“ steht je Serie eine Karte: „Alle vormerken“ erledigt die ganze Serie auf einmal. "
+        "Die Regel-Vorlage auf der Serienseite zeigt, wie Paperless neue Dokumente schon beim Einlesen so einordnet.",
     ]),
     "/rules": ("Regeln", [
         "<strong>Gelernte Felder:</strong> Aus deinen bestätigten Rechnungen lernt die App je Absender Zahlungsart, IBAN und Zahlungsziel "

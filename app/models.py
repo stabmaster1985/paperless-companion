@@ -44,6 +44,8 @@ class Document(Base):
     # Vorgemerkte Vorschläge, noch nicht in Paperless ("tag:Strom" -> {"value", "source", "new_tag"})
     meta_accepted: Mapped[dict | None] = mapped_column(JSON)
     meta_pending: Mapped[bool] = mapped_column(default=False, server_default="0")
+    # Serie wiederkehrender Dokumente (gleicher Absender und Betreff), siehe app/series.py
+    series_key: Mapped[str | None] = mapped_column(String)
     # Textmerkmale des Absenders (IBAN, USt-IdNr., Domain, Kundennr.) – siehe app/identifiers.py
     identifiers: Mapped[dict | None] = mapped_column(JSON)
     identifiers_at: Mapped[datetime | None] = mapped_column(DateTime)
@@ -222,6 +224,7 @@ class ReceiptCheck(Base):
     document_id: Mapped[int | None] = mapped_column(Integer)
     candidates: Mapped[list | None] = mapped_column(JSON)  # [{"id": 12, "title": ..., "reason": ...}]
     note: Mapped[str | None] = mapped_column(String)
+    text_searched: Mapped[bool] = mapped_column(default=False, server_default="0")  # Betrag schon im Volltext gesucht
     checked_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 

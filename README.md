@@ -25,6 +25,9 @@ Paperless archiviert Dokumente und macht sie durchsuchbar. Der Companion leitet 
   Archiv mit Protokoll.
 - **Dashboard:** anstehende Fristen, offene Beträge, monatliche Fixkosten.
 - **Erinnerungen** per ntfy oder E-Mail sowie ein **Kalender-Feed (ICS)** für Handy und Outlook.
+- **Serien:** Wiederkehrende Dokumente (Lohnabrechnungen, Kontoauszüge, Abschläge) werden erkannt; Titel nach Muster,
+  Tags und Typ kommen aus den schon abgelegten Dokumenten der Serie – ohne AI, als Block vormerkbar, mit Regel-Vorlage
+  für Paperless.
 - **Home Assistant:** Kennzahlen per MQTT-Discovery (offene Rechnungen, Fristen, Erstattungen …), optional.
 - **Paperless bleibt unangetastet:** Vorschläge für deine Custom Fields übernimmst du gezielt
   auf der Seite „Für Paperless“.
@@ -50,6 +53,11 @@ Zuordnung lösen oder direkt in Firefly nach der richtigen Buchung suchen.
 vorgemerkt und später gesammelt übertragen. Ähnliche Dokumente lassen sich gleich mit vormerken.
 
 ![Für Paperless](docs/screenshots/fuer-paperless.png)
+
+**Serien** – wiederkehrende Dokumente mit Titelmuster, üblichen Tags und Typ aus den schon abgelegten Dokumenten;
+in „Für Paperless“ lässt sich eine ganze Serie auf einmal vormerken.
+
+![Serien](docs/screenshots/serien.png)
 
 **Regeln** – aus deinen Daten abgeleitete Vorschläge für Paperless-Regeln, z.B. den Korrespondenten an
 IBAN, Domain oder Kundennummer erkennen. Mit Auswirkung auf dein Archiv, bevor du etwas anlegst.

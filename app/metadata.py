@@ -29,7 +29,7 @@ from app.ollama import OllamaClient, OllamaError
 from app.paperless import PaperlessClient
 
 ITEMS = {"title": "Titel", "correspondent": "Korrespondent", "document_type": "Dokumenttyp", "tag": "Tag"}
-SOURCES = {"llm": "AI", "history": "Verlauf", "rule": "Regel"}
+SOURCES = {"llm": "AI", "history": "Verlauf", "rule": "Regel", "series": "Serie", "date": "Datum"}
 MAX_TAGS = 4
 MAX_NEW_TAGS = 2
 VOCAB_LIMIT = 200
@@ -63,6 +63,76 @@ def title_needs_suggestion(title: str | None, original_file_name: str | None = N
     """Lohnt ein Titelvorschlag? Nur bei nichtssagenden Titeln – ein Titel gleich dem Dateinamen zählt nicht,
     wenn er echte Wörter enthält (Paperless übernimmt oft den sprechenden Dateinamen, z.B. „Lohnabrechnung Mai 2026“)."""
     return is_generic_title(title, original_file_name) and not (title_words(title) - SCANNER_WORDS)
+
+
+# --------------------------------------------------------------------------- Aufräumen von Vorschlägen
+
+YEAR_TAG = re.compile(r"(19|20)\d{2}")
+# Eindeutig englische Wörter (keine, die es so auch im Deutschen gibt) und deutsche Gegenzeichen
+_ENGLISH = {"invoice", "invoices", "bill", "billing", "receipt", "statement", "payment", "payments", "letter", "contract",
+            "agreement", "insurance", "notice", "reminder", "salary", "payslip", "payroll", "confirmation", "order",
+            "purchase", "delivery", "shipping", "monthly", "annual", "yearly", "tax", "taxes", "refund", "subscription",
+            "renewal", "policy", "claim", "the", "of", "for", "and", "your", "from", "with", "regarding", "about",
+            "overview", "summary", "terms", "conditions", "health", "electricity", "water", "rent", "utility", "utilities",
+            "documents", "customer", "fee", "fees", "membership", "warranty"}
+_GERMAN = {"rechnung", "abrechnung", "vertrag", "versicherung", "kündigung", "mahnung", "bescheid", "beitrag", "und", "für",
+           "der", "die", "das", "vom", "zur", "zum", "mit", "von", "bestellung", "lieferung", "quittung", "beleg",
+           "schreiben", "mitteilung", "auszug", "kontoauszug", "gehalt", "lohn", "steuer", "strom", "gas", "wasser", "miete"}
+
+
+def looks_english(text: str | None) -> bool:
+    """Englischer Titel/Tag? Eindeutig englische Wörter und kein deutsches Gegenzeichen (Umlaut, deutsches Wort)."""
+    lower = (text or "").lower()
+    if re.search(r"[äöüß]", lower):
+        return False
+    words = re.findall(r"[a-z]+", lower)
+    english = [w for w in words if w in _ENGLISH]
+    if not english or any(w in _GERMAN or any(g in w for g in ("rechnung", "vertrag", "versicherung")) for w in words):
+        return False
+    return len(english) >= 2 or len(words) <= 3
+
+
+def is_year_tag(name: str) -> bool:
+    return bool(YEAR_TAG.fullmatch(name.strip()))
+
+
+def clean_suggestion(sugg: dict, doc: Document, year_mode: str = "date", known_tags: set[str] | None = None) -> dict:
+    """Vorschlag aufräumen: Jahres-Tags nur passend zum Dokumentdatum, keine englischen Titel und neuen Tags.
+
+    Betrifft nur offene Vorschläge – was du vorgemerkt oder verworfen hast, bleibt unberührt.
+    """
+    result = dict(sugg)
+    year = str(doc.created.year) if doc.created else None
+    tags = []
+    for tag in sugg.get("tags") or []:
+        name = tag["name"]
+        if is_year_tag(name):
+            if year_mode != "date" or name != year:
+                continue  # Jahreszahl nur aus dem Text – kein Vorschlag
+            tag = {**tag, "source": "date"}
+        elif tag.get("new") and looks_english(name):
+            continue
+        tags.append(tag)
+    have = {t["name"] for t in tags} | set(doc.tags or [])
+    if year_mode == "date" and year and known_tags and year in known_tags and year not in have:
+        tags.append({"name": year, "source": "date"})  # du nutzt Jahres-Tags: Jahr des Dokuments
+    result["tags"] = tags
+    title = sugg.get("title")
+    if title and title.get("source") == "llm" and looks_english(title.get("value")):
+        result.pop("title")
+    return result
+
+
+def questionable(doc: Document, item: dict, year_mode: str = "date") -> str | None:
+    """Würde dieser (vorgemerkte) Eintrag heute nicht mehr vorgeschlagen? Gibt den Grund zurück."""
+    if item["key"].startswith("tag:") and is_year_tag(item["new"]):
+        if year_mode != "date" or not doc.created or item["new"] != str(doc.created.year):
+            return "Jahres-Tag passt nicht zum Dokumentdatum"
+    if item["key"] == "title" and item.get("source") == "llm" and looks_english(item["new"]):
+        return "englischer Titel"
+    if item["key"].startswith("tag:") and item.get("new_tag") and looks_english(item["new"]):
+        return "englischer Tag"
+    return None
 
 
 # --------------------------------------------------------------------------- Kontext aus dem Archiv
@@ -177,7 +247,7 @@ def schema(vocab: dict[str, list[str]]) -> dict:
 def build_prompt(doc: Document, text: str, vocab: dict, hist: dict, rejected: set[str], max_input: int,
                  examples: list[str] | None = None) -> str:
     lines = [
-        "Schlage für das Dokument vor:",
+        "Schlage für das Dokument vor. Antworte ausschließlich auf Deutsch – Titel und neue Tags nie auf Englisch:",
         "- title: kurzer, sprechender deutscher Titel (max. 60 Zeichen) nach dem Muster „Was – Wofür/Zeitraum“, "
         "z.B. „Stromrechnung Oktober 2026“ oder „Kfz-Versicherung Beitragsanpassung 2027“. Ohne Absendernamen.",
         f"- tags: bis zu {MAX_TAGS} passende Tags aus der Liste. Lieber wenige treffende als viele.",
@@ -282,7 +352,12 @@ def suggest(
                          title_examples(session, corr))
         info.update(ai=True, ai_seconds=time.monotonic() - started)
         suggestion["model"] = ollama.model
-        for tag in [*result["tags"], *result["new_tags"]]:
+        # AI-Tags nur als Ergänzung: Gibt es Tags aus dem Verlauf, höchstens einen weiteren vorhandenen, keinen neuen
+        base = {t.lower() for t in hist["tags"]}
+        extra = [t for t in result["tags"] if t.lower() not in base]
+        allowed = [*[t for t in result["tags"] if t.lower() in base], *extra[:1 if base else 3],
+                   *([] if base else result["new_tags"][:1])]
+        for tag in allowed:
             add_tag(tag, "llm")
         if result["title"]:
             suggestion["title"] = {"value": result["title"], "source": "llm"}
@@ -292,6 +367,11 @@ def suggest(
 
     doc.meta_suggestion = suggestion
     doc.meta_state = "done"
+    # Aufräumen (Jahres-Tags, Englisch) und Serienwerte einarbeiten – Serie hat Vorrang vor der AI
+    from app import series
+
+    member = next((s for s in series.build(session) if any(d.id == doc.id for d in s.members)), None)
+    series.overlay(doc, member, settings.year_tags, {t for _, tags, _, _ in archive for t in tags})
     refresh_pending(doc)
     open_items = [i for i in pending(doc) if i["state"] == "open"]
     info["items"] = list(dict.fromkeys(p["label"] for p in open_items))
@@ -345,7 +425,9 @@ def pending(doc: Document, everything: bool = False) -> list[dict]:
             continue
         if key == "title" and dismissed.get(KEEP_TITLE):
             continue  # „Titel behalten“: für dieses Dokument nie wieder einen Titel vorschlagen
-        useful = title_needs_suggestion(current, doc.original_file_name) if key == "title" else not current
+        # Titel nach Serienmuster ist immer sinnvoll (vereinheitlicht), sonst nur bei nichtssagendem Titel
+        useful = (entry.get("source") == "series" or title_needs_suggestion(current, doc.original_file_name)) \
+            if key == "title" else not current
         if useful or everything:
             items.append({"key": key, "label": ITEMS[key], "current": current, "new": value, "source": entry["source"],
                           "new_tag": False, "state": "open", "useful": useful, "at": sugg.get("at")})
@@ -365,12 +447,15 @@ def filter_items(items: list[dict], what: str = "", source: str = "", value: str
 
 
 # Filter auf „Für Paperless“: Vorschlag (what/source/value) und Dokument (has_tag/correspondent/doctype/q)
-FILTER_KEYS = ("what", "source", "value", "has_tag", "correspondent", "doctype", "q")
+FILTER_KEYS = ("what", "source", "value", "has_tag", "correspondent", "doctype", "q", "series", "check")
 NONE = "__none__"  # Filterwert „ohne …“
 
 
-def doc_matches(doc: Document, has_tag: str = "", correspondent: str = "", doctype: str = "", q: str = "") -> bool:
-    """Dokument nach seinem jetzigen Stand in Paperless filtern (Tag, Korrespondent, Typ, Titel/Absender-Suche)."""
+def doc_matches(doc: Document, has_tag: str = "", correspondent: str = "", doctype: str = "", q: str = "",
+                series: str = "") -> bool:
+    """Dokument nach seinem jetzigen Stand in Paperless filtern (Tag, Korrespondent, Typ, Suche, Serie)."""
+    if series and doc.series_key != series:
+        return False
     tags = {t.lower() for t in doc.tags or []}
     if has_tag and ((has_tag == NONE and tags) or (has_tag != NONE and has_tag.lower() not in tags)):
         return False
@@ -386,13 +471,16 @@ def doc_matches(doc: Document, has_tag: str = "", correspondent: str = "", docty
 
 
 def pending_rows(session: Session, state: str, what: str = "", source: str = "", value: str = "",
-                 has_tag: str = "", correspondent: str = "", doctype: str = "", q: str = "") -> list[tuple]:
+                 has_tag: str = "", correspondent: str = "", doctype: str = "", q: str = "", series: str = "",
+                 check: str = "", year_mode: str = "date") -> list[tuple]:
     """(Dokument, Vorschläge) aller Dokumente mit offenen bzw. vorgemerkten Vorschlägen, gefiltert."""
     rows = []
     for doc in session.scalars(select(Document).where(Document.meta_pending.is_(True)).order_by(Document.id)):
-        if not doc_matches(doc, has_tag, correspondent, doctype, q):
+        if not doc_matches(doc, has_tag, correspondent, doctype, q, series):
             continue
         items = filter_items([i for i in pending(doc) if i["state"] == state], what, source, value)
+        if check:  # nur Einträge, die heute nicht mehr vorgeschlagen würden (Jahres-Tag, Englisch)
+            items = [i for i in items if questionable(doc, i, year_mode)]
         if items:
             rows.append((doc, items))
     return rows

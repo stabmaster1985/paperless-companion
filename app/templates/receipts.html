@@ -39,6 +39,15 @@
         <span class="tag tag-ok">zugeordnet</span>
         {% if r.document_id %}<a href="/documents/{{ r.document_id }}">{{ titles.get(r.document_id) or ('#' ~ r.document_id) }}</a> {{ doclink(r.document_id) }}{% endif %}
         {% if r.note %}<small class="muted">· {{ r.note }}</small>{% endif %}
+        {% if r.counterparty and r.document_id %}
+          {% if fixed.get(party_key(r.counterparty)) == r.document_id %}
+          <form method="post" action="/receipts/{{ r.id }}/always-off" class="inline"><input type="hidden" name="state" value="{{ state }}">
+            <button class="small link" title="Künftige Buchungen an diesen Empfänger wieder einzeln prüfen">feste Zuordnung aufheben</button></form>
+          {% else %}
+          <form method="post" action="/receipts/{{ r.id }}/always" class="inline"><input type="hidden" name="state" value="{{ state }}">
+            <button class="small link" title="Dauerauftrag, Miete, Abo: Buchungen an „{{ r.counterparty[:40] }}“ künftig immer diesem Dokument zuordnen">künftig immer so</button></form>
+          {% endif %}
+        {% endif %}
       {% elif r.state == 'ignored' %}
         <span class="tag">kein Beleg nötig</span>{% if r.note %} <small class="muted">{{ r.note }}</small>{% endif %}
       {% else %}
@@ -51,11 +60,11 @@
           <button class="small" title="Diese Buchung dem Dokument zuordnen (nur im Companion)">Das ist der Beleg</button>
         </form>
         {% else %}<span class="tag tag-overdue">Beleg fehlt</span>{% endfor %}
-        <form method="post" action="/receipts/{{ r.id }}/link" class="link-form">
-          <input type="hidden" name="state" value="{{ state }}">
-          <input name="doc_id" placeholder="Paperless-ID" inputmode="numeric" aria-label="Paperless-ID des Belegs">
-          <button class="small">Zuordnen</button>
-        </form>
+        <div class="receipt-search" data-url="/receipts/{{ r.id }}/search?state={{ state }}">
+          <input type="search" placeholder="Beleg suchen: Titel, Absender oder Paperless-ID" aria-label="Beleg suchen"
+            oninput="receiptSearch(this)" autocomplete="off">
+          <div class="receipt-hits" aria-live="polite"></div>
+        </div>
       {% endif %}
     </div>
     <div class="row-actions">
@@ -77,6 +86,28 @@
 {% else %}
 <p class="empty">{% if state == 'open' %}Keine offenen Buchungen – alles belegt oder noch nicht geprüft.{% else %}Keine Buchungen in dieser Ansicht.{% endif %}</p>
 {% endif %}
+
+<section class="card">
+  <h2>Feste Zuordnungen ({{ fixed|length }}) {{ help("Daueraufträge, Miete, Abos: Buchungen an diese Empfänger werden immer demselben Dokument zugeordnet. Aufheben über „feste Zuordnung aufheben“ an einer zugeordneten Buchung.") }}</h2>
+  {% if fixed %}
+  <ul class="plain">{% for key, doc_id in fixed.items() %}<li>„{{ key }}“ → <a href="/documents/{{ doc_id }}">{{ fixed_titles[key] }}</a></li>{% endfor %}</ul>
+  {% else %}<p class="muted">Noch keine. Ordne eine Buchung zu und wähle „künftig immer so“, z.B. Miete → Mietvertrag.</p>{% endif %}
+</section>
+
+<script>
+// Beleg in der Buchungskarte suchen (kurz warten, bis fertig getippt ist)
+function receiptSearch(input) {
+  const box = input.closest('.receipt-search'), out = box.querySelector('.receipt-hits');
+  clearTimeout(box._timer);
+  if (input.value.trim().length < 2) { out.innerHTML = ''; return; }
+  box._timer = setTimeout(async () => {
+    try {
+      const r = await fetch(box.dataset.url + '&q=' + encodeURIComponent(input.value));
+      out.innerHTML = await r.text();
+    } catch (e) { out.innerHTML = '<small class="bad">Suche fehlgeschlagen.</small>'; }
+  }, 300);
+}
+</script>
 
 <section class="card">
   <h2>Ausgeblendete Empfänger ({{ ignored|length }})</h2>

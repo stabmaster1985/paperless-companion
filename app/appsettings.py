@@ -45,6 +45,9 @@ SECTIONS: list[tuple[str, list[tuple[str, str, str]]]] = [
         ("summary_max_input_chars", "Zusammenfassung: Zeichen vom Dokumentanfang", ""),
         ("meta_mode", "Vorschläge für Titel, Tags, Korrespondent, Typ", ""),
         ("meta_max_input_chars", "Vorschläge: Zeichen vom Dokumentanfang", ""),
+        ("year_tags", "Jahres-Tags (z.B. „2026“)", "nie aus dem Text – höchstens passend zum Dokumentdatum"),
+        ("series_auto_accept", "Serien: Werte einheitlicher Serien selbst vormerken",
+         "ab 5 gleich abgelegten Dokumenten; nach Paperless überträgst weiterhin nur du"),
     ]),
     ("Paperless-Felder", [
         ("field_amount", "Betrag", "Name des Custom Fields, leer = nicht verwenden"),
@@ -122,6 +125,7 @@ CHOICES = {
     "llm_provider": [("ollama", "ja (Ollama)"), ("none", "nein, nur Regeln")],
     "summary_mode": [("off", "aus"), ("manual", "nur per Knopf"), ("new", "automatisch für neue Dokumente")],
     "meta_mode": [("off", "aus"), ("manual", "nur auf Anforderung"), ("new", "automatisch für neu analysierte Dokumente")],
+    "year_tags": [("date", "nur das Jahr des Dokumentdatums, wenn es den Tag gibt"), ("off", "nie vorschlagen")],
 }
 
 

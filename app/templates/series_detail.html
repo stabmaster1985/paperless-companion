@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% from "macros.html" import doclink, help %}
+{% block content %}
+<div class="head">
+  <h1>Serie: {{ s.name }}</h1>
+  <a class="button small" href="/series">← Alle Serien</a>
+</div>
+<p class="muted">{{ s.correspondent or 'ohne Korrespondent' }} · {{ s.members|length }} Dokumente, {{ s.refs }} schon abgelegt (inklusive Vorgemerktem)</p>
+
+<section class="card">
+  <h2>Profil der Serie {{ help("Aus den schon abgelegten Dokumenten: Werte, die mindestens 60 % von ihnen tragen. Das Titelmuster gilt nur, wenn es sich bei den Vorbildern aus dem Dokumentdatum ergibt.") }}</h2>
+  <dl class="refund-totals series-profile">
+    <dt>Titelmuster</dt><dd>{{ s.pattern or '–' }}{% if s.month_offset %} <small class="muted">(Monat = {{ 'Vormonat' if s.month_offset < 0 else 'Folgemonat' }} des Dokumentdatums)</small>{% endif %}</dd>
+    <dt>Tags</dt><dd>{{ s.tags|join(', ') or '–' }}</dd>
+    <dt>Dokumenttyp</dt><dd>{{ s.document_type or '–' }}</dd>
+    <dt>Korrespondent</dt><dd>{{ s.correspondent or '–' }}</dd>
+  </dl>
+  <p><a class="button small primary" href="/paperless-changes?series={{ s.id }}#metadata">Vorschläge dieser Serie in „Für Paperless“</a></p>
+</section>
+
+<section class="card">
+  <h2>Regel-Vorlage für Paperless {{ help("Damit neue Dokumente dieser Serie schon beim Einlesen richtig benannt und eingeordnet sind. Der Companion legt nichts an – du überträgst die Werte selbst in einen Paperless-Workflow.") }}</h2>
+  <p class="muted">In Paperless unter <strong>Workflows → Workflow hinzufügen</strong>:</p>
+  <ol class="rule-steps">
+    <li><strong>Name:</strong> {{ workflow.name }}</li>
+    <li><strong>Auslöser:</strong> „{{ workflow.trigger.type }}“ – Zuordnungsalgorithmus „{{ workflow.trigger.matching_algorithm }}“
+      mit <code>{{ workflow.trigger.match }}</code>{% if workflow.trigger.filter_has_correspondent %}; alternativ, wenn der Korrespondent
+      schon erkannt wird: Filter „hat Korrespondent“ = {{ workflow.trigger.filter_has_correspondent }}{% endif %}</li>
+    <li><strong>Aktion „Zuweisung“:</strong>
+      <ul>
+        {% if workflow.action.assign_title %}<li>Titel zuweisen: <code>{{ workflow.action.assign_title }}</code></li>{% endif %}
+        {% if workflow.action.assign_correspondent %}<li>Korrespondent: {{ workflow.action.assign_correspondent }}</li>{% endif %}
+        {% if workflow.action.assign_document_type %}<li>Dokumenttyp: {{ workflow.action.assign_document_type }}</li>{% endif %}
+        {% if workflow.action.assign_tags %}<li>Tags: {{ workflow.action.assign_tags|join(', ') }}</li>{% endif %}
+      </ul></li>
+  </ol>
+  <p class="hint">{{ workflow.note }} Die Platzhalter-Schreibweise hängt von deiner Paperless-Version ab: ältere Versionen
+    <code>{created_year}</code>, neuere <code>{{ '{{ created_year }}' }}</code> – die gültigen Platzhalter zeigt Paperless im Feld „Titel zuweisen“ an.
+    Bitte dort prüfen, bevor du den Workflow speicherst.</p>
+</section>
+
+<section class="card">
+  <h2>Dokumente ({{ members|length }})</h2>
+  <ul class="plain refund-list">
+    {% for doc, open_items, accepted in members %}
+    <li><a href="/documents/{{ doc.id }}">{{ doc.title or ('#' ~ doc.id) }}</a> {{ doclink(doc.id) }}
+      <small class="muted">{{ doc.created|d }}{% if doc.tags %} · {{ doc.tags|join(', ') }}{% endif %}</small>
+      <span class="refund-amount">
+        {% if open_items %}<span class="tag tag-warn">{{ open_items|length }} offen</span>
+        {% elif accepted %}<span class="tag tag-ok">vorgemerkt</span>
+        {% else %}<small class="muted">passt</small>{% endif %}</span></li>
+    {% endfor %}
+  </ul>
+</section>
+{% endblock %}
