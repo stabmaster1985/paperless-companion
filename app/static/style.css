@@ -758,6 +758,12 @@ body.docview-open { overflow: hidden; }
   .rc-row:hover { background: color-mix(in srgb, var(--bg) 60%, transparent); }
 }
 
+/* Inbox-Filter */
+.inbox-filter { display: flex; flex-wrap: wrap; gap: .4rem .6rem; align-items: center; margin: 0 0 .75rem; }
+.inbox-filter input[type=search] { flex: 1 1 14rem; max-width: 24rem; }
+.inbox-filter select { max-width: 16rem; }
+@media (max-width: 640px) { .inbox-filter input[type=search], .inbox-filter select { flex: 1 1 100%; max-width: none; font-size: 16px; } }
+
 /* ------------------------------------------------------------------ Desktop: Platz nutzen
    Ab 1200 px wachsen die Seiten mit dem Bildschirm, die Schrift wird etwas größer, Karten stehen nebeneinander. */
 @media (min-width: 1200px) {

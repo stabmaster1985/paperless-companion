@@ -331,7 +331,7 @@ document.querySelectorAll('.ff-form').forEach((form) => form.addEventListener('s
   <div class="actions confirm-actions">
     {% if doc.review_state == 'pending' %}
       {% if pending_left %}
-      <button type="submit" name="after" value="next" class="primary">Bestätigen &amp; nächstes ({{ pending_left }})</button>
+      <button type="submit" name="after" value="next" class="primary" {% if inbox_left and inbox_left < pending_left %}title="im gefilterten Stapel der Inbox"{% endif %}>Bestätigen &amp; nächstes ({{ inbox_left or pending_left }})</button>
       <button type="submit" name="after" value="inbox">Bestätigen</button>
       {% else %}
       <button type="submit" class="primary">Bestätigen</button>

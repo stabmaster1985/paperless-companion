@@ -387,3 +387,24 @@ def test_meta_checkboxes_keep_your_choice(client):
     page = client.get("/documents/3").text
     assert "checked" not in page.split('value="tag:Garten"')[1].split(">")[0]  # abgewählt bleibt abgewählt
     assert "checked" not in page.split('value="tag:Haus"')[1].split(">")[0]  # vorgemerkt: nicht erneut anhaken
+
+
+def test_inbox_filter_and_next_stays_in_filter(client):
+    with session_scope() as s:
+        for i, (title, corr, kind) in enumerate([("Abschlag Gas", "Gaswerk", "invoice"), ("Police Hausrat", "Versicherer", "contract"),
+                                                 ("Abschlag Wasser", "Wasserwerk", "invoice")]):
+            s.add(Document(id=900 + i, title=title, correspondent=corr, kind=kind, tags=[], review_state="pending",
+                           extraction_state="done", created=date(2026, 10, 1 + i)))
+    page = client.get("/inbox?q=abschlag").text
+    assert "Abschlag Gas" in page and "Abschlag Wasser" in page and "Police Hausrat" not in page
+    assert "Rechnung (2)" in page  # Reiter je Art mit Anzahl im Filter
+    page = client.get("/inbox?kind=contract").text
+    assert "Police Hausrat" in page and "Abschlag Gas" not in page
+    page = client.get("/inbox?corr=Gaswerk").text
+    assert "Abschlag Gas" in page and "Abschlag Wasser" not in page
+    # Filter bleibt gemerkt: „Bestätigen & nächstes“ springt im gefilterten Stapel weiter
+    client.get("/inbox?q=abschlag")
+    assert "Abschlag Gas" in client.get("/inbox").text and "Police Hausrat" not in client.get("/inbox").text
+    r = client.post("/documents/902/confirm", data={"after": "next", "amount": "10"}, follow_redirects=False)
+    assert r.headers["location"].startswith("/documents/900")
+    assert "Police Hausrat" in client.get("/inbox?reset=1").text

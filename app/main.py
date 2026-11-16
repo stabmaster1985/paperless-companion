@@ -9,7 +9,7 @@ import time
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote, urlencode
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -17,7 +17,7 @@ from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import case as case_, func, select
+from sqlalchemy import case as case_, func, or_, select
 from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 from starlette.middleware.sessions import SessionMiddleware
@@ -215,12 +215,62 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         }
         return render(request, "dashboard.html", events=upcoming, stats=stats, todo=todo)
 
+    INBOX_COOKIE = "inbox_filter"
+    INBOX_KEYS = ("kind", "q", "corr", "sort")
+
+    def inbox_filter(request: Request) -> dict:
+        """Filter der Inbox: aus der Adresse, sonst der zuletzt gewählte (Cookie) – damit „Bestätigen & nächstes“
+        und „zurück zur Inbox“ im gefilterten Stapel bleiben."""
+        params = request.query_params
+        if not any(k in params for k in INBOX_KEYS) and "reset" not in params:
+            params = parse_qs(request.cookies.get(INBOX_COOKIE, ""))
+            params = {k: v[0] for k, v in params.items()}
+        flt = {k: (params.get(k) or "").strip() for k in INBOX_KEYS}
+        if flt["kind"] not in pipeline.KINDS:
+            flt["kind"] = ""
+        return flt
+
+    def inbox_docs(session: Session, flt: dict, kind: bool = True) -> list[Document]:
+        order = Document.created.asc().nulls_last() if flt.get("sort") == "old" else Document.created.desc().nulls_last()
+        query = select(Document).where(Document.review_state == "pending").order_by(order, Document.id.desc())
+        if kind and flt.get("kind"):
+            query = query.where(Document.kind == flt["kind"])
+        if flt.get("corr"):
+            query = query.where(Document.correspondent == flt["corr"]) if flt["corr"] != "-" else \
+                query.where(Document.correspondent.is_(None))
+        for word in (flt.get("q") or "").split():
+            pattern = f"%{word.lstrip('#')}%"
+            conds = [Document.title.ilike(pattern), Document.correspondent.ilike(pattern),
+                     Document.original_file_name.ilike(pattern), Document.document_type.ilike(pattern)]
+            if word.lstrip("#").isdigit():
+                conds.append(Document.id == int(word.lstrip("#")))
+            query = query.where(or_(*conds))
+        return list(session.scalars(query))
+
+    def next_in_inbox(request: Request, session: Session, doc_id: int) -> Document | None:
+        """Nächstes Dokument im (gefilterten) Inbox-Stapel; ist der Filter abgearbeitet, das nächste überhaupt."""
+        docs = [d for d in inbox_docs(session, inbox_filter(request)) if d.id != doc_id]
+        if docs:
+            return docs[0]
+        return next((d for d in inbox_docs(session, {}) if d.id != doc_id), None)
+
     @app.get("/inbox", response_class=HTMLResponse)
     def inbox(request: Request, msg: str = "", session: Session = Depends(get_session)):
-        docs = session.scalars(
-            select(Document).where(Document.review_state == "pending").order_by(Document.created.desc())
-        ).all()
-        return render(request, "inbox.html", docs=docs, msg=msg)
+        flt = inbox_filter(request)
+        all_pending = inbox_docs(session, {k: v for k, v in flt.items() if k != "corr" and k != "q"}, kind=False)
+        without_kind = inbox_docs(session, flt, kind=False)
+        docs = [d for d in without_kind if not flt["kind"] or d.kind == flt["kind"]]
+        kind_counts = {}
+        for d in without_kind:
+            kind_counts[d.kind] = kind_counts.get(d.kind, 0) + 1
+        correspondents = sorted({d.correspondent for d in all_pending if d.correspondent}, key=metadata.locale_key)
+        active = {k: v for k, v in flt.items() if v}
+        response = render(request, "inbox.html", docs=docs, msg=msg, flt=flt, kind_counts=kind_counts,
+                          total=len(all_pending), filtered=len(without_kind), correspondents=correspondents,
+                          has_unnamed=any(not d.correspondent for d in all_pending),
+                          qs=lambda **kw: urlencode({k: v for k, v in {**active, **kw}.items() if v}))
+        response.set_cookie(INBOX_COOKIE, urlencode(active), max_age=30 * 86400, samesite="lax")
+        return response
 
     @app.get("/search")
     def search(q: str = "", session: Session = Depends(get_session)):
@@ -407,6 +457,8 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             pending_left=session.scalar(
                 select(func.count()).select_from(Document).where(Document.review_state == "pending", Document.id != doc_id)
             ),
+            inbox_left=len([d for d in inbox_docs(session, inbox_filter(request)) if d.id != doc_id])
+            if doc.review_state == "pending" else 0,
         )
 
     @app.get("/documents/{doc_id}/preview")
@@ -529,10 +581,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         doc.writeback_pending = True
         request_worker(app)
         if form.get("after") == "next":
-            following = session.scalars(
-                select(Document).where(Document.review_state == "pending", Document.id != doc_id)
-                .order_by(Document.created.desc()).limit(1)
-            ).first()
+            following = next_in_inbox(request, session, doc_id)
             if following is not None:
                 return RedirectResponse(f"/documents/{following.id}?msg={quote('Bestätigt – nächstes Dokument')}", status_code=303)
             return RedirectResponse(f"/inbox?msg={quote('Bestätigt – die Inbox ist leer')}", status_code=303)
@@ -544,7 +593,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                                 status_code=303)
 
     @app.post("/documents/{doc_id}/kind")
-    def document_kind(doc_id: int, kind: str = Form(...), session: Session = Depends(get_session)):
+    def document_kind(request: Request, doc_id: int, kind: str = Form(...), session: Session = Depends(get_session)):
         doc = session.get(Document, doc_id)
         if doc is None or kind not in pipeline.KINDS:
             raise HTTPException(404)
@@ -560,8 +609,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         msg = f"„{doc.title or doc_id}“ ist jetzt „Sonstiges“ und wird nicht mehr ausgewertet"
         if not was_pending:
             return RedirectResponse(f"/documents/{doc_id}?msg={quote(msg)}", status_code=303)
-        following = session.scalars(select(Document).where(Document.review_state == "pending", Document.id != doc_id)
-                                    .order_by(Document.created.desc()).limit(1)).first()
+        following = next_in_inbox(request, session, doc_id)
         if following is None:
             return RedirectResponse(f"/inbox?msg={quote(msg + ' – die Inbox ist leer')}", status_code=303)
         return RedirectResponse(f"/documents/{following.id}?msg={quote(msg + ' – nächstes Dokument')}", status_code=303)
