@@ -1271,7 +1271,33 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         row = session.get(ReceiptCheck, row_id)
         if row is None:
             raise HTTPException(404)
-        return render(request, "_receipt_search.html", row=row, docs=receipts.search_documents(session, row, q), q=q, state=state)
+        docs = receipts.search_documents(session, row, q)
+        remote, problem = [], None
+        needle = q.strip().lstrip("#")
+        wanted = int(needle) if needle.isdigit() else None
+        if (wanted and not any(d.id == wanted for d in docs)) or (not wanted and len(docs) < 3 and len(needle) >= 3):
+            # nicht im Companion: direkt in Paperless nachsehen (z.B. ganz neu in der Paperless-Inbox)
+            paperless = make_paperless(settings, timeout=15)
+            try:
+                if wanted:
+                    data = paperless.get_document(wanted)
+                    remote = [{"id": wanted, "title": data.get("title"), "created": (data.get("created") or "")[:10]}]
+                else:
+                    known = {d.id for d in docs}
+                    remote = [{"id": h["id"], "title": h.get("title"), "created": (h.get("created") or "")[:10]}
+                              for h in paperless.search(needle, limit=8) if h["id"] not in known]
+            except PaperlessError as exc:
+                if wanted and ("404" in str(exc) or "403" in str(exc)):
+                    problem = (f"Paperless liefert #{wanted} nicht an den Companion: Entweder gibt es die ID nicht, oder der "
+                               "Paperless-Benutzer des Companion darf das Dokument nicht sehen. Neue Dokumente gehören oft nur "
+                               "dem Benutzer, der sie hochgeladen hat – in Paperless unter „Berechtigungen“ dem Companion-"
+                               "Benutzer „Anzeigen“ geben (siehe Hilfe: paperless_grant_view.py).")
+                else:
+                    problem = f"Paperless-Suche nicht möglich: {exc}"
+            finally:
+                paperless.close()
+        return render(request, "_receipt_search.html", row=row, docs=docs, remote=remote, problem=problem, q=q,
+                      state=state)
 
     @app.post("/receipts/run")
     def receipts_run(session: Session = Depends(get_session)):

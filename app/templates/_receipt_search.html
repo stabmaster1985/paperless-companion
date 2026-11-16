@@ -1,23 +1,31 @@
 {% from "macros.html" import doclink %}
-{# Treffer der Belegsuche in einer Buchungskarte – wird per JS geladen #}
-{% if docs %}
+{# Treffer der Belegsuche in einer Buchung – wird per JS geladen #}
+{% macro link_button(doc_id) %}
+<form method="post" action="/receipts/{{ row.id }}/link" class="inline">
+  <input type="hidden" name="doc_id" value="{{ doc_id }}"><input type="hidden" name="state" value="{{ state }}">
+  <button class="small">Das ist der Beleg</button>
+</form>
+{% endmacro %}
+{% if docs or remote %}
 <ul class="plain receipt-hit-list">
   {% for d in docs %}
   <li>
     <span class="cand-doc"><a href="/documents/{{ d.id }}" target="_blank" rel="noopener">{{ d.title or ('#' ~ d.id) }}</a> {{ doclink(d.id) }}
-      <small class="muted">{{ d.correspondent or 'ohne Korrespondent' }} · {{ d.created|d }} · #{{ d.id }}</small></span>
-    <form method="post" action="/receipts/{{ row.id }}/link" class="inline">
-      <input type="hidden" name="doc_id" value="{{ d.id }}"><input type="hidden" name="state" value="{{ state }}">
-      <button class="small">Das ist der Beleg</button>
-    </form>
+      <small class="muted">{{ d.correspondent or 'ohne Korrespondent' }} · {{ d.created|d }} · #{{ d.id }}{% if d.review_state == 'pending' %} · noch ungeprüft{% endif %}</small></span>
+    {{ link_button(d.id) }}
+  </li>
+  {% endfor %}
+  {% for d in remote %}
+  <li>
+    <span class="cand-doc">{{ d.title or ('#' ~ d.id) }} {{ doclink(d.id) }}
+      <small class="muted">{{ d.created }} · #{{ d.id }} · direkt aus Paperless, noch nicht im Companion – wird beim Zuordnen übernommen</small></span>
+    {{ link_button(d.id) }}
   </li>
   {% endfor %}
 </ul>
-{% elif q.strip().isdigit() %}
-<form method="post" action="/receipts/{{ row.id }}/link" class="inline">
-  <input type="hidden" name="doc_id" value="{{ q.strip() }}"><input type="hidden" name="state" value="{{ state }}">
-  <small class="muted">#{{ q.strip() }} steht nicht im Index –</small> <button class="small">trotzdem aus Paperless holen und zuordnen</button>
-</form>
-{% else %}
-<small class="muted">Nichts gefunden. Tipp: Absender oder ein Wort aus dem Titel, oder die Paperless-ID.</small>
+{% endif %}
+{% if problem %}
+<small class="bad">{{ problem }}</small>
+{% elif not docs and not remote %}
+<small class="muted">Nichts gefunden – weder im Companion noch in Paperless. Tipp: ein Wort aus dem Titel, der Absender oder die Paperless-ID (Zahl am Ende der Paperless-Adresse).</small>
 {% endif %}

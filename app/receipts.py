@@ -218,15 +218,30 @@ def link(session: Session, row: ReceiptCheck, doc_id: int) -> bool:
     return True
 
 
+def _norm(text: str) -> str:
+    return " ".join(re.findall(r"[0-9a-zäöüß]+", (text or "").lower()))
+
+
 def search_documents(session: Session, row: ReceiptCheck, q: str, limit: int = 8) -> list[Document]:
-    """Suche für die Buchungskarte: Titel, Absender oder ID im lokalen Index – zeitlich nahe Dokumente zuerst."""
-    needle = q.strip().lower()
-    if len(needle) < 2:
+    """Suche für die Buchung: Paperless-ID, Titel, Absender oder Dateiname im lokalen Index – egal ob Rechnung,
+    unbearbeitet oder sonstiges. Genaue ID und genauer Titel zuerst, dann zeitlich nahe Dokumente."""
+    needle = _norm(q)
+    if len(needle) < 2 and not needle.isdigit():
         return []
-    hits = [d for d in session.scalars(select(Document))
-            if needle in (d.title or "").lower() or needle in (d.correspondent or "").lower() or needle == str(d.id)]
-    hits.sort(key=lambda d: abs((row.tx_date - d.created).days) if d.created else 99999)
-    return hits[:limit]
+    words = needle.split()
+    by_id = session.get(Document, int(needle)) if needle.isdigit() else None
+    hits = []
+    for d in session.scalars(select(Document)):
+        if d is by_id:
+            continue
+        title = _norm(d.title)
+        hay = f"{title} {_norm(d.correspondent)} {_norm(d.original_file_name)}"
+        if all(w in hay for w in words):
+            rank = 0 if title == needle else 1 if title.startswith(needle) else 2 if needle in title else 3
+            days = abs((row.tx_date - d.created).days) if d.created else 99999
+            hits.append((rank, days, d))
+    hits.sort(key=lambda h: h[:2])
+    return ([by_id] if by_id else []) + [d for _, _, d in hits][:limit - (1 if by_id else 0)]
 
 
 def ignore(row: ReceiptCheck, note: str = "kein Beleg nötig") -> None:

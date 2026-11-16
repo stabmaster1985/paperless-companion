@@ -1,3 +1,4 @@
+import httpx
 import json
 from datetime import date
 
@@ -9,6 +10,7 @@ from app.db import session_scope
 from app.extraction.rules import field
 from app.main import create_app
 from app.models import Document, Invoice, MetaDecision, ReceiptCheck, RuleProposal
+from tests.conftest import PAPERLESS
 from tests.test_payments import FIREFLY, tx
 from tests.test_pipeline import run_all
 
@@ -556,6 +558,7 @@ def test_receipts_text_search_learning_and_fixed(db, settings):
         assert rows["1"].candidates[0]["id"] == 201  # Treffer der Textsuche bleibt, ohne erneut zu suchen
         assert len(paperless.queries) == asked
         hits = receipts.search_documents(s, rows["4"], "amazon")
+        assert receipts.search_documents(s, rows["4"], str(hits[-1].id))[0].id == hits[-1].id  # ID zuerst
         assert [d.id for d in hits] == [203, 202]  # zeitlich nächstes zuerst
         receipts.set_fixed(s, "Vermieter Meier", None)
         assert receipts.fixed_documents(s) == {}
@@ -575,7 +578,19 @@ def test_receipt_search_and_always_in_ui(client, mock_api):
     assert "Beleg suchen: Titel, Absender oder Paperless-ID" in page and "Feste Zuordnungen (0)" in page
     hits = client.get(f"/receipts/{row_id}/search?q=handy").text
     assert "Handyvertrag" in hits and "Das ist der Beleg" in hits
-    assert "trotzdem aus Paperless holen" in client.get(f"/receipts/{row_id}/search?q=98765").text
+    assert "Handyvertrag" in client.get(f"/receipts/{row_id}/search?q=Vertrag%20handy").text  # Wörter in beliebiger Reihenfolge
+    # Einzelabruf: 98765 gibt es nicht (oder keine Berechtigung), 777 ist ganz neu in Paperless (noch nicht im Companion)
+    single = next(r for r in mock_api.routes if r.pattern and "\\d+/$" in repr(r.pattern))
+    single.side_effect = lambda request: (
+        httpx.Response(404) if "/98765/" in request.url.path else
+        httpx.Response(200, json={"id": 777, "title": "Mietbescheinigung 2026", "created": "2026-10-02"})
+        if "/777/" in request.url.path else httpx.Response(200, json={"content": ""}))
+    assert "darf das Dokument nicht sehen" in client.get(f"/receipts/{row_id}/search?q=98765").text
+    hits = client.get(f"/receipts/{row_id}/search?q=777").text
+    assert "Mietbescheinigung 2026" in hits and "direkt aus Paperless" in hits
+    mock_api.get(url__regex=r".*/api/documents/\?.*query=Mietbescheinigung.*").respond(
+        json={"count": 1, "results": [{"id": 777, "title": "Mietbescheinigung 2026", "created": "2026-10-02"}]})
+    assert "direkt aus Paperless" in client.get(f"/receipts/{row_id}/search?q=Mietbescheinigung").text
     client.post(f"/receipts/{row_id}/link", data={"doc_id": "2"})
     assert "künftig immer so" in client.get("/receipts?state=linked").text
     client.post(f"/receipts/{row_id}/always")
