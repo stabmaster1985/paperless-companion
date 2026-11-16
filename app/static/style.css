@@ -705,3 +705,40 @@ body.docview-open { overflow: hidden; }
 .receipt-search input { width: 100%; }
 .receipt-hit-list li { display: flex; flex-wrap: wrap; gap: .3rem .6rem; justify-content: space-between; align-items: center;
   padding: .35rem 0; border-top: 1px dashed var(--border); }
+
+/* ------------------------------------------------------------------ Desktop: Platz nutzen
+   Ab 1200 px wachsen die Seiten mit dem Bildschirm, die Schrift wird etwas größer, Karten stehen nebeneinander. */
+@media (min-width: 1200px) {
+  body { font-size: 16px; }
+  main, main.wide { max-width: min(1840px, 100%); padding: 1.5rem 2rem 3rem; }
+  .topbar { padding-left: 2rem; padding-right: 2rem; }
+  .card { padding: 1.15rem 1.25rem; }
+  table.list th, table.list td { padding-top: .6rem; padding-bottom: .6rem; }
+  /* Karten nebeneinander statt untereinander */
+  .tx-cards, .doc-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(34rem, 1fr)); gap: .75rem; align-items: start; }
+  .tx-cards > *, .doc-cards > * { margin: 0; }
+  .series-cards { grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr)); }
+  .tiles { grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); }
+  /* Für Paperless: Listen links, Filter und Status als Seitenspalte rechts */
+  .pc-layout { display: grid; grid-template-columns: minmax(0, 1fr) clamp(19rem, 22vw, 25rem); gap: 1.25rem; align-items: start; }
+  .pc-side { grid-column: 2; grid-row: 1; position: sticky; top: 1rem; max-height: calc(100vh - 2rem); overflow-y: auto; }
+  .pc-main { grid-column: 1; grid-row: 1; min-width: 0; }
+  .pc-side > .card:first-child, .pc-main > .card:first-child, .pc-main > .notice:first-child { margin-top: 0; }
+  .pc-side .grid { grid-template-columns: 1fr; }
+  .pc-side .tabs { flex-wrap: wrap; }
+  /* Lesetexte nicht über die ganze Breite ziehen */
+  main > p, main > .head + p, .card > p.muted, .page-help p { max-width: 75rem; }
+}
+/* Sehr breite Bildschirme: Dokumentblöcke zweispaltig */
+@media (min-width: 1700px) {
+  .docblocks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6rem .9rem; align-items: start; }
+  .docblocks > .docblock { margin: 0; }
+}
+.pc-tips > summary { cursor: pointer; font-weight: 600; }
+.pc-tips[open] > summary { margin-bottom: .5rem; }
+@media (min-width: 1200px) {
+  /* zwei kurze Karten nebeneinander */
+  .two-up { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; align-items: start; margin: 1rem 0; }
+  .two-up > .card { margin: 0; }
+  table.list select { max-width: 22rem; }
+}

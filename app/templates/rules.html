@@ -6,6 +6,7 @@
 <p class="muted">Was der Companion aus deinen Entscheidungen gelernt hat – und welche Regeln sich daraus für Paperless anbieten.
   Nichts davon wird automatisch in Paperless angelegt.</p>
 
+<div class="two-up">
 <section class="card" id="learned">
   <h2>Gelernte Felder {{ help("Aus mindestens zwei bestätigten Rechnungen eines Absenders mit (fast) immer gleichem Wert. Neue Rechnungen dieses Absenders werden damit vorbelegt (Herkunft „Gelernt“) – das spart AI-Abfragen. Du prüfst wie immer in der Inbox.") }}</h2>
   {% if profiles %}
@@ -53,6 +54,7 @@
   </table></div>
   {% else %}<p class="muted">Noch keine Daten – gezählt wird ab jetzt bei jeder Bestätigung in der Inbox.</p>{% endif %}
 </section>
+</div>
 
 <section class="card" id="proposals">
   <h2>Vorschläge für Paperless-Regeln {{ help("Gesucht werden Muster in deinem Archiv (inkl. Vorgemerktem). Korrespondent aus Text: Merkmale wie IBAN oder Domain, die nur bei einem Absender vorkommen. Absender → Tags/Typ und Dokumenttyp → Tags ab " ~ MIN_DOCS ~ " Dokumenten und " ~ SHARE ~ " %, Stichwort im Titel ab " ~ KEYWORD_SHARE ~ " %. Jahres-Tags und verworfene Tags werden nie vorgeschlagen.") }}</h2>
