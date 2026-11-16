@@ -47,12 +47,17 @@
     {% endif %}
     {% else %}
     {% if r.state == 'linked' and r.counterparty and r.document_id %}
-      {% if fixed.get(party_key(r.counterparty)) == r.document_id %}
+      {% if party_key(r.counterparty) in fixed %}
       <form method="post" action="/receipts/{{ r.id }}/always-off" class="inline"><input type="hidden" name="state" value="{{ state }}">
         <button class="small link" title="Künftige Buchungen an diesen Empfänger wieder einzeln prüfen">feste Zuordnung aufheben</button></form>
       {% else %}
       <form method="post" action="/receipts/{{ r.id }}/always" class="inline"><input type="hidden" name="state" value="{{ state }}">
-        <button class="small link" title="Dauerauftrag, Miete, Abo: Buchungen an „{{ r.counterparty[:40] }}“ künftig immer diesem Dokument zuordnen">künftig immer so</button></form>
+        <button class="small link" title="Miete, Abo: Buchungen an „{{ r.counterparty[:40] }}“ künftig immer diesem Dokument zuordnen">immer dieses Dokument</button></form>
+      {% if correspondents.get(r.document_id) %}
+      <form method="post" action="/receipts/{{ r.id }}/always" class="inline"><input type="hidden" name="state" value="{{ state }}">
+        <input type="hidden" name="mode" value="latest">
+        <button class="small link" title="Strom, Gas, Versicherung: Buchungen an „{{ r.counterparty[:40] }}“ gehören künftig zum jeweils neuesten Dokument von {{ correspondents[r.document_id] }} bis zum Buchungstag – Vertrag, Abschlagsplan oder Jahresabrechnung">laufende Zahlung</button></form>
+      {% endif %}
       {% endif %}
     {% endif %}
     {% if r.decided or r.state == 'ignored' %}
@@ -121,10 +126,10 @@
 
 <div class="two-up">
 <section class="card">
-  <h2>Feste Zuordnungen ({{ fixed|length }}) {{ help("Daueraufträge, Miete, Abos: Buchungen an diese Empfänger werden immer demselben Dokument zugeordnet. Aufheben über „feste Zuordnung aufheben“ an einer zugeordneten Buchung.") }}</h2>
+  <h2>Feste Zuordnungen ({{ fixed|length }}) {{ help("Miete, Abos: immer dasselbe Dokument. Laufende Zahlungen (Strom, Gas, Versicherung): jeweils das neueste Dokument des Korrespondenten bis zum Buchungstag – Vertrag, Abschlagsplan oder Jahresabrechnung. Kommt eine neue Abrechnung, gehören spätere Abbuchungen automatisch zu ihr. Aufheben über „feste Zuordnung aufheben“ an einer zugeordneten Buchung.") }}</h2>
   {% if fixed %}
-  <ul class="plain">{% for key, doc_id in fixed.items() %}<li>„{{ key }}“ → <a href="/documents/{{ doc_id }}">{{ fixed_titles[key] }}</a></li>{% endfor %}</ul>
-  {% else %}<p class="muted">Noch keine. Ordne eine Buchung zu und wähle „künftig immer so“, z.B. Miete → Mietvertrag.</p>{% endif %}
+  <ul class="plain">{% for key, entry in fixed.items() %}<li>„{{ key }}“ → {% if entry is mapping %}{{ fixed_titles[key] }}{% else %}<a href="/documents/{{ entry }}">{{ fixed_titles[key] }}</a>{% endif %}</li>{% endfor %}</ul>
+  {% else %}<p class="muted">Noch keine. Ordne eine Buchung zu und wähle „immer dieses Dokument“ (z.B. Miete → Mietvertrag) oder „laufende Zahlung“ (z.B. Stromabschlag → jeweils neuester Vertrag/Abrechnung der Stadtwerke).</p>{% endif %}
 </section>
 
 <section class="card">

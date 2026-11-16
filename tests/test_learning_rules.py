@@ -564,6 +564,30 @@ def test_receipts_text_search_learning_and_fixed(db, settings):
         assert receipts.fixed_documents(s) == {}
 
 
+def test_receipts_running_payment_follows_newest_document(db, settings):
+    """Strom/Gas: Abbuchungen gehören zum jeweils neuesten Dokument des Versorgers bis zum Buchungstag."""
+    settings.receipts_min_amount = 20
+    with db() as s:
+        s.add(Document(id=301, title="Stromvertrag", correspondent="Stadtwerke", created=date(2025, 1, 10), tags=[]))
+        s.add(Document(id=302, title="Jahresabrechnung 2025", correspondent="Stadtwerke", created=date(2026, 2, 5), tags=[]))
+        s.add(Document(id=303, title="Anderer Versorger", correspondent="Gaswerk", created=date(2026, 3, 1), tags=[]))
+    txs = [tx("1", date(2025, 6, 1), 78.0, "Stadtwerke Musterstadt", "Abschlag Juni"),
+           tx("2", date(2026, 1, 1), 78.0, "Stadtwerke Musterstadt", "Abschlag Januar"),
+           tx("3", date(2026, 3, 1), 85.0, "Stadtwerke Musterstadt", "Abschlag März")]
+    with db() as s:
+        receipts.check(s, txs, settings)
+        row = s.query(ReceiptCheck).filter_by(tx_id="1").one()
+        receipts.link(s, row, 301)
+        receipts.set_fixed(s, row.counterparty, 301, "latest")
+        assert "Stadtwerke" in receipts.fixed_label(s, receipts.fixed_documents(s)["stadtwerke musterstadt"])
+    with db() as s:
+        receipts.check(s, txs, settings)
+        rows = {r.tx_id: r for r in s.query(ReceiptCheck)}
+        assert rows["2"].document_id == 301 and "laufende Zahlung" in rows["2"].note  # vor der Abrechnung: Vertrag
+        assert rows["3"].document_id == 302  # nach der Jahresabrechnung: die Abrechnung
+        assert rows["1"].document_id == 301 and rows["1"].decided  # deine Zuordnung bleibt
+
+
 def test_receipt_search_and_always_in_ui(client, mock_api):
     mock_api.get(f"{FIREFLY}/api/v1/transactions").respond(json={"data": [
         {"type": "transactions", "id": "600", "attributes": {"transactions": [{
@@ -592,7 +616,8 @@ def test_receipt_search_and_always_in_ui(client, mock_api):
         json={"count": 1, "results": [{"id": 777, "title": "Mietbescheinigung 2026", "created": "2026-10-02"}]})
     assert "direkt aus Paperless" in client.get(f"/receipts/{row_id}/search?q=Mietbescheinigung").text
     client.post(f"/receipts/{row_id}/link", data={"doc_id": "2"})
-    assert "künftig immer so" in client.get("/receipts?state=linked").text
+    page = client.get("/receipts?state=linked").text
+    assert "immer dieses Dokument" in page and "laufende Zahlung" in page
     client.post(f"/receipts/{row_id}/always")
     page = client.get("/receipts?state=linked").text
     assert "feste Zuordnung aufheben" in page and "Feste Zuordnungen (1)" in page

@@ -740,6 +740,7 @@ body.docview-open { overflow: hidden; }
 .rc-search[open] summary { margin-bottom: .3rem; }
 .rc-actions { grid-area: actions; display: flex; flex-wrap: wrap; gap: 0 .5rem; margin-left: -.4rem; }
 .rc-actions form { margin: 0; }
+.rc-actions button { text-align: left; }
 @media (max-width: 640px) {
   .rc-cand button { width: 100%; }
   .rc-tools input, .receipt-search input { width: 100%; font-size: 16px; }

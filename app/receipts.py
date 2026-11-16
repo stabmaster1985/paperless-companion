@@ -47,19 +47,53 @@ def aliases(session: Session) -> dict[str, dict[str, int]]:
     return _kv(session, ALIAS_KEY)
 
 
-def fixed_documents(session: Session) -> dict[str, int]:
+def fixed_documents(session: Session) -> dict[str, int | dict]:
+    """Feste Zuordnungen je Empfänger: Dokument-ID (immer dieses Dokument) oder
+    {"mode": "latest", "correspondent": …, "doc": …} (laufende Zahlung: jeweils neuestes Dokument des Korrespondenten)."""
     return _kv(session, FIXED_KEY)
 
 
-def set_fixed(session: Session, counterparty: str, doc_id: int | None) -> None:
-    """Dauerauftrag: Buchungen an diesen Empfänger künftig immer diesem Dokument zuordnen (None = aufheben)."""
+def set_fixed(session: Session, counterparty: str, doc_id: int | None, mode: str = "doc") -> None:
+    """Dauerauftrag/Abo: Buchungen an diesen Empfänger künftig fest zuordnen (None = aufheben).
+
+    mode "doc": immer dieses Dokument. mode "latest": laufende Zahlung (Strom, Gas, Versicherung) – jeweils das
+    neueste Dokument desselben Korrespondenten bis zum Buchungstag (Vertrag, Abschlagsplan, Jahresabrechnung).
+    """
     fixed = fixed_documents(session)
     key = party_key(counterparty)
     if doc_id is None:
         fixed.pop(key, None)
     elif key:
-        fixed[key] = doc_id
+        doc = session.get(Document, doc_id)
+        if mode == "latest" and doc is not None and doc.correspondent:
+            fixed[key] = {"mode": "latest", "correspondent": doc.correspondent, "doc": doc_id}
+        else:
+            fixed[key] = doc_id
     _kv_set(session, FIXED_KEY, fixed)
+
+
+def fixed_label(session: Session, entry) -> str:
+    """Kurzbeschreibung einer festen Zuordnung für die Liste."""
+    if isinstance(entry, dict):
+        return f"laufende Zahlung – jeweils neuestes Dokument von {entry.get('correspondent')}"
+    doc = session.get(Document, entry) if isinstance(entry, int) else None
+    return doc.title if doc and doc.title else f"#{entry}"
+
+
+def fixed_target(session: Session, entry, day: date) -> tuple[int | None, str]:
+    """Zu welchem Dokument gehört eine Buchung vom Tag `day` laut fester Zuordnung? Gibt (ID, Hinweis) zurück."""
+    if isinstance(entry, dict) and entry.get("mode") == "latest":
+        docs = session.scalars(select(Document).where(Document.correspondent == entry["correspondent"],
+                                                      Document.created.is_not(None)).order_by(Document.created)).all()
+        before = [d for d in docs if d.created <= day]
+        doc = before[-1] if before else (docs[0] if docs else session.get(Document, entry.get("doc")))
+        if doc is None:
+            return None, ""
+        return doc.id, f"laufende Zahlung: neuestes Dokument von {entry['correspondent']}"
+    doc_id = entry if isinstance(entry, int) else None
+    if doc_id is None or session.get(Document, doc_id) is None:
+        return None, ""
+    return doc_id, "Dauerauftrag: immer dieses Dokument"
 
 
 # --------------------------------------------------------------------------- ausgeblendete Empfänger
@@ -176,9 +210,9 @@ def check(session: Session, transactions: list[Transaction], settings: Settings,
             row.note = "über den Zahlungsabgleich"
         elif _is_ignored(tx.counterparty, ignored):
             row.state, row.candidates, row.note = "ignored", None, "Empfänger ausgeblendet"
-        elif (fixed_id := fixed.get(party_key(tx.counterparty))) and session.get(Document, fixed_id) is not None:
-            row.state, row.document_id, row.candidates = "linked", fixed_id, None
-            row.note = "Dauerauftrag: immer dieses Dokument"
+        elif (target := fixed_target(session, fixed.get(party_key(tx.counterparty)), tx.date))[0]:
+            row.state, row.document_id, row.candidates = "linked", target[0], None
+            row.note = target[1]
         elif cands := candidates_for(session, tx, invoices, docs, learned):
             row.state, row.candidates, row.note = "candidate", cands, None
         else:

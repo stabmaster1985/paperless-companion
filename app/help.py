@@ -70,7 +70,7 @@ PAGES: dict[str, tuple[str, list[str]]] = {
         "Findet die App keinen Beleg, sucht sie den Betrag einmal im Volltext deiner Dokumente (Paperless-Suche, nur lesend). "
         "Über das Suchfeld in der Karte findest du Belege nach Titel, Absender oder Paperless-ID.",
         "Die App lernt aus deinen Zuordnungen: Ordnest du „AMZN Mktp“ einem Amazon-Dokument zu, schlägt sie künftig "
-        "Amazon-Dokumente vor. Mit „künftig immer so“ (Miete, Abo, Dauerauftrag) wird ein Empfänger immer demselben Dokument zugeordnet.",
+        "Amazon-Dokumente vor. Mit „immer dieses Dokument“ (Miete, Abo) wird ein Empfänger immer demselben Dokument zugeordnet; mit „laufende Zahlung“ (Strom, Gas, Versicherung) jeweils dem neuesten Dokument des Versorgers bis zum Buchungstag – Vertrag, Abschlagsplan oder Jahresabrechnung.",
         "Alles bleibt im Companion; Paperless und Firefly werden nicht verändert.",
     ]),
     "/series": ("Serien", [
