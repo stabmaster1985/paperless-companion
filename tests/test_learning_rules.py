@@ -111,7 +111,7 @@ def test_receipts_page_and_actions(client, mock_api):
     mock_api.get(f"{FIREFLY}/api/v1/transactions").respond(json=FIREFLY_PAGE)
     client.post("/receipts/run")
     page = client.get("/receipts").text
-    assert "Stadtwerke" in page and "78,00 €" in page and "Buchung prüfen:" in page
+    assert "Stadtwerke" in page and "78,00 €" in page and "Buchung prüfen" in page and "Vorschlag prüfen" in page
     with session_scope() as s:
         row = s.query(ReceiptCheck).one()
         assert row.state == "candidate" and row.candidates[0]["id"] == 1

@@ -1246,8 +1246,10 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         return RedirectResponse(f"{target}{'&' if '?' in target else '?'}msg={quote(msg)}", status_code=303)
 
     @app.get("/receipts", response_class=HTMLResponse)
-    def receipts_page(request: Request, state: str = "open", msg: str = "", session: Session = Depends(get_session)):
-        query = select(ReceiptCheck).order_by(ReceiptCheck.tx_date.desc())
+    def receipts_page(request: Request, state: str = "open", msg: str = "", sort: str = "date",
+                      session: Session = Depends(get_session)):
+        order = ReceiptCheck.amount.desc() if sort == "amount" else ReceiptCheck.tx_date.desc()
+        query = select(ReceiptCheck).order_by(order, ReceiptCheck.tx_date.desc())
         if state == "open":
             query = query.where(ReceiptCheck.state.in_(("missing", "candidate")))
         elif state in receipts.STATES:
@@ -1256,7 +1258,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         titles = {d.id: d.title for d in session.scalars(select(Document).where(
             Document.id.in_([r.document_id for r in rows if r.document_id] or [-1])))}
         fixed = receipts.fixed_documents(session)
-        return render(request, "receipts.html", rows=rows, state=state, msg=msg, STATES=receipts.STATES,
+        return render(request, "receipts.html", rows=rows, state=state, msg=msg, STATES=receipts.STATES, sort=sort,
                       overview=receipts.overview(session), ignored=receipts.ignored_counterparties(session),
                       titles=titles, settings=settings, fixed=fixed, party_key=receipts.party_key,
                       fixed_titles={k: (session.get(Document, v).title if session.get(Document, v) else f"#{v}")

@@ -79,6 +79,11 @@ Welche Rechnungen dazugehören, kommt aus den Paperless-Verknüpfungen („gehö
 
 ![Erstattung mit verknüpften Rechnungen](docs/screenshots/erstattung.png)
 
+**Belege** – Abbuchungen aus Firefly III ohne Dokument in Paperless. Oben stehen die mit gefundenem Vorschlag
+(ein Klick genügt), darunter die, zu denen noch ein Beleg fehlt.
+
+![Belege](docs/screenshots/belege.png)
+
 **Inbox** – Dokumente, bei denen die Erkennung nicht sicher genug war.
 
 ![Inbox](docs/screenshots/inbox.png)

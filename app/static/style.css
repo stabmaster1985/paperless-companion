@@ -706,6 +706,54 @@ body.docview-open { overflow: hidden; }
 .receipt-hit-list li { display: flex; flex-wrap: wrap; gap: .3rem .6rem; justify-content: space-between; align-items: center;
   padding: .35rem 0; border-top: 1px dashed var(--border); }
 
+/* Belege als Liste: eine Zeile je Buchung (am Handy als kompakte Karte) */
+.rc-toolbar { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: center; justify-content: space-between; margin-bottom: .5rem; }
+.rc-toolbar .tabs { margin: 0; }
+.rc-tools { display: flex; flex-wrap: wrap; gap: .4rem 1rem; align-items: center; }
+.rc-tools input { width: 18rem; max-width: 100%; }
+.rc-sort { color: var(--muted); font-size: .9rem; white-space: nowrap; }
+.rc-sort a { margin-left: .4rem; }
+.rc-sort a.active { color: var(--text); font-weight: 600; text-decoration: underline; }
+.rc-group { margin: 1.1rem 0 1.4rem; }
+.rc-group h2 { margin: 0 0 .15rem; font-size: 1.1rem; }
+.rc-group h2 .count { display: inline-block; min-width: 1.6em; padding: 0 .4em; border-radius: 999px; background: var(--bg);
+  border: 1px solid var(--border); font-size: .85rem; text-align: center; }
+.rc-hint { margin: 0 0 .5rem; font-size: .9rem; }
+.rc-list { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.rc-row { display: grid; grid-template-columns: 1fr auto; grid-template-areas: "who amount" "date date" "receipt receipt" "actions actions";
+  gap: .3rem .75rem; padding: .6rem .8rem; border-left: 5px solid var(--st, var(--border)); }
+.rc-row + .rc-row { border-top: 1px solid var(--border); }
+.rc-row.st-missing { --st: #b91c1c; }
+.rc-row.st-candidate { --st: #d97706; }
+.rc-row.st-linked { --st: #17845f; }
+.rc-row.st-ignored { --st: #94a3b8; }
+.rc-date { grid-area: date; color: var(--muted); font-size: .85rem; white-space: nowrap; }
+.rc-who { grid-area: who; min-width: 0; overflow-wrap: anywhere; display: flex; flex-direction: column; }
+.rc-who small { color: var(--muted); }
+.rc-amount { grid-area: amount; font-weight: 700; white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }
+.rc-receipt { grid-area: receipt; display: flex; flex-direction: column; gap: .3rem; min-width: 0; }
+.rc-cand { display: flex; flex-wrap: wrap; gap: .3rem .6rem; align-items: center; justify-content: space-between;
+  background: var(--warn-bg); border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent); border-radius: 6px; padding: .3rem .5rem; }
+.rc-doc { min-width: 0; overflow-wrap: anywhere; }
+.rc-doc small { display: block; }
+.rc-search summary { cursor: pointer; color: var(--accent); font-size: .9rem; width: max-content; }
+.rc-search[open] summary { margin-bottom: .3rem; }
+.rc-actions { grid-area: actions; display: flex; flex-wrap: wrap; gap: 0 .5rem; margin-left: -.4rem; }
+.rc-actions form { margin: 0; }
+@media (max-width: 640px) {
+  .rc-cand button { width: 100%; }
+  .rc-tools input, .receipt-search input { width: 100%; font-size: 16px; }
+  .rc-tools { width: 100%; }
+}
+@media (min-width: 900px) {
+  .rc-row { grid-template-columns: 6.5rem minmax(10rem, 1.1fr) 7rem minmax(16rem, 2fr) 11rem;
+    grid-template-areas: "date who amount receipt actions"; align-items: start; }
+  .rc-date { display: flex; flex-direction: column; font-size: .9rem; color: var(--text); }
+  .rc-date .tx-link { margin-left: 0; }
+  .rc-actions { flex-direction: column; align-items: flex-start; margin-left: 0; }
+  .rc-row:hover { background: color-mix(in srgb, var(--bg) 60%, transparent); }
+}
+
 /* ------------------------------------------------------------------ Desktop: Platz nutzen
    Ab 1200 px wachsen die Seiten mit dem Bildschirm, die Schrift wird etwas größer, Karten stehen nebeneinander. */
 @media (min-width: 1200px) {

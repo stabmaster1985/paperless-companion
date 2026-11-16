@@ -59,7 +59,7 @@ def start_demo(data: Path, port: int) -> None:
     from app.config import Settings
     from app.db import session_scope
     from app.main import create_app
-    from app.models import Case, CaseDocument, CaseEntry, Document, Invoice, PaymentMatch, Reimbursement
+    from app.models import Case, CaseDocument, CaseEntry, Document, Invoice, PaymentMatch, ReceiptCheck, Reimbursement
     from tests import conftest
     from tests.test_pipeline import run_all
 
@@ -183,6 +183,21 @@ def start_demo(data: Path, port: int) -> None:
     with session_scope() as s:
         series.refresh(s)  # Serien wiederkehrender Dokumente (Abschläge, Lohnabrechnungen)
 
+    with session_scope() as s:  # Belege: Abbuchungen mit und ohne passendes Dokument
+        def cand(doc_id, reason):
+            return {"id": doc_id, "title": s.get(Document, doc_id).title, "reason": reason}
+
+        for i, (who, text, amount, day, state, cands) in enumerate([
+                ("Online-Versand Muster", "Bestellung 302-1234567", 49.99, date(2026, 11, 2), "candidate",
+                 [cand(1, "gleicher Betrag"), cand(3, "gleicher Absender, Datum in der Nähe")]),
+                ("Elektro Beispiel GmbH", "RE 2026-0815 Waschmaschine", 649.0, date(2026, 10, 28), "missing", None),
+                ("Bezahldienst Muster", "1043928475 Online-Shop", 23.8, date(2026, 10, 25), "missing", None),
+                ("Apotheke am Markt", "Kartenzahlung", 31.45, date(2026, 10, 21), "candidate",
+                 [cand(2, "Betrag 31,45 € im Dokumenttext")]),
+                ("Kfz-Werkstatt Muster", "Inspektion", 412.3, date(2026, 10, 18), "missing", None)]):
+            s.add(ReceiptCheck(tx_id=f"demo{i}", tx_group_id=f"7{i}", tx_date=day, amount=amount, counterparty=who,
+                               description=text, state=state, candidates=cands))
+
 
 def launch(pw):
     try:
@@ -226,7 +241,7 @@ def shoot(base: str) -> None:
         for name, path, width, height in [
                 ("dashboard", "/", 1280, 960), ("inbox", "/inbox", 1280, 720), ("dokument", "/documents/1", 1280, 960),
                 ("rechnungen", "/invoices", 1280, 760), ("erstattungen", "/reimbursements", 1280, 900),
-                ("serien", "/series", 1280, 620),
+                ("serien", "/series", 1280, 620), ("belege", "/receipts", 1280, 900),
                 ("erstattung", "/documents/600", 1280, 1100), ("handy-dashboard", "/", 390, 844)]:
             p = page(width, height)
             p.goto(base + path)
