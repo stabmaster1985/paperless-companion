@@ -355,6 +355,11 @@ python3 paperless_grant_view.py --url http://PAPERLESS:8000 --token ADMIN_TOKEN 
 Bestehende Rechte bleiben erhalten (merge). `--documents` gibt zusätzlich alle Dokumente frei.
 Danach in der App unter **Einstellungen** „Archiv-Index neu einlesen“.
 
+Damit **neue Dokumente** gleich sichtbar sind (Paperless gibt sie standardmäßig nur dem Benutzer,
+der sie hochlädt), in Paperless unter *Workflows* einen Workflow anlegen:
+Auslöser „Dokument hinzugefügt“ (ohne Filter), Aktion „Zuweisung“ → *Berechtigungen* →
+„Anzeigen: Gruppen“ = `ReadOnly`. Sonst nichts ausfüllen.
+
 ### Metadaten-Vorschläge: Titel, Tags, Korrespondent, Dokumenttyp
 
 Wenn ein Dokument ohnehin analysiert wird, schlägt die App auch Paperless-Metadaten vor.
