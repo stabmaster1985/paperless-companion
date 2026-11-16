@@ -58,6 +58,9 @@ small, .muted { color: var(--muted); }
   padding: .75rem 1rem; background: var(--surface); border-bottom: 1px solid var(--border);
 }
 .brand { font-weight: 700; color: var(--text); }
+.top-search { margin: 0 0 0 auto; flex: 0 1 17rem; }
+.top-search input { width: 100%; padding: .35rem .6rem; font-size: .9rem; }
+@media (max-width: 640px) { .top-search { flex: 1 1 8rem; } .top-search input { font-size: 16px; } }
 .topbar nav { display: flex; flex-wrap: wrap; gap: .25rem; align-items: center; }
 .topbar nav a { padding: .3rem .6rem; border-radius: 6px; color: var(--muted); }
 .topbar nav a.active, .topbar nav a:hover { background: var(--bg); color: var(--text); text-decoration: none; }

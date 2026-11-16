@@ -222,6 +222,18 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         ).all()
         return render(request, "inbox.html", docs=docs, msg=msg)
 
+    @app.get("/search")
+    def search(q: str = "", session: Session = Depends(get_session)):
+        """Suche oben in der Leiste: Paperless-ID öffnet das Dokument direkt (fehlt es im Companion, wird es aus
+        Paperless geholt), sonst Trefferliste über das ganze Archiv."""
+        needle = q.strip().lstrip("#")
+        if needle.isdigit():
+            problem = ensure_indexed(session, int(needle))
+            if problem is None:
+                return RedirectResponse(f"/documents/{int(needle)}", status_code=303)
+            return RedirectResponse(f"/documents?view=all&q={quote(needle)}&msg={quote(problem)}", status_code=303)
+        return RedirectResponse(f"/documents?view=all&q={quote(q.strip())}", status_code=303)
+
     @app.get("/documents", response_class=HTMLResponse)
     def documents(request: Request, msg: str = "", session: Session = Depends(get_session)):
         flt = selection.Filter.from_mapping(request.query_params)

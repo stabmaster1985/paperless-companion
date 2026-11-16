@@ -43,6 +43,10 @@
     </details>
     {% endfor %}
   </nav>
+  <form class="top-search" action="/search" method="get" role="search">
+    <input type="search" name="q" placeholder="Suchen …" title="Titel, Absender, Dateiname oder Paperless-ID" aria-label="Dokumente suchen"
+      value="{{ request.query_params.get('q', '') if path == '/documents' else '' }}">
+  </form>
 </header>
 <nav class="bottom-nav" aria-label="Schnellzugriff">
   <a href="/" class="{{ 'active' if path == '/' }}"><span class="ico">⌂</span>Übersicht</a>

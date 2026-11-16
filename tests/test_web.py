@@ -1,3 +1,4 @@
+import httpx
 from datetime import date
 
 import pytest
@@ -79,6 +80,20 @@ def test_login_required(settings, mock_api):
 def test_document_search(client):
     page = client.get("/documents?q=strom").text
     assert "Stromrechnung Oktober" in page and "Handyvertrag" not in page
+    assert "Stromrechnung Oktober" in client.get("/documents?q=oktober%20strom").text  # Wörter in beliebiger Reihenfolge
+
+
+def test_top_search(client, mock_api):
+    assert 'action="/search"' in client.get("/").text
+    r = client.get("/search?q=2", follow_redirects=False)
+    assert r.headers["location"] == "/documents/2"  # Paperless-ID öffnet das Dokument
+    r = client.get("/search?q=Oktober", follow_redirects=False)
+    assert r.headers["location"] == "/documents?view=all&q=Oktober"  # ganzes Archiv
+    single = next(r for r in mock_api.routes if r.pattern and "\\d+/$" in repr(r.pattern))
+    single.side_effect = lambda request: httpx.Response(404) if "/4242/" in request.url.path else \
+        httpx.Response(200, json={"content": ""})
+    page = client.get("/search?q=4242").text
+    assert "darf es nicht sehen" in page
 
 
 def test_unwritable_data_dir_gives_clear_error(tmp_path):

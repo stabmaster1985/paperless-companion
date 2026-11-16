@@ -72,9 +72,13 @@ class Filter:
 
     def apply(self, session: Session) -> list[Document]:
         query = select(Document).order_by(Document.created.desc().nulls_last(), Document.id.desc())
-        if self.q:
-            pattern = f"%{self.q}%"
-            query = query.where(or_(Document.title.ilike(pattern), Document.correspondent.ilike(pattern)))
+        for word in self.q.split():  # jedes Wort muss vorkommen (Titel, Korrespondent, Dateiname oder ID)
+            pattern = f"%{word.lstrip('#')}%"
+            conds = [Document.title.ilike(pattern), Document.correspondent.ilike(pattern),
+                     Document.original_file_name.ilike(pattern), Document.document_type.ilike(pattern)]
+            if word.lstrip("#").isdigit():
+                conds.append(Document.id == int(word.lstrip("#")))
+            query = query.where(or_(*conds))
         if self.kind:
             query = query.where(Document.kind == self.kind)
         if self.state:
