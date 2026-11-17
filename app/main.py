@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import appsettings, cases, mqtt, reimbursements, series, help as helptexts, identifiers, learning, paperless_rules, receipts, rules as rule_proposals, deadlines, events, fields, highlight, ics, metadata, notify, payments, pipeline, reminders, retention, selection, tax
+from app import appsettings, cancellations, cases, mqtt, reimbursements, series, help as helptexts, identifiers, learning, paperless_rules, receipts, rules as rule_proposals, deadlines, events, fields, highlight, ics, metadata, notify, payments, pipeline, reminders, retention, selection, tax
 from app.config import Settings, get_settings
 from app.db import get_session, init_db, session_scope
 from app.models import Case, CaseDocument, CaseEntry, Contract, Document, Invoice, KeyValue, ReceiptCheck, RuleProposal, RetentionLog, RetentionRule, Warranty
@@ -766,13 +766,37 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         return RedirectResponse("/inbox", status_code=303)
 
     @app.get("/contracts", response_class=HTMLResponse)
-    def contracts(request: Request, session: Session = Depends(get_session)):
+    def contracts(request: Request, msg: str = "", session: Session = Depends(get_session)):
         t = today()
         rows = []
         for c in session.scalars(select(Contract)):
             rows.append((c, deadlines.compute(deadlines.terms_from_contract(c), t)))
         rows.sort(key=lambda r: (r[0].status != "active", r[1].cancel_by or date.max))
-        return render(request, "contracts.html", rows=rows, fixed_costs=events.monthly_fixed_costs(session))
+        return render(request, "contracts.html", rows=rows, fixed_costs=events.monthly_fixed_costs(session), msg=msg,
+                      cancels=cancellations.pending(session),
+                      all_contracts=sorted(session.scalars(select(Contract)), key=lambda c: (c.name or "").lower()))
+
+    @app.post("/cancellations/{doc_id}")
+    def cancellation_action(doc_id: int, action: str = Form("apply"), contract_id: str = Form(""),
+                            cancelled_on: str = Form(""), effective: str = Form(""),
+                            session: Session = Depends(get_session)):
+        """Kündigungsbestätigung übernehmen (Vertrag als gekündigt markieren) oder ausblenden."""
+        doc = session.get(Document, doc_id)
+        if doc is None:
+            raise HTTPException(404)
+        if action == "dismiss":
+            cancellations.dismiss(doc)
+            return RedirectResponse(f"/contracts?msg={quote('Ausgeblendet')}", status_code=303)
+        contract = session.get(Contract, int(contract_id)) if contract_id.isdigit() else None
+        if contract is None:
+            return RedirectResponse(f"/contracts?msg={quote('Bitte den Vertrag auswählen')}#kuendigungen", status_code=303)
+        try:
+            day, end = pipeline.coerce("date", cancelled_on or None), pipeline.coerce("date", effective or None)
+        except ValueError:
+            return RedirectResponse(f"/contracts?msg={quote('Datum ungültig')}#kuendigungen", status_code=303)
+        cancellations.apply(session, doc, contract, day, end)
+        msg = f"„{contract.name or contract.provider}“ ist als gekündigt markiert" + (f" (endet {end:%d.%m.%Y})" if end else "")
+        return RedirectResponse(f"/contracts?msg={quote(msg)}", status_code=303)
 
     @app.post("/contracts/{contract_id}/cancelled")
     def contract_cancelled(contract_id: int, cancelled_on: str = Form(""), session: Session = Depends(get_session)):

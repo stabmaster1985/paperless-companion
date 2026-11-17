@@ -106,6 +106,9 @@ class Contract(Base):
     # active | cancelled | ended
     status: Mapped[str] = mapped_column(String, default="active")
     cancelled_on: Mapped[date | None] = mapped_column(Date)
+    # Kündigungsbestätigung: Vertragsende laut Bestätigung und das Dokument dazu
+    cancel_effective: Mapped[date | None] = mapped_column(Date)
+    cancellation_doc_id: Mapped[int | None] = mapped_column(Integer)
     notes: Mapped[str | None] = mapped_column(Text)
 
     document: Mapped[Document] = relationship(back_populates="contract")

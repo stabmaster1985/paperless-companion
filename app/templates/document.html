@@ -70,6 +70,15 @@ document.querySelectorAll('#viewer .tab[data-tab]').forEach((tab) => tab.addEven
 }));
 </script>
 <div class="review-main">
+{% set canc = sugg.get('_cancellation') if sugg else none %}
+{% if canc and not canc.dismissed %}
+<div class="notice warn">Das sieht nach einer <strong>Kündigungsbestätigung</strong> aus{% if canc.effective %} (Vertragsende {{ canc.effective[8:10] }}.{{ canc.effective[5:7] }}.{{ canc.effective[:4] }}){% endif %}.
+  <a href="/contracts#kuendigungen">Unter Verträge dem Vertrag zuordnen und als gekündigt markieren →</a></div>
+{% endif %}
+{% if doc.contract and doc.contract.cancellation_doc_id %}
+<div class="notice">Gekündigt am {{ doc.contract.cancelled_on|d }}{% if doc.contract.cancel_effective %}, endet am <strong>{{ doc.contract.cancel_effective|d }}</strong>{% endif %} –
+  <a href="/documents/{{ doc.contract.cancellation_doc_id }}">Kündigungsbestätigung</a></div>
+{% endif %}
 {% if doc.kind == 'other' %}
   <p class="empty">Dieses Dokument wird nicht ausgewertet. Wähle oben eine Art, um es als Rechnung, Vertrag, Garantie oder Erstattung zu erfassen.</p>
 {% else %}

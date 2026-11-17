@@ -102,6 +102,11 @@ def collect(session: Session, today: date) -> list[Event]:
     return events
 
 
-def monthly_fixed_costs(session: Session) -> float:
-    costs = session.scalars(select(Contract.monthly_cost).where(Contract.status == "active"))
-    return round(sum(c for c in costs if c), 2)
+def monthly_fixed_costs(session: Session, today: date | None = None) -> float:
+    """Monatliche Fixkosten: aktive Verträge und gekündigte, die laut Bestätigung noch laufen."""
+    today = today or date.today()
+    total = 0.0
+    for c in session.scalars(select(Contract).where(Contract.status.in_(("active", "cancelled")))):
+        if c.monthly_cost and (c.status == "active" or (c.cancel_effective and c.cancel_effective >= today)):
+            total += c.monthly_cost
+    return round(total, 2)

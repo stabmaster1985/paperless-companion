@@ -818,3 +818,9 @@ body.docview-open { overflow: hidden; }
 .quick-vals { font-size: .9rem; }
 .quick-missing { font-size: .85rem; color: var(--warn); }
 button:disabled, button:disabled:hover { opacity: .5; cursor: not-allowed; }
+
+/* Kündigungsbestätigungen auf der Vertragsseite */
+.cancel-card { border-top: 4px solid #b91c1c; }
+.cancel-item { border-top: 1px solid var(--border); padding: .75rem 0 .25rem; }
+.cancel-item:first-of-type { border-top: 0; }
+.cancel-doc small { display: block; }

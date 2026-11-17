@@ -2,7 +2,34 @@
 {% from "macros.html" import doclink %}
 {% block content %}
 <h1>Verträge</h1>
-<p class="muted">Fixkosten aktiver Verträge: <strong>{{ fixed_costs|eur }}</strong> pro Monat</p>
+<p class="muted">Fixkosten laufender Verträge: <strong>{{ fixed_costs|eur }}</strong> pro Monat <small>(gekündigte zählen bis zum Vertragsende)</small></p>
+{% if msg %}<div class="notice ok">{{ msg }}</div>{% endif %}
+
+{% if cancels %}
+<section class="card cancel-card" id="kuendigungen">
+  <h2>Kündigungsbestätigungen ({{ cancels|length }})</h2>
+  <p class="muted">Diese Dokumente sehen nach einer Kündigungsbestätigung aus. Prüfe den Vertrag und das Vertragsende und markiere ihn als
+    gekündigt – die Bestätigung wird am Vertrag hinterlegt. Nach Paperless geht dabei nichts automatisch.</p>
+  {% for item in cancels %}{% set doc = item.doc %}
+  <form method="post" action="/cancellations/{{ doc.id }}" class="cancel-item">
+    <div class="cancel-doc"><a href="/documents/{{ doc.id }}">{{ doc.title or ('#' ~ doc.id) }}</a> {{ doclink(doc.id) }}
+      <small class="muted">{{ doc.correspondent or 'ohne Korrespondent' }} · {{ doc.created|d }}{% if item.by_title %} · nach dem Titel erkannt{% endif %}</small></div>
+    <div class="grid">
+      <label class="field"><span>Vertrag</span>
+        <select name="contract_id"><option value="">– bitte wählen –</option>
+          {% for c in all_contracts %}<option value="{{ c.id }}" {{ 'selected' if item.contract and item.contract.id == c.id }}>{{ c.name or c.provider or ('#' ~ c.document_id) }}{% if c.provider and c.name %} ({{ c.provider }}){% endif %}{% if c.status != 'active' %} – {{ 'gekündigt' if c.status == 'cancelled' else 'beendet' }}{% endif %}</option>{% endfor %}
+        </select></label>
+      <label class="field"><span>Gekündigt am</span><input type="date" name="cancelled_on" value="{{ item.date.isoformat() if item.date }}"></label>
+      <label class="field"><span>Vertrag endet am</span><input type="date" name="effective" value="{{ item.effective.isoformat() if item.effective }}"></label>
+    </div>
+    <div class="actions">
+      <button class="small primary" name="action" value="apply">Als gekündigt markieren</button>
+      <button class="small link" name="action" value="dismiss" title="Keine Kündigungsbestätigung bzw. nicht mehr anzeigen">ausblenden</button>
+    </div>
+  </form>
+  {% endfor %}
+</section>
+{% endif %}
 {% if rows %}
 <div class="table-wrap"><table class="list">
   <thead><tr><th>Vertrag</th><th>Kündigen bis</th><th class="hide-sm">Laufzeitende</th><th class="hide-sm">Frist</th><th>€/Monat</th><th></th></tr></thead>
@@ -13,13 +40,14 @@
       <td><a href="/documents/{{ c.document_id }}">{{ c.name }}</a> {{ doclink(c.document_id) }}<br><small>{{ c.provider or '' }}</small></td>
       <td class="nowrap">
         {% if c.status == 'cancelled' %}<span class="tag">gekündigt {{ c.cancelled_on|d }}</span>
+          {% if c.cancellation_doc_id %}<br><small><a href="/documents/{{ c.cancellation_doc_id }}">Bestätigung</a> {{ doclink(c.cancellation_doc_id) }}</small>{% endif %}
         {% elif c.status == 'ended' %}<span class="tag">beendet</span>
         {% elif d.missing_info %}<span class="tag tag-warn">Angaben fehlen</span>
         {% elif d.anytime %}jederzeit
         {% elif d.cancel_by %}<span class="{{ 'soon' if days is not none and days <= 30 }}">{{ d.cancel_by|d }}</span><br><small>in {{ days }} T.</small>
         {% else %}–{% endif %}
       </td>
-      <td class="hide-sm">{{ d.term_end|d }}</td>
+      <td class="hide-sm">{% if c.status == 'cancelled' and c.cancel_effective %}{{ c.cancel_effective|d }}<br><small class="muted">laut Bestätigung</small>{% else %}{{ d.term_end|d }}{% endif %}</td>
       <td class="hide-sm">{% if c.notice_value %}{{ c.notice_value }} {{ {'months': 'Mon.', 'weeks': 'Wo.', 'days': 'Tage'}[c.notice_unit] }}{% else %}–{% endif %}</td>
       <td class="nowrap">{{ c.monthly_cost|eur }}</td>
       <td>

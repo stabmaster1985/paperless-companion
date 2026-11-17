@@ -21,7 +21,7 @@ from app.paperless import PaperlessClient, PaperlessError
 log = logging.getLogger(__name__)
 
 # Bei Erweiterungen der Erkennung erhöhen – die Systemseite bietet dann an, betroffene Dokumente neu zu analysieren
-ANALYSIS_VERSION = 4  # 3: Gehaltsabrechnungen/Kontoauszüge nicht als Rechnung, 4: Erstattungen
+ANALYSIS_VERSION = 5  # 3: Gehaltsabrechnungen/Kontoauszüge nicht als Rechnung, 4: Erstattungen, 5: Kündigungsbestätigungen
 
 KINDS = {"invoice": "Rechnung", "contract": "Vertrag", "warranty": "Garantie", "reimbursement": "Erstattung",
          "other": "Sonstiges"}
@@ -494,6 +494,13 @@ def process_document(
     else:
         kind, source = classify(doc, text, settings)
     sugg: dict = {}
+    from app import cancellations  # lokal, um Importzyklen zu vermeiden
+
+    # Kündigungsbestätigung: kein neuer Vertrag, sondern ein Hinweis zum bestehenden Vertrag
+    if doc.kind_source not in ("manual", "fields") and kind in ("contract", "other") \
+            and (cancel := cancellations.detect(session, doc, text)):
+        kind, source = "other", "keyword"
+        sugg["_cancellation"] = cancel
     # Was ist bei dieser Analyse passiert? (für die Aktivitätsanzeige)
     info: dict = {"kind": kind, "ai": "not_needed", "ai_seconds": None, "ai_fields": [], "wanted": []}
     if kind != "other":
