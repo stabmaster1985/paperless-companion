@@ -135,32 +135,79 @@ def _linked_transactions(session: Session) -> dict[str, int]:
     return linked
 
 
+def _doc_amount(doc: Document) -> float | None:
+    """Betrag eines Dokuments: erfasste Rechnung (bei Teilzahlungen der Rest), sonst der erkannte Vorschlag."""
+    inv = doc.invoice
+    if inv is not None and inv.amount is not None:
+        return inv.open_amount if inv.status == "open" else inv.amount
+    value = ((doc.suggestions or {}).get("amount") or {}).get("value") if isinstance(doc.suggestions, dict) else None
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+MIN_SCORE = 50  # darunter kein Vorschlag
+
+
+def score_document(tx: Transaction, doc: Document, known: set[str], paid_elsewhere: set[int]) -> tuple[int, list[str]] | None:
+    """Wie gut passt ein Dokument als Beleg zur Buchung? Betrag, Empfänger, Rechnungsnummer und Datum zählen.
+
+    Ein Dokument mit bekanntem, aber deutlich anderem Betrag scheidet aus – auch wenn der Absender passt
+    (z.B. ein Schreiben der Stadtwerke über eine andere Summe)."""
+    inv = doc.invoice
+    ref = (inv.invoice_date if inv else None) or doc.created or (inv.due_date if inv else None)
+    if doc.id in paid_elsewhere or ref is None:
+        return None
+    days = (tx.date - ref).days
+    latest = (inv.due_date if inv and inv.due_date else ref) + timedelta(days=60 if inv else 30)
+    if days < -10 or tx.date > latest:
+        return None
+    points, reasons = 0, []
+    amount = _doc_amount(doc)
+    if amount is not None:
+        diff = abs(amount - tx.amount)
+        if diff <= 0.01:
+            points, reasons = points + 60, ["gleicher Betrag"]
+        elif diff <= max(1.0, amount * 0.02):
+            points, reasons = points + 25, [f"Betrag fast gleich ({amount:.2f} €)".replace(".", ",")]
+        else:
+            return None  # Beleg über einen anderen Betrag
+    name = (inv.issuer if inv and inv.issuer else None) or doc.correspondent or ""
+    if name and name.lower() in known:
+        points, reasons = points + 35, [*reasons, "früher so zugeordnet"]
+    elif name and (_words(tx.counterparty) & _words(name) or _compact(name) in _compact(tx.counterparty)):
+        points, reasons = points + 35, [*reasons, "gleicher Absender" if amount is None else "Empfänger passt"]
+    number = inv.invoice_number if inv else None
+    if number and len(_compact(number)) >= 3 and _compact(number) in _compact(f"{tx.description} {tx.text}"):
+        points, reasons = points + 40, [*reasons, "Rechnungsnr. im Verwendungszweck"]
+    if amount is None and len(reasons) == 0:
+        return None  # weder Betrag noch Absender: kein Hinweis
+    points += max(0, 15 - abs(days) // 3)  # zeitlich nah: etwas besser
+    reasons.append(f"{abs(days)} Tag{'e' if abs(days) != 1 else ''} {'vorher' if days >= 0 else 'nachher'}"
+                   if days else "am selben Tag")
+    return points, reasons
+
+
 def candidates_for(session: Session, tx: Transaction, invoices: list[Invoice], docs: list[Document],
-                   learned: dict | None = None) -> list[dict]:
-    """Mögliche Belege: Rechnung mit gleichem Betrag in zeitlicher Nähe, sonst Dokument des Empfängers in Zeitnähe –
-    auch über gelernte Zuordnungen (Firefly-Name -> Korrespondent)."""
-    found: list[dict] = []
+                   learned: dict | None = None, paid_elsewhere: set[int] | None = None) -> list[dict]:
+    """Mögliche Belege, beste zuerst: Betrag (auch erkannte Beträge ungeprüfter Dokumente und Restbeträge nach
+    Teilzahlungen), Empfänger bzw. gelernte Zuordnung, Rechnungsnummer im Verwendungszweck und zeitliche Nähe."""
     known = {c.lower() for c in ((learned or {}).get(party_key(tx.counterparty)) or {})}
+    pool = {d.id: d for d in docs}
     for inv in invoices:
-        if inv.amount is None or abs(inv.amount - tx.amount) > 0.01:
-            continue
-        ref = inv.invoice_date or inv.due_date or (inv.document.created if inv.document else None)
-        if ref and -10 <= (tx.date - ref).days <= 75:
-            found.append({"id": inv.document_id, "title": inv.document.title if inv.document else "",
-                          "reason": "gleicher Betrag" + (", Empfänger passt" if _name_match(inv.issuer, tx) else "")})
-    if not found:
-        words = _words(tx.counterparty)
-        for doc in docs:
-            if not doc.correspondent or not doc.created or abs((tx.date - doc.created).days) > 21:
-                continue
-            days = abs((tx.date - doc.created).days)
-            if doc.correspondent.lower() in known:
-                found.append({"id": doc.id, "title": doc.title, "reason": "früher so zugeordnet, Datum in der Nähe", "_days": days})
-            elif words & _words(doc.correspondent) or _compact(doc.correspondent) in _compact(tx.counterparty):
-                found.append({"id": doc.id, "title": doc.title, "reason": "gleicher Absender, Datum in der Nähe", "_days": days})
-    # passender Empfänger zuerst, dann gelernte Zuordnungen, dann das zeitlich nächste Dokument
-    found.sort(key=lambda c: ("Empfänger" not in c["reason"], "früher" not in c["reason"], c.get("_days", 0)))
-    return [{k: v for k, v in c.items() if k != "_days"} for c in found[:5]]
+        if inv.document is not None:
+            pool.setdefault(inv.document_id, inv.document)
+    scored = []
+    for doc in pool.values():
+        if (result := score_document(tx, doc, known, paid_elsewhere or set())) and result[0] >= MIN_SCORE:
+            scored.append((result[0], doc, result[1]))
+    if not scored:
+        return []
+    scored.sort(key=lambda c: -c[0])
+    best = scored[0][0]
+    keep = [c for c in scored if c[0] >= best - 25][:5]  # deutlich schwächere Treffer nicht anzeigen
+    return [{"id": d.id, "title": d.title, "reason": ", ".join(r), "score": p} for p, d, r in keep]
 
 
 def text_candidates(session: Session, paperless, row: ReceiptCheck) -> list[dict]:
@@ -188,9 +235,14 @@ def check(session: Session, transactions: list[Transaction], settings: Settings,
     ignored = ignored_counterparties(session)
     learned, fixed = aliases(session), fixed_documents(session)
     searches = 0
+    start = min((tx.date for tx in transactions), default=date.today()) - timedelta(days=120)
     invoices = list(session.scalars(select(Invoice).options(selectinload(Invoice.document))))
-    start = min((tx.date for tx in transactions), default=date.today()) - timedelta(days=30)
-    docs = list(session.scalars(select(Document).where(Document.correspondent.is_not(None), Document.created >= start)))
+    docs = list(session.scalars(select(Document).where(Document.created >= start, Document.kind != "contract")
+                                .options(selectinload(Document.invoice))))
+    # Rechnungen, die schon vollständig über eine Firefly-Buchung bezahlt sind (ohne Teilzahlungen): kein Beleg mehr
+    paid_elsewhere = {m.invoice.document_id for m in session.scalars(
+        select(PaymentMatch).where(PaymentMatch.state == "accepted").options(selectinload(PaymentMatch.invoice)))
+        if m.invoice is not None and m.invoice.status == "paid"}
     existing = {r.tx_id: r for r in session.scalars(select(ReceiptCheck))}
     counts = {"checked": 0, "missing": 0, "candidate": 0, "linked": 0}
     for tx in transactions:
@@ -213,7 +265,7 @@ def check(session: Session, transactions: list[Transaction], settings: Settings,
         elif (target := fixed_target(session, fixed.get(party_key(tx.counterparty)), tx.date))[0]:
             row.state, row.document_id, row.candidates = "linked", target[0], None
             row.note = target[1]
-        elif cands := candidates_for(session, tx, invoices, docs, learned):
+        elif cands := candidates_for(session, tx, invoices, docs, learned, paid_elsewhere - {linked.get(tx.journal_id)}):
             row.state, row.candidates, row.note = "candidate", cands, None
         else:
             cands = [c for c in row.candidates or [] if "Dokumenttext" in c.get("reason", "")]  # frühere Textsuche behalten

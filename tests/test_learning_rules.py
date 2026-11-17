@@ -9,7 +9,7 @@ from app import learning, receipts, rules
 from app.db import session_scope
 from app.extraction.rules import field
 from app.main import create_app
-from app.models import Document, Invoice, MetaDecision, ReceiptCheck, RuleProposal
+from app.models import Document, Invoice, MetaDecision, PaymentMatch, ReceiptCheck, RuleProposal
 from tests.conftest import PAPERLESS
 from tests.test_payments import FIREFLY, tx
 from tests.test_pipeline import run_all
@@ -637,3 +637,29 @@ def test_several_bookings_one_receipt(client):
         client.post(f"/receipts/{row_id}/link", data={"doc_id": "1"})
     assert "2 Buchungen zugeordnet, zusammen 200,00" in client.get("/receipts?state=linked").text
     assert "schon 2 Buchungen (200,00" in client.get(f"/receipts/{ids[2]}/search?q=1").text
+
+
+def test_receipt_candidates_compare_amounts(db, settings):
+    """Vorschläge vergleichen Beträge: gleicher Absender mit anderem Betrag fällt raus, passender Betrag gewinnt."""
+    settings.receipts_min_amount = 20
+    with db() as s:
+        confirmed_invoice(s, 401, "Stadtwerke", date(2026, 9, 1), date(2026, 9, 15), amount=312.4)  # Jahresabrechnung
+        s.add(Document(id=402, title="Abschlagsplan", correspondent="Stadtwerke", created=date(2026, 9, 2), tags=[],
+                       suggestions={"amount": {"value": 78.0, "confidence": 0.8, "source": "rule"}}))
+        s.add(Document(id=403, title="Scan_0001", correspondent=None, created=date(2026, 9, 8), tags=[], review_state="pending",
+                       suggestions={"amount": {"value": 129.99, "confidence": 0.8, "source": "rule"}}))
+        paid = confirmed_invoice(s, 404, "Versand", date(2026, 9, 1), date(2026, 9, 15), amount=45.0)
+        paid.invoice.status = "paid"
+        s.flush()
+        s.add(PaymentMatch(invoice_id=paid.invoice.id, tx_id="old", tx_group_id="g", tx_date=date(2026, 9, 3), amount=45.0,
+                           counterparty="Versand", score=100, state="accepted"))
+    txs = [tx("1", date(2026, 9, 10), 78.0, "Stadtwerke Musterstadt", "Abschlag"),
+           tx("2", date(2026, 9, 10), 129.99, "Online-Shop", "Bestellung"),
+           tx("3", date(2026, 9, 12), 45.0, "Versand", "zweite Bestellung")]
+    with db() as s:
+        receipts.check(s, txs, settings)
+        rows = {r.tx_id: r for r in s.query(ReceiptCheck)}
+        assert [c["id"] for c in rows["1"].candidates] == [402]  # nicht die Jahresabrechnung über 312,40 €
+        assert "gleicher Betrag" in rows["1"].candidates[0]["reason"] and "Empfänger passt" in rows["1"].candidates[0]["reason"]
+        assert rows["2"].candidates[0]["id"] == 403  # erkannter Betrag eines ungeprüften Dokuments
+        assert rows["3"].state == "missing"  # Rechnung schon über eine andere Buchung bezahlt
