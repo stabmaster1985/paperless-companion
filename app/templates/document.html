@@ -151,6 +151,8 @@ document.querySelectorAll('#viewer .tab[data-tab]').forEach((tab) => tab.addEven
   </form>
   <fieldset class="ff-take">
     <legend>Aus der gewählten Buchung übernehmen {{ help("Status und Datum (bezahlt bzw. erhalten am) werden immer gesetzt. Angehakte Felder werden mit den Werten der Buchung überschrieben, egal was drinsteht. Deine Auswahl merkt sich dieser Browser.") }}</legend>
+    <label class="check" title="Wird immer übernommen"><input type="checkbox" checked disabled> {{ '„Erhalten am“ = Buchungstag' if incoming else '„Bezahlt am“ = Buchungstag' }}</label>
+    <label class="check" title="Wird immer übernommen"><input type="checkbox" checked disabled> Status {{ '„erhalten“' if incoming else '„bezahlt“' }}</label>
     <label class="check"><input type="checkbox" name="take" value="amount" checked> Betrag</label>
     <label class="check"><input type="checkbox" name="take" value="issuer" checked> {{ 'Absender als Erstatter' if incoming else 'Empfänger als Aussteller' }}</label>
     {% if not incoming %}<label class="check"><input type="checkbox" name="take" value="iban" checked> IBAN</label>{% endif %}
