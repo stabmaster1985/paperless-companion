@@ -137,6 +137,7 @@ class Invoice(Base):
     refunded_on: Mapped[date | None] = mapped_column(Date)
     refund_tx_id: Mapped[str | None] = mapped_column(String)
     refund_tx_group_id: Mapped[str | None] = mapped_column(String)
+    refund_doc_id: Mapped[int | None] = mapped_column(Integer)  # Gutschrift-/Storno-Dokument in Paperless
 
     document: Mapped[Document] = relationship(back_populates="invoice")
 

@@ -70,6 +70,8 @@ document.querySelectorAll('#viewer .tab[data-tab]').forEach((tab) => tab.addEven
 }));
 </script>
 <div class="review-main">
+{% set rof = refund_of(doc) %}
+{% if rof %}<div class="notice">Gutschrift-Beleg zur Rechnung <a href="/documents/{{ rof.id }}#refund">{{ rof.title or ('#' ~ rof.id) }}</a>{% if rof.amount %} · {{ rof.amount|eur }} zurück{% endif %}.</div>{% endif %}
 {% set canc = sugg.get('_cancellation') if sugg else none %}
 {% if canc and not canc.dismissed %}
 <div class="notice warn">Das sieht nach einer <strong>Kündigungsbestätigung</strong> aus{% if canc.effective %} (Vertragsende {{ canc.effective[8:10] }}.{{ canc.effective[5:7] }}.{{ canc.effective[:4] }}){% endif %}.
@@ -271,16 +273,43 @@ document.querySelectorAll('.ff-form').forEach((form) => form.addEventListener('s
 {% endif %}
 {% if doc.kind == 'invoice' and doc.invoice and doc.review_state != 'pending' %}
 {% set inv = doc.invoice %}{% set rfd = refund_defaults(doc) %}
-<details class="card refund-box" id="refund" {{ 'open' if inv.refund_amount }}>
+<details class="card refund-box" id="refund" {{ 'open' if inv.refund_amount or inv.refund_doc_id }}>
   <summary>{% if inv.refund_amount %}Rückerstattung: {{ inv.refund_amount|eur }} am {{ inv.refunded_on|d }}{% if inv.amount and inv.refund_amount < inv.amount %} · kostet dich noch {{ inv.net_amount|eur }}{% else %} · vollständig erstattet{% endif %}
+    {% elif inv.refund_doc_id %}Rückerstattung: Gutschrift-Beleg zugeordnet, Betrag fehlt noch
     {% else %}Geld zurückbekommen? Rückerstattung zuordnen{% endif %}</summary>
   {% if inv.refund_amount %}
-  <div>{{ 'Aus Firefly' if inv.refund_tx_id else 'Von dir eingetragen' }}{% if inv.refund_tx_id %}:{{ txlinks(inv.refund_tx_group_id, inv.refunded_on) }}{% endif %}
+  <div>{{ 'Aus Firefly' if inv.refund_tx_id else ('Betrag und Datum aus dem Beleg bzw. von dir' if inv.refund_doc_id else 'Von dir eingetragen') }}{% if inv.refund_tx_id %}:{{ txlinks(inv.refund_tx_group_id, inv.refunded_on) }}{% endif %}
     <form method="post" action="/documents/{{ doc.id }}/refund" class="inline"><input type="hidden" name="action" value="clear">
       <button class="small link">entfernen</button></form></div>
   {% endif %}
   <p class="muted"><small>Für Rücksendungen, Gutschriften oder Stornos: die Rechnung bleibt bezahlt, als Kosten zählt nur der Rest
     (auch im Steuer-Export).</small></p>
+  <div class="rf-doc">
+    <strong>Beleg:</strong>
+    {% if inv.refund_doc_id %}
+      <a href="/documents/{{ inv.refund_doc_id }}">{{ doc_title(inv.refund_doc_id) }}</a> {{ doclink(inv.refund_doc_id) }}
+      <form method="post" action="/documents/{{ doc.id }}/refund" class="inline"><input type="hidden" name="action" value="doc-clear">
+        <button class="small link">lösen</button></form>
+    {% else %}
+      {% set rdocs = refund_docs_of(doc) %}
+      {% if rdocs %}
+      <ul class="plain receipt-hit-list">
+        {% for d in rdocs %}
+        <li><span class="cand-doc"><a href="/documents/{{ d.id }}">{{ d.title or ('#' ~ d.id) }}</a> {{ doclink(d.id) }}
+          <small class="muted">{{ d.correspondent or '' }} · {{ d.created|d }}{% if d.amount %} · {{ d.amount|eur }}{% endif %}</small></span>
+          <form method="post" action="/documents/{{ doc.id }}/refund" class="inline">
+            <input type="hidden" name="action" value="doc"><input type="hidden" name="refund_doc_id" value="{{ d.id }}">
+            <button class="small primary">Als Gutschrift-Beleg</button></form></li>
+        {% endfor %}
+      </ul>
+      {% else %}<span class="muted">noch keiner</span>{% endif %}
+      <div class="receipt-search rf-docsearch" data-url="/documents/{{ doc.id }}/refund-docs?">
+        <input type="search" placeholder="Gutschrift-Dokument suchen: Titel, Absender oder Paperless-ID" aria-label="Gutschrift-Dokument suchen"
+          oninput="refundDocSearch(this)" autocomplete="off">
+        <div class="receipt-hits" aria-live="polite"></div>
+      </div>
+    {% endif %}
+  </div>
   {% if settings.firefly_url and settings.firefly_token %}
   <form class="rf-form" data-url="/documents/{{ doc.id }}/firefly-search">
     <input type="hidden" name="refund" value="1">
@@ -303,6 +332,15 @@ document.querySelectorAll('.ff-form').forEach((form) => form.addEventListener('s
   </form>
 </details>
 <script>
+function refundDocSearch(input) {
+  const box = input.closest('.rf-docsearch'), out = box.querySelector('.receipt-hits');
+  clearTimeout(box._timer);
+  if (input.value.trim().length < 2 && !/^\d+$/.test(input.value.trim())) { out.innerHTML = ''; return; }
+  box._timer = setTimeout(async () => {
+    try { out.innerHTML = await (await fetch(box.dataset.url + 'q=' + encodeURIComponent(input.value))).text(); }
+    catch (e) { out.innerHTML = '<small class="bad">Suche fehlgeschlagen.</small>'; }
+  }, 300);
+}
 document.querySelectorAll('.rf-form').forEach((form) => form.addEventListener('submit', async (e) => {
   e.preventDefault();
   const out = form.parentElement.querySelector('.rf-results');

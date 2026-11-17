@@ -829,3 +829,5 @@ button:disabled, button:disabled:hover { opacity: .5; cursor: not-allowed; }
 .refund-box > summary { cursor: pointer; font-weight: 600; }
 .rf-manual { display: flex; flex-wrap: wrap; gap: .4rem .6rem; align-items: center; margin-top: .75rem; }
 .rf-manual input { width: 10rem; }
+.rf-doc { margin: .5rem 0 .75rem; }
+.rf-docsearch { margin-top: .4rem; }

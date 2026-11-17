@@ -103,6 +103,26 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     templates.env.globals["ff_defaults"] = payments.search_defaults
     templates.env.globals["refund_defaults"] = payments.refund_defaults
 
+    def refund_docs_of(doc: Document) -> list:
+        with session_scope() as s:
+            return [{"id": d.id, "title": d.title, "created": d.created, "amount": payments.doc_amount(d),
+                     "correspondent": d.correspondent} for d in payments.refund_doc_suggestions(s, s.get(Document, doc.id))]
+
+    def doc_title(doc_id: int | None) -> str:
+        with session_scope() as s:
+            d = s.get(Document, doc_id) if doc_id else None
+            return (d.title or f"#{doc_id}") if d else f"#{doc_id}"
+
+    def refund_of(doc: Document) -> dict | None:
+        """Zu welcher Rechnung gehört dieses Dokument als Gutschrift-Beleg?"""
+        with session_scope() as s:
+            inv = s.scalar(select(Invoice).where(Invoice.refund_doc_id == doc.id))
+            return {"id": inv.document_id, "title": inv.document.title, "amount": inv.refund_amount} if inv else None
+
+    templates.env.globals["refund_docs_of"] = refund_docs_of
+    templates.env.globals["refund_of"] = refund_of
+    templates.env.globals["doc_title"] = doc_title
+
     def partials_of(doc: Document) -> list:
         with session_scope() as s:
             return [{"tx_id": m.tx_id, "group_id": m.tx_group_id, "date": m.tx_date, "amount": m.amount,
@@ -552,6 +572,18 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         return render(request, "_firefly_search.html", doc=doc, found=found, start=start_d, end=end_d, amount=value,
                       refund=is_refund)
 
+    @app.get("/documents/{doc_id}/refund-docs", response_class=HTMLResponse)
+    def document_refund_docs(request: Request, doc_id: int, q: str = "", session: Session = Depends(get_session)):
+        """Gutschrift-Dokument suchen (Titel, Absender, Dateiname oder Paperless-ID)."""
+        from types import SimpleNamespace
+
+        doc = session.get(Document, doc_id)
+        if doc is None or doc.invoice is None:
+            raise HTTPException(404)
+        near = SimpleNamespace(tx_date=doc.invoice.refunded_on or doc.invoice.invoice_date or doc.created or today())
+        docs = [d for d in receipts.search_documents(session, near, q) if d.id != doc_id]
+        return render(request, "_refund_docs.html", doc=doc, docs=docs, q=q, doc_amount=payments.doc_amount)
+
     @app.post("/documents/{doc_id}/refund")
     async def document_refund(request: Request, doc_id: int, session: Session = Depends(get_session)):
         """Rückerstattung zu einer Rechnung: Geldeingang aus Firefly, von Hand eingetragen oder entfernen."""
@@ -564,6 +596,16 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         if form.get("action") == "clear":
             payments.clear_refund(doc)
             msg = "Rückerstattung entfernt"
+        elif form.get("action") == "doc-clear":
+            doc.invoice.refund_doc_id = None
+            msg = "Gutschrift-Beleg gelöst"
+        elif form.get("action") == "doc":
+            ids = selection.parse_ids(str(form.get("refund_doc_id") or ""))
+            problem = ensure_indexed(session, ids[0]) if ids else "Bitte ein Dokument wählen oder die Paperless-ID eingeben"
+            if problem or ids[0] == doc_id:
+                msg = problem or "Die Rechnung selbst kann nicht ihre Gutschrift sein"
+            else:
+                msg = payments.set_refund_doc(session, doc, session.get(Document, ids[0]))
         else:
             try:
                 amount = pipeline.coerce("float", str(form.get("amount") or ""))

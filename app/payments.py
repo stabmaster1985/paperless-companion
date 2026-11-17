@@ -438,7 +438,56 @@ def set_refund(doc: Document, amount: float, day: date, tx: Transaction | None =
 
 def clear_refund(doc: Document) -> None:
     inv = doc.invoice
-    inv.refund_amount = inv.refunded_on = inv.refund_tx_id = inv.refund_tx_group_id = None
+    inv.refund_amount = inv.refunded_on = inv.refund_tx_id = inv.refund_tx_group_id = inv.refund_doc_id = None
+
+
+REFUND_WORDS = re.compile(r"gutschrift|storno|stornierung|rückerstattung|rueckerstattung|erstattung|rücksendung|retoure|korrektur",
+                          re.IGNORECASE)
+
+
+def refund_doc_suggestions(session: Session, doc: Document) -> list[Document]:
+    """Gutschrift-Dokumente, die in Paperless mit der Rechnung verknüpft sind („gehört zu“, beide Richtungen),
+    sonst Dokumente desselben Absenders mit „Gutschrift/Storno/…“ im Titel nach dem Rechnungsdatum."""
+    from app import reimbursements
+
+    inv = doc.invoice
+    linked = [session.get(Document, i) for i in sorted(reimbursements.related_graph(session).get(doc.id, ()))]
+    found = [d for d in linked if d is not None and d.kind != "reimbursement"
+             and (REFUND_WORDS.search(d.title or "") or d.kind == "other")]
+    if not found and doc.correspondent:
+        base = (inv.invoice_date if inv else None) or doc.created
+        for d in session.scalars(select(Document).where(Document.correspondent == doc.correspondent, Document.id != doc.id)):
+            if REFUND_WORDS.search(d.title or "") and (base is None or d.created is None or d.created >= base):
+                found.append(d)
+    taken = {i.refund_doc_id for i in session.scalars(select(Invoice).where(Invoice.refund_doc_id.is_not(None)))
+             if i.document_id != doc.id}
+    return [d for d in found if d.id not in taken and d.id != (inv.refund_doc_id if inv else None)][:5]
+
+
+def doc_amount(doc: Document) -> float | None:
+    """Betrag eines Dokuments: erfasste Rechnung, sonst der erkannte Vorschlag."""
+    if doc.invoice is not None and doc.invoice.amount is not None:
+        return doc.invoice.amount
+    value = ((doc.suggestions or {}).get("amount") or {}).get("value") if isinstance(doc.suggestions, dict) else None
+    try:
+        return round(float(value), 2) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def set_refund_doc(session: Session, doc: Document, refund_doc: Document) -> str:
+    """Gutschrift-Dokument an die Rückerstattung hängen. Fehlen Betrag/Datum, kommen sie aus dem Dokument.
+    War die Gutschrift als eigene Rechnung in der Inbox, wird sie dort herausgenommen (sie ist keine neue Rechnung)."""
+    inv = doc.invoice
+    inv.refund_doc_id = refund_doc.id
+    if inv.refund_amount is None and (amount := doc_amount(refund_doc)):
+        inv.refund_amount, inv.refunded_on = abs(amount), refund_doc.created or inv.refunded_on
+    if inv.refunded_on is None:
+        inv.refunded_on = refund_doc.created
+    if refund_doc.review_state == "pending" and refund_doc.kind == "invoice":
+        refund_doc.kind, refund_doc.kind_source, refund_doc.review_state = "other", "manual", "none"
+        refund_doc.invoice = None
+    return f"„{refund_doc.title or refund_doc.id}“ als Gutschrift-Beleg zugeordnet"
 
 
 def refund_transactions(session: Session, exclude_doc: int | None = None) -> dict[str, int]:

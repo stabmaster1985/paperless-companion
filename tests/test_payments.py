@@ -416,3 +416,28 @@ def test_tax_counts_net_after_refund(db, settings):
     with db() as s:
         item = next(i for i in tax.collect(s, 2026, settings) if i.doc.id == 1)
         assert item.amount == 80.0 and item.refund == "Rückerstattung 40,00 € am 20.03.2026, ursprünglich 120,00 €"
+
+
+def test_refund_document(client):
+    """Gutschrift-Dokument als Beleg: in Paperless verknüpft wird es vorgeschlagen, Betrag und Datum kommen daraus,
+    und aus der Inbox fällt es als vermeintlich neue Rechnung heraus."""
+    with session_scope() as s:
+        doc = s.get(Document, 1)
+        doc.review_state, doc.invoice.status, doc.invoice.amount = "confirmed", "paid", 120.0
+        doc.paperless_fields = {"related": [950]}
+        s.add(Document(id=950, title="Gutschrift Rücksendung", correspondent="Stadtwerke", kind="invoice", tags=[],
+                       review_state="pending", created=date(2026, 10, 22),
+                       suggestions={"amount": {"value": 40.0, "confidence": 0.8, "source": "rule"}}))
+    page = client.get("/documents/1").text
+    assert "Gutschrift Rücksendung" in page and "Als Gutschrift-Beleg" in page  # über „gehört zu“ vorgeschlagen
+    assert "Gutschrift Rücksendung" in client.get("/documents/1/refund-docs?q=gutschrift").text
+    client.post("/documents/1/refund", data={"action": "doc", "refund_doc_id": "950"})
+    with session_scope() as s:
+        inv = s.get(Document, 1).invoice
+        assert inv.refund_doc_id == 950 and inv.refund_amount == 40.0 and inv.refunded_on == date(2026, 10, 22)
+        gs = s.get(Document, 950)
+        assert gs.review_state == "none" and gs.kind == "other"  # keine neue Rechnung in der Inbox
+    assert "Gutschrift-Beleg zur Rechnung" in client.get("/documents/950").text
+    client.post("/documents/1/refund", data={"action": "doc-clear"})
+    with session_scope() as s:
+        assert s.get(Document, 1).invoice.refund_doc_id is None and s.get(Document, 1).invoice.refund_amount == 40.0
