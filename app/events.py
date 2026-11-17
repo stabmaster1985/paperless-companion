@@ -76,8 +76,9 @@ def collect(session: Session, today: date) -> list[Event]:
         events.append(Event(
             date=inv.due_date, type="overdue" if overdue else "due",
             title=inv.issuer or (inv.document.title if inv.document else "Rechnung"),
-            detail=f"{fmt_money(inv.amount)}" + (f", Rechnungsnr. {inv.invoice_number}" if inv.invoice_number else ""),
-            document_id=inv.document_id, key=f"invoice:{inv.id}", amount=inv.amount,
+            detail=f"{fmt_money(inv.open_amount)}" + (" (Rest nach Teilzahlungen)" if inv.paid_amount else "")
+            + (f", Rechnungsnr. {inv.invoice_number}" if inv.invoice_number else ""),
+            document_id=inv.document_id, key=f"invoice:{inv.id}", amount=inv.open_amount,
         ))
 
     for w in session.scalars(select(Warranty)):

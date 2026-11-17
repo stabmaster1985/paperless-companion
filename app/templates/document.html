@@ -83,7 +83,20 @@ document.querySelectorAll('#viewer .tab[data-tab]').forEach((tab) => tab.addEven
 </div>
 {% elif doc.invoice %}
 {% set linked = payment_of(doc) %}
-{% if linked and linked.state != 'prefilled' %}
+{% set parts = partials_of(doc) %}
+{% if parts|length > 1 or doc.invoice.paid_amount %}
+<div class="notice {{ 'ok' if doc.invoice.status == 'paid' }} partials">
+  <strong>{{ 'Bezahlt in Teilzahlungen' if doc.invoice.status == 'paid' else 'Teilweise bezahlt' }}:</strong>
+  {{ parts|sum(attribute='amount')|eur }} von {{ doc.invoice.amount|eur }}{% if doc.invoice.status != 'paid' %} · noch offen <strong>{{ doc.invoice.open_amount|eur }}</strong>{% endif %}
+  <ul class="plain">
+    {% for p in parts %}
+    <li>{{ p.date|d }} · {{ p.amount|eur }} an {{ p.counterparty or 'unbekannt' }} {{ txlinks(p.group_id, p.date) }}
+      <form method="post" action="/documents/{{ doc.id }}/payment/remove" class="inline"><input type="hidden" name="tx_id" value="{{ p.tx_id }}">
+        <button class="small link" title="Diese Teilzahlung lösen">lösen</button></form></li>
+    {% endfor %}
+  </ul>
+</div>
+{% elif linked and linked.state != 'prefilled' %}
 <div class="notice {{ 'ok' if linked.state == 'accepted' else '' }}">
   {{ 'Bezahlt laut' if linked.state == 'accepted' else 'Passende' }} Firefly-Buchung vom {{ linked.date[8:10] }}.{{ linked.date[5:7] }}.{{ linked.date[:4] }} · {{ linked.amount|eur }}
   an {{ linked.counterparty or 'unbekannt' }}{% if linked.description %} – „{{ linked.description }}“{% endif %}
@@ -133,7 +146,8 @@ document.querySelectorAll('#viewer .tab[data-tab]').forEach((tab) => tab.addEven
     <small class="muted">{% if incoming %}Gesucht wird unter den Geldeingängen: gleicher oder ähnlicher Betrag (±5 %) oder Suchtext.
       {% else %}Gefunden wird bei gleichem oder ähnlichem Betrag (±5 %), Suchtext, Rechnungsnummer oder IBAN.{% endif %}
       {% if doc.review_state == 'pending' %}In der Inbox wird die gewählte Buchung nur vorbelegt – du bestätigst wie gewohnt.
-      {% else %}Die gewählte Buchung {{ 'markiert die Erstattung als erhalten' if incoming else 'setzt die Rechnung auf bezahlt' }}.{% endif %}</small>
+      {% else %}Die gewählte Buchung {{ 'markiert die Erstattung als erhalten' if incoming else 'setzt die Rechnung auf bezahlt' }}.
+      {% if not incoming %}In Raten bezahlt? Mit „+ Teilzahlung“ fügst du weitere Buchungen hinzu – bezahlt ist die Rechnung, sobald die Summe stimmt.{% endif %}{% endif %}</small>
   </form>
   <fieldset class="ff-take">
     <legend>Aus der gewählten Buchung übernehmen {{ help("Status und Datum (bezahlt bzw. erhalten am) werden immer gesetzt. Angehakte Felder werden mit den Werten der Buchung überschrieben, egal was drinsteht. Deine Auswahl merkt sich dieser Browser.") }}</legend>
@@ -198,6 +212,7 @@ document.querySelectorAll('.ff-form').forEach((form) => form.addEventListener('s
     if (form.dataset.confirm && !confirm(form.dataset.confirm)) return;
     try {
       const data = await send(form);
+      if (data.reload) { location.href = location.pathname + '?msg=' + encodeURIComponent(data.msg) + '#firefly'; return; }
       if (form.matches('.ff-choose')) {
         // Felder laut Server setzen (Status, Datum und angehakte Werte) – egal was drinsteht
         const names = [];

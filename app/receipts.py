@@ -278,6 +278,15 @@ def search_documents(session: Session, row: ReceiptCheck, q: str, limit: int = 8
     return ([by_id] if by_id else []) + [d for _, _, d in hits][:limit - (1 if by_id else 0)]
 
 
+def linked_totals(session: Session) -> dict[int, tuple[int, float]]:
+    """Je Dokument: wie viele Buchungen schon zugeordnet sind und ihre Summe (z.B. Raten, Abschläge)."""
+    totals: dict[int, tuple[int, float]] = {}
+    for r in session.scalars(select(ReceiptCheck).where(ReceiptCheck.state == "linked", ReceiptCheck.document_id.is_not(None))):
+        n, total = totals.get(r.document_id, (0, 0.0))
+        totals[r.document_id] = (n + 1, round(total + r.amount, 2))
+    return totals
+
+
 def ignore(row: ReceiptCheck, note: str = "kein Beleg nötig") -> None:
     row.state, row.decided, row.note = "ignored", True, note
 

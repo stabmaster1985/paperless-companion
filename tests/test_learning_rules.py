@@ -623,3 +623,17 @@ def test_receipt_search_and_always_in_ui(client, mock_api):
     assert "feste Zuordnung aufheben" in page and "Feste Zuordnungen (1)" in page
     client.post(f"/receipts/{row_id}/always-off")
     assert "Feste Zuordnungen (0)" in client.get("/receipts").text
+
+
+def test_several_bookings_one_receipt(client):
+    """Raten/Abschläge: mehrere Buchungen dürfen zum selben Beleg gehören – die Seite zeigt Anzahl und Summe."""
+    with session_scope() as s:
+        for i, amount in enumerate([100.0, 100.0, 50.0]):
+            s.add(ReceiptCheck(tx_id=f"r{i}", tx_group_id=f"g{i}", tx_date=date(2026, 9 + i, 1), amount=amount,
+                               counterparty="Möbelhaus", description=f"Rate {i + 1}", state="missing"))
+    with session_scope() as s:
+        ids = [r.id for r in s.query(ReceiptCheck).filter(ReceiptCheck.tx_id.like("r%")).order_by(ReceiptCheck.tx_id)]
+    for row_id in ids[:2]:
+        client.post(f"/receipts/{row_id}/link", data={"doc_id": "1"})
+    assert "2 Buchungen zugeordnet, zusammen 200,00" in client.get("/receipts?state=linked").text
+    assert "schon 2 Buchungen (200,00" in client.get(f"/receipts/{ids[2]}/search?q=1").text

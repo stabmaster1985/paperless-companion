@@ -39,7 +39,8 @@ def window(inv: Invoice) -> tuple[date, date] | None:
 
 
 def score(inv: Invoice, tx: Transaction) -> tuple[int, list[str]] | None:
-    if inv.amount is None or abs(tx.amount - inv.amount) > 0.005:
+    target = getattr(inv, "open_amount", inv.amount)  # bei Teilzahlungen: der Rest (Inbox-Kandidat: Betrag)
+    if target is None or abs(tx.amount - target) > 0.005:
         return None
     span = window(inv)
     if span is None or not span[0] <= tx.date <= span[1]:
@@ -314,7 +315,10 @@ def accept(session: Session, match_id: int) -> PaymentMatch | None:
     if m is None:
         return None
     m.state = "accepted"
-    m.invoice.status, m.invoice.paid_on = "paid", m.tx_date
+    if m.invoice.paid_amount:  # Restzahlung nach Teilzahlungen
+        recompute(session, m.invoice)
+    else:
+        m.invoice.status, m.invoice.paid_on = "paid", m.tx_date
     m.invoice.document.writeback_pending = True
     _mark_firefly(m.invoice.document, m.score, confirmed=True)
     return m
@@ -409,6 +413,8 @@ def search(session: Session, doc: Document, client: FireflyClient, today: date, 
     else:
         used = _used_transactions(session, exclude_doc=doc.id)
         current = (payment_for(session, doc) or {}).get("tx_id")
+        partial_ids = {m.tx_id for m in partial_payments(session, doc.invoice)}
+        used -= partial_ids
     found = []
     for tx in (client.deposits if incoming else client.withdrawals)(start, min(end, today)):
         points, reasons = 0, []
@@ -427,7 +433,7 @@ def search(session: Session, doc: Document, client: FireflyClient, today: date, 
         if not reasons:
             continue
         found.append({"tx": tx, "score": points, "reasons": reasons, "used": tx.journal_id in used,
-                      "current": tx.journal_id == current,
+                      "current": tx.journal_id == current or tx.journal_id in partial_ids,
                       "diff": abs(tx.amount - amount) if amount is not None else 0.0})
     found.sort(key=lambda f: (-f["score"], f["diff"], abs((f["tx"].date - (start + (end - start) / 2)).days)))
     return found[:limit]
@@ -491,7 +497,7 @@ def choose(session: Session, doc: Document, tx: Transaction, take=TAKE) -> tuple
                               score=AUTO_MIN, reasons=", ".join(reasons))
         session.add(chosen)
     chosen.state = "accepted"
-    inv.status, inv.paid_on = "paid", tx.date
+    inv.status, inv.paid_on, inv.paid_amount = "paid", tx.date, None
     for name, value in values.items():
         setattr(inv, name, value)
     doc.writeback_pending = True
@@ -501,6 +507,64 @@ def choose(session: Session, doc: Document, tx: Transaction, take=TAKE) -> tuple
 
         pipeline.set_source(doc, list(values), "firefly", 0.9, True)
     return "als bezahlt übernommen", form
+
+
+def partial_payments(session: Session, inv: Invoice | None) -> list[PaymentMatch]:
+    """Alle zugeordneten Buchungen einer Rechnung (bei Teilzahlungen mehrere), älteste zuerst."""
+    if inv is None or inv.id is None:
+        return []
+    return list(session.scalars(select(PaymentMatch).where(PaymentMatch.invoice_id == inv.id, PaymentMatch.state == "accepted")
+                                .order_by(PaymentMatch.tx_date)))
+
+
+def recompute(session: Session, inv: Invoice) -> None:
+    """Status aus den Teilzahlungen: bezahlt, sobald die Summe den Rechnungsbetrag erreicht."""
+    session.flush()
+    paid = partial_payments(session, inv)
+    total = round(sum(m.amount for m in paid), 2)
+    if inv.amount is not None and paid and total >= inv.amount - 0.005:
+        inv.status, inv.paid_on, inv.paid_amount = "paid", max(m.tx_date for m in paid), None
+    else:
+        inv.status, inv.paid_on, inv.paid_amount = "open", None, total or None
+
+
+def add_partial(session: Session, doc: Document, tx: Transaction) -> tuple[str, dict]:
+    """Buchung als Teilzahlung hinzufügen – bisherige Zahlungen bleiben. Nur für bestätigte Rechnungen."""
+    inv = doc.invoice
+    if inv is None or doc.review_state == "pending":
+        return "Teilzahlungen gehen erst nach dem Bestätigen der Rechnung", {}
+    if inv.status == "paid" and not inv.paid_amount and not partial_payments(session, inv):
+        inv.paid_amount = None  # „bezahlt“ ohne Buchung: ab jetzt zählen die Teilzahlungen
+    m = session.scalar(select(PaymentMatch).where(PaymentMatch.invoice_id == inv.id, PaymentMatch.tx_id == tx.journal_id))
+    if m is None:
+        m = PaymentMatch(invoice_id=inv.id, tx_id=tx.journal_id, tx_group_id=tx.group_id, tx_date=tx.date,
+                         amount=tx.amount, counterparty=tx.counterparty[:200], description=tx.description[:300],
+                         score=AUTO_MIN, reasons="Teilzahlung, von dir gewählt")
+        session.add(m)
+    m.state = "accepted"
+    recompute(session, inv)
+    if inv.status == "paid":
+        doc.writeback_pending = True
+        _mark_firefly(doc, AUTO_MIN, confirmed=True)
+        msg = "als letzte Teilzahlung übernommen – die Rechnung ist jetzt bezahlt"
+    else:
+        msg = f"als Teilzahlung übernommen – noch offen: {inv.open_amount:.2f} €".replace(".", ",")
+    return msg, {"status": inv.status, "paid_on": inv.paid_on.isoformat() if inv.paid_on else ""}
+
+
+def remove_partial(session: Session, doc: Document, tx_id: str) -> bool:
+    """Eine einzelne Teilzahlung lösen (wird nicht wieder vorgeschlagen)."""
+    inv = doc.invoice
+    m = session.scalar(select(PaymentMatch).where(PaymentMatch.invoice_id == inv.id, PaymentMatch.tx_id == tx_id)) \
+        if inv is not None else None
+    if m is None:
+        return False
+    m.state = "rejected"
+    was_paid = inv.status == "paid"
+    recompute(session, inv)
+    if was_paid and inv.status != "paid":
+        doc.writeback_pending = True
+    return True
 
 
 def _choose_deposit(session: Session, doc: Document, tx: Transaction, take) -> tuple[str, dict]:
@@ -559,9 +623,10 @@ def clear(session: Session, doc: Document) -> bool:
     if inv is not None and doc.review_state != "pending":
         for m in session.scalars(select(PaymentMatch).where(PaymentMatch.invoice_id == inv.id,
                                                             PaymentMatch.state.in_(("accepted", "suggested")))):
-            if m.state == "accepted" and inv.paid_on == m.tx_date:
+            if m.state == "accepted" and (inv.paid_on == m.tx_date or inv.paid_amount):
                 inv.status, inv.paid_on = "open", None
                 doc.writeback_pending = True
+            inv.paid_amount = None
             m.state = "rejected"
             changed = True
     return changed

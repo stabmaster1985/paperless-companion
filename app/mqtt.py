@@ -66,7 +66,7 @@ def build_state(session, settings: Settings, today: date) -> dict:
             timespec="seconds")
     return {
         "offene_rechnungen": len(invoices),
-        "offene_rechnungen_summe": round(sum(i.amount or 0 for i in invoices), 2),
+        "offene_rechnungen_summe": round(sum(i.open_amount or 0 for i in invoices), 2),
         "ueberfaellige_rechnungen": len([e for e in payable if e.type == "overdue"]),
         "naechste_faelligkeit": next_due.date.isoformat() if next_due else None,
         "naechste_faelligkeit_titel": next_due.title if next_due else None,
@@ -89,7 +89,7 @@ def build_invoices(session, settings: Settings, today: date) -> dict:
     return {"rechnungen": [{
         "titel": (inv.document.title if inv.document else None) or inv.issuer or "Rechnung",
         "korrespondent": inv.issuer or (inv.document.correspondent if inv.document else None),
-        "betrag": _money(inv.amount),
+        "betrag": _money(inv.open_amount),
         "faellig": inv.due_date.isoformat() if inv.due_date else None,
         "ueberfaellig": bool(inv.due_date and inv.due_date < today),
         "doc_id": inv.document_id,

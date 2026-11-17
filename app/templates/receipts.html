@@ -2,6 +2,9 @@
 {% from "macros.html" import doclink, txlinks, help %}
 
 {# Eine Buchung als Zeile: Datum · Empfänger · Betrag · Beleg · Aktionen (am Handy untereinander) #}
+{% macro already(doc_id, own=0) %}{% set t = totals.get(doc_id) %}{% if t and t[0] - own > 0 %}
+  <small class="muted rc-already" title="Mehrere Buchungen zu einem Beleg sind möglich (Raten, Abschläge, Teilzahlungen)">· {{ t[0] }} Buchung{{ 'en' if t[0] != 1 }} zugeordnet, zusammen {{ t[1]|eur }}</small>{% endif %}{% endmacro %}
+
 {% macro rc_row(r) %}
 <article class="rc-row st-{{ r.state }}" id="tx-{{ r.id }}"
   data-text="{{ (r.counterparty ~ ' ' ~ r.description ~ ' ' ~ ('%.2f'|format(r.amount)).replace('.', ','))|lower }}">
@@ -15,7 +18,8 @@
     {% if r.state == 'linked' %}
       <div class="rc-doc"><span class="tag tag-ok">zugeordnet</span>
         {% if r.document_id %}<a href="/documents/{{ r.document_id }}">{{ titles.get(r.document_id) or ('#' ~ r.document_id) }}</a> {{ doclink(r.document_id) }}{% endif %}
-        {% if r.note %}<small class="muted">· {{ r.note }}</small>{% endif %}</div>
+        {% if r.note %}<small class="muted">· {{ r.note }}</small>{% endif %}
+        {% if r.document_id and totals.get(r.document_id, (0,))[0] > 1 %}{{ already(r.document_id) }}{% endif %}</div>
     {% elif r.state == 'ignored' %}
       <div class="rc-doc"><span class="tag">kein Beleg nötig</span>{% if r.note %} <small class="muted">{{ r.note }}</small>{% endif %}</div>
     {% else %}
@@ -23,7 +27,7 @@
       <form method="post" action="/receipts/{{ r.id }}/link" class="rc-cand">
         <input type="hidden" name="doc_id" value="{{ cand.id }}"><input type="hidden" name="state" value="{{ state }}">
         <span class="rc-doc"><a href="/documents/{{ cand.id }}">{{ cand.title or ('#' ~ cand.id) }}</a> {{ doclink(cand.id) }}
-          <small class="muted">{{ cand.reason }}</small></span>
+          <small class="muted">{{ cand.reason }}</small>{{ already(cand.id) }}</span>
         <button class="small" title="Diese Buchung dem Dokument zuordnen (nur im Companion)">✓ Das ist der Beleg</button>
       </form>
       {% endfor %}

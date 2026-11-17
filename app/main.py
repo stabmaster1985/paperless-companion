@@ -101,6 +101,13 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
 
     templates.env.globals["payment_of"] = payment_of
     templates.env.globals["ff_defaults"] = payments.search_defaults
+
+    def partials_of(doc: Document) -> list:
+        with session_scope() as s:
+            return [{"tx_id": m.tx_id, "group_id": m.tx_group_id, "date": m.tx_date, "amount": m.amount,
+                     "counterparty": m.counterparty} for m in payments.partial_payments(s, s.get(Document, doc.id).invoice)]
+
+    templates.env.globals["partials_of"] = partials_of
     templates.env.globals.update(HINTS=metadata.HINTS, META_SOURCES=metadata.SOURCES, KINDS=pipeline.KINDS, link_base=settings.paperless_link_base, auth=bool(settings.app_password))
 
     @app.middleware("http")
@@ -192,7 +199,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         upcoming = [e for e in all_events if (e.date - t).days <= 60]
         open_invoices = session.scalars(select(Invoice).where(Invoice.status == "open")).all()
         stats = {
-            "open_sum": round(sum(i.amount or 0 for i in open_invoices if i.payment_method != "debit"), 2),
+            "open_sum": round(sum(i.open_amount or 0 for i in open_invoices if i.payment_method != "debit"), 2),
             "open_count": len([i for i in open_invoices if i.payment_method != "debit"]),
             "overdue": len([e for e in all_events if e.type == "overdue"]),
             "fixed_costs": events.monthly_fixed_costs(session),
@@ -523,14 +530,26 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             raise HTTPException(400, "Buchung unvollständig")
         # ohne Angabe (Formular ohne Skript) alles übernehmen
         take = [t for t in form.getlist("take") if t in payments.TAKE] if "take_sent" in form else payments.TAKE
-        result, form_fields = payments.choose(session, doc, tx, take)
+        if form.get("partial"):
+            result, form_fields = payments.add_partial(session, doc, tx)
+        else:
+            result, form_fields = payments.choose(session, doc, tx, take)
         amount = f"{tx.amount:.2f}".replace(".", ",")
         msg = f"Firefly-Buchung vom {tx.date:%d.%m.%Y} ({amount} €) {result}"
         if request.headers.get("x-requested-with") == "fetch":
             # Seite nicht neu laden: ungespeicherte Eingaben im Formular bleiben erhalten, das Skript setzt die Felder
             return {"msg": msg, "label": f"Buchung vom {tx.date:%d.%m.%Y} ({amount} €)", "saved": doc.review_state != "pending",
-                    "tx_id": tx.journal_id, "set": form_fields}
+                    "tx_id": tx.journal_id, "set": form_fields, "reload": bool(form.get("partial"))}
         return RedirectResponse(f"/documents/{doc_id}?msg={quote(msg)}", status_code=303)
+
+    @app.post("/documents/{doc_id}/payment/remove")
+    def document_payment_remove(doc_id: int, tx_id: str = Form(...), session: Session = Depends(get_session)):
+        """Eine Teilzahlung lösen."""
+        doc = session.get(Document, doc_id)
+        if doc is None:
+            raise HTTPException(404)
+        msg = "Teilzahlung gelöst" if payments.remove_partial(session, doc, tx_id) else "Keine solche Zahlung"
+        return RedirectResponse(f"/documents/{doc_id}?msg={quote(msg)}#firefly", status_code=303)
 
     @app.post("/documents/{doc_id}/payment/clear")
     def document_payment_clear(request: Request, doc_id: int, session: Session = Depends(get_session)):
@@ -1319,6 +1338,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             Document.id.in_([r.document_id for r in rows if r.document_id] or [-1])))}
         fixed = receipts.fixed_documents(session)
         return render(request, "receipts.html", rows=rows, state=state, msg=msg, STATES=receipts.STATES, sort=sort,
+                      totals=receipts.linked_totals(session),
                       overview=receipts.overview(session), ignored=receipts.ignored_counterparties(session),
                       titles=titles, settings=settings, fixed=fixed, party_key=receipts.party_key,
                       fixed_titles={k: receipts.fixed_label(session, v) for k, v in fixed.items()},
@@ -1358,7 +1378,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             finally:
                 paperless.close()
         return render(request, "_receipt_search.html", row=row, docs=docs, remote=remote, problem=problem, q=q,
-                      state=state)
+                      state=state, totals=receipts.linked_totals(session))
 
     @app.post("/receipts/run")
     def receipts_run(session: Session = Depends(get_session)):

@@ -250,7 +250,7 @@ def test_search_choose_and_clear_in_inbox(review_client, mock_api):
     html = review_client.get("/documents/1/firefly-search", params={"amount": "79,00", "q": "Stadtwerke",
                                                                     "start": "2026-10-01", "end": "2026-10-31"}).text
     assert html.index("79,00") < html.index("78,00")  # exakter Betrag zuerst
-    assert "jetzt zugeordnet" in html and "Diese übernehmen" in html and "Betrag ähnlich" in html
+    assert "zugeordnet<" in html and "Diese übernehmen" in html and "Betrag ähnlich" in html
     assert dict(route.calls.last.request.url.params)["start"] == "2026-10-01"
     r = review_client.post("/documents/1/payment", data={"tx_id": "901", "group_id": "501", "date": "2026-10-12",
                                                          "amount": "79.0", "counterparty": "Stadtwerke Musterstadt",
@@ -290,6 +290,45 @@ def test_choose_other_payment_for_confirmed_invoice(db):
         inv = s.get(Document, 1).invoice
         assert inv.status == "open" and inv.paid_on is None
         assert {m.state for m in s.query(PaymentMatch)} == {"rejected"}
+
+
+def test_partial_payments(db, settings):
+    """Ratenzahlung: mehrere Buchungen, bezahlt erst wenn die Summe stimmt; der Rest wird automatisch gefunden."""
+    with db() as s:
+        inv = add_invoice(s, 1, 300.0, issuer="Möbelhaus")
+        inv.document.review_state = "confirmed"
+    with db() as s:
+        msg, form = payments.add_partial(s, s.get(Document, 1), tx("901", date(2026, 9, 12), 100.0, "Möbelhaus"))
+        assert "noch offen: 200,00 €" in msg and form == {"status": "open", "paid_on": ""}
+        payments.add_partial(s, s.get(Document, 1), tx("902", date(2026, 10, 12), 100.0, "Möbelhaus"))
+        inv = s.get(Document, 1).invoice
+        assert inv.status == "open" and inv.paid_amount == 200.0 and inv.open_amount == 100.0
+    with db() as s:  # Restzahlung (100 €, nicht 300 €) wird im Abgleich vorgeschlagen
+        counts = payments.match(s, [tx("903", date(2026, 11, 12), 100.0, "Möbelhaus")], settings)
+        assert counts["suggested"] == 1
+        m = s.query(PaymentMatch).filter_by(tx_id="903").one()
+        payments.accept(s, m.id)
+        inv = s.get(Document, 1).invoice
+        assert inv.status == "paid" and inv.paid_on == date(2026, 11, 12) and inv.paid_amount is None
+        assert [p.tx_id for p in payments.partial_payments(s, inv)] == ["901", "902", "903"]
+    with db() as s:  # eine Rate lösen: wieder offen
+        assert payments.remove_partial(s, s.get(Document, 1), "902")
+        inv = s.get(Document, 1).invoice
+        assert inv.status == "open" and inv.paid_amount == 200.0 and s.get(Document, 1).writeback_pending
+
+
+def test_partial_payment_in_ui(client):
+    with session_scope() as s:
+        s.get(Document, 1).review_state = "confirmed"
+        s.get(Document, 1).invoice.amount = 156.0
+    data = {"tx_id": "950", "group_id": "550", "date": "2026-10-10", "amount": "78.0", "counterparty": "Stadtwerke",
+            "partial": "1"}
+    r = client.post("/documents/1/payment", data=data, headers={"X-Requested-With": "fetch"})
+    assert r.json()["reload"] and "noch offen" in r.json()["msg"]
+    page = client.get("/documents/1").text
+    assert "Teilweise bezahlt" in page and "noch offen <strong>78,00" in page
+    client.post("/documents/1/payment/remove", data={"tx_id": "950"})
+    assert "Teilweise bezahlt" not in client.get("/documents/1").text
 
 
 def test_choose_and_clear_without_reload(review_client):
