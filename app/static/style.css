@@ -831,3 +831,5 @@ button:disabled, button:disabled:hover { opacity: .5; cursor: not-allowed; }
 .rf-manual input { width: 10rem; }
 .rf-doc { margin: .5rem 0 .75rem; }
 .rf-docsearch { margin-top: .4rem; }
+.ff-sort { font-size: .9rem; color: var(--muted); margin: .5rem 0 .25rem; }
+.ff-sort button.active { color: var(--text); font-weight: 600; text-decoration: underline; }

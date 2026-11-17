@@ -1,7 +1,7 @@
 {% from "macros.html" import txlinks %}
 {# Ergebnisliste „In Firefly suchen“ – wird per JS in die Dokumentseite geladen #}
-{% macro ff_item(f) %}{% set tx = f.tx %}
-  <li class="ff-item {{ 'current' if f.current }}">
+{% macro ff_item(f, loop_index=0) %}{% set tx = f.tx %}
+  <li class="ff-item {{ 'current' if f.current }}" data-date="{{ tx.date.isoformat() }}" data-amount="{{ tx.amount }}" data-rank="{{ loop_index }}">
     <div class="ff-main">
       <strong>{{ tx.date|d }} · {{ tx.amount|eur }}</strong> an {{ tx.counterparty or 'unbekannt' }}
       {% if tx.description %}<small class="muted">– „{{ tx.description }}“</small>{% endif %}
@@ -43,10 +43,15 @@
 {% set fits = free|selectattr('amount_ok')|list + free|rejectattr('amount_ok')|selectattr('current')|list %}
 {% set others = free|rejectattr('amount_ok')|rejectattr('current')|list %}
 {% if found %}
+<div class="ff-sort" role="group" aria-label="Sortieren">Sortieren:
+  {% for key, label in [('rank', 'beste Treffer'), ('date-desc', 'Datum ↓'), ('date-asc', 'Datum ↑'), ('amount-desc', 'Betrag ↓'), ('amount-asc', 'Betrag ↑')] %}
+  <button type="button" class="small link" data-sort="{{ key }}" onclick="ffSort(this.closest('.ff-results, .rf-results'), '{{ key }}')">{{ label }}</button>
+  {% endfor %}
+</div>
 {% if fits %}
-<p class="muted"><small>{{ fits|length }} Buchung{{ 'en' if fits|length != 1 }} vom {{ start|d }} bis {{ end|d }}{% if amount is not none %} mit passendem Betrag (±5 %){% endif %}, beste Treffer zuerst.</small></p>
+<p class="muted"><small>{{ fits|length }} Buchung{{ 'en' if fits|length != 1 }} vom {{ start|d }} bis {{ end|d }}{% if amount is not none %} mit passendem Betrag (±5 %){% endif %}.</small></p>
 <ul class="ff-list">
-  {% for f in fits %}{{ ff_item(f) }}{% endfor %}
+  {% for f in fits %}{{ ff_item(f, loop.index) }}{% endfor %}
 </ul>
 {% else %}
 <p class="muted">Keine {{ 'Gutschrift' if refund else 'Abbuchung' }} mit passendem Betrag vom {{ start|d }} bis {{ end|d }}.</p>
@@ -55,7 +60,7 @@
 <details class="ff-others" {{ 'open' if not fits }}>
   <summary>{{ others|length }} weitere Buchung{{ 'en' if others|length != 1 }} mit anderem Betrag (Empfänger, Rechnungsnr. oder IBAN passt) – z.B. für Teilzahlungen</summary>
   <ul class="ff-list">
-    {% for f in others %}{{ ff_item(f) }}{% endfor %}
+    {% for f in others %}{{ ff_item(f, loop.index) }}{% endfor %}
   </ul>
 </details>
 {% endif %}
@@ -63,7 +68,7 @@
 <details class="ff-others ff-taken">
   <summary>{{ taken|length }} Buchung{{ 'en' if taken|length != 1 }} schon einem anderen Dokument zugeordnet – nur falls dort falsch zugeordnet</summary>
   <ul class="ff-list">
-    {% for f in taken %}{{ ff_item(f) }}{% endfor %}
+    {% for f in taken %}{{ ff_item(f, loop.index) }}{% endfor %}
   </ul>
 </details>
 {% endif %}

@@ -174,6 +174,23 @@ document.querySelectorAll('#viewer .tab[data-tab]').forEach((tab) => tab.addEven
   <div class="ff-results" aria-live="polite"></div>
 </details>
 <script>
+// Trefferlisten sortieren (beste Treffer, Datum, Betrag); die Wahl merkt sich dieser Browser
+function ffSort(box, key) {
+  if (!box) return;
+  if (key) { try { localStorage.setItem('ff-sort', key); } catch (e) {} }
+  else { try { key = localStorage.getItem('ff-sort') || 'rank'; } catch (e) { key = 'rank'; } }
+  const [field, dir] = key === 'rank' ? ['rank', 'asc'] : key.split('-');
+  const value = (li) => field === 'date' ? li.dataset.date : Number(li.dataset[field]);
+  box.querySelectorAll('.ff-list').forEach((ul) => {
+    const items = [...ul.children];
+    items.sort((a, b) => {
+      const x = value(a), y = value(b);
+      return (x < y ? -1 : x > y ? 1 : 0) * (dir === 'desc' ? -1 : 1);
+    });
+    items.forEach((li) => ul.appendChild(li));
+  });
+  box.querySelectorAll('.ff-sort button').forEach((b) => b.classList.toggle('active', b.dataset.sort === key));
+}
 // Firefly-Suche aufklappen und gleich suchen (Knopf „übernehmen …“ im Hinweis oben)
 function ffOpen() {
   const panel = document.getElementById('firefly');
@@ -189,6 +206,7 @@ document.querySelectorAll('.ff-form').forEach((form) => form.addEventListener('s
   try {
     const r = await fetch(form.dataset.url + '?' + new URLSearchParams(new FormData(form)));
     out.innerHTML = await r.text();
+    ffSort(out);
   } catch (err) { out.innerHTML = '<p class="bad">Suche fehlgeschlagen.</p>'; }
 }));
 // Übernehmen / Lösen ohne Neuladen: ungespeicherte Eingaben bleiben, nur Status, „Bezahlt am“ (und leerer Betrag) ändern sich
@@ -348,6 +366,7 @@ document.querySelectorAll('.rf-form').forEach((form) => form.addEventListener('s
   try {
     const r = await fetch(form.dataset.url + '?' + new URLSearchParams(new FormData(form)));
     out.innerHTML = await r.text();
+    ffSort(out);
   } catch (err) { out.innerHTML = '<p class="bad">Suche fehlgeschlagen.</p>'; }
 }));
 </script>
