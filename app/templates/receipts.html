@@ -20,6 +20,27 @@
         {% if r.document_id %}<a href="/documents/{{ r.document_id }}">{{ titles.get(r.document_id) or ('#' ~ r.document_id) }}</a> {{ doclink(r.document_id) }}{% endif %}
         {% if r.note %}<small class="muted">· {{ r.note }}</small>{% endif %}
         {% if r.document_id and totals.get(r.document_id, (0,))[0] > 1 %}{{ already(r.document_id) }}{% endif %}</div>
+      {% set iv = invoices.get(r.document_id) %}
+      {% if iv %}{% set inv = iv.inv %}
+      <div class="rc-invoice">
+        <small>Rechnung über {{ inv.amount|eur }}:
+          {% if r.tx_id in iv.paid_tx %}<strong class="ok">diese Buchung zählt als {{ 'Teilzahlung' if iv.paid_tx|length > 1 or inv.paid_amount else 'Zahlung' }}</strong>
+            {%- if inv.status == 'paid' %} · bezahlt{% else %} · noch {{ inv.open_amount|eur }} offen{% endif %}
+          {% elif inv.status == 'paid' %}schon bezahlt{% if inv.paid_on %} am {{ inv.paid_on|d }}{% endif %} (über eine andere Buchung)
+          {% else %}offen{% if inv.paid_amount %}, noch {{ inv.open_amount|eur }}{% endif %}{% if iv.suggested_tx == r.tx_id %} · als Zahlung vorgeschlagen{% endif %}{% endif %}</small>
+        {% if r.tx_id not in iv.paid_tx and inv.status != 'paid' %}
+        <form method="post" action="/receipts/{{ r.id }}/pay" class="inline"><input type="hidden" name="state" value="{{ state }}">
+          <input type="hidden" name="mode" value="full">
+          <button class="small {{ 'primary' if inv.amount and (inv.open_amount - r.amount)|abs < 0.01 }}"
+            title="Rechnung mit dieser Buchung als bezahlt markieren (bezahlt am {{ r.tx_date|d }})">{{ 'In der Inbox vorbelegen' if iv.pending else 'Als bezahlt übernehmen' }}</button></form>
+        {% if not iv.pending %}
+        <form method="post" action="/receipts/{{ r.id }}/pay" class="inline"><input type="hidden" name="state" value="{{ state }}">
+          <input type="hidden" name="mode" value="partial">
+          <button class="small" title="Zusätzlich zu bisherigen Zahlungen zuordnen – bezahlt ist die Rechnung, sobald die Summe stimmt">+ Teilzahlung</button></form>
+        {% endif %}
+        {% endif %}
+      </div>
+      {% endif %}
     {% elif r.state == 'ignored' %}
       <div class="rc-doc"><span class="tag">kein Beleg nötig</span>{% if r.note %} <small class="muted">{{ r.note }}</small>{% endif %}</div>
     {% else %}

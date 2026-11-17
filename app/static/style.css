@@ -833,3 +833,5 @@ button:disabled, button:disabled:hover { opacity: .5; cursor: not-allowed; }
 .rf-docsearch { margin-top: .4rem; }
 .ff-sort { font-size: .9rem; color: var(--muted); margin: .5rem 0 .25rem; }
 .ff-sort button.active { color: var(--text); font-weight: 600; text-decoration: underline; }
+.rc-invoice { display: flex; flex-wrap: wrap; gap: .3rem .6rem; align-items: center; margin-top: .3rem; }
+.rc-invoice .ok { color: var(--ok, #17845f); }

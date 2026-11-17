@@ -665,3 +665,29 @@ def test_receipt_candidates_compare_amounts(db, settings):
         assert "gleicher Betrag" in rows["1"].candidates[0]["reason"] and "Empfänger passt" in rows["1"].candidates[0]["reason"]
         assert rows["2"].candidates[0]["id"] == 403  # erkannter Betrag eines ungeprüften Dokuments
         assert rows["3"].state == "missing"  # Rechnung schon über eine andere Buchung bezahlt
+
+
+def test_receipt_pay_invoice_from_receipts_page(client):
+    """Belegseite: zugeordnete Buchung direkt als (Teil-)Zahlung der Rechnung übernehmen."""
+    with session_scope() as s:
+        doc = s.get(Document, 1)
+        doc.review_state, doc.invoice.amount, doc.invoice.status, doc.invoice.paid_on = "confirmed", 200.0, "open", None
+        for i, amount in enumerate([120.0, 80.0]):
+            s.add(ReceiptCheck(tx_id=f"z{i}", tx_group_id=f"g{i}", tx_date=date(2026, 9 + i, 5), amount=amount,
+                               counterparty="Stadtwerke", description=f"Rate {i + 1}", state="missing"))
+    with session_scope() as s:
+        ids = [r.id for r in s.query(ReceiptCheck).filter(ReceiptCheck.tx_id.like("z%")).order_by(ReceiptCheck.tx_id)]
+    r = client.post(f"/receipts/{ids[0]}/link", data={"doc_id": "1"})
+    assert "Rechnung ist noch offen" in r.text
+    page = client.get("/receipts?state=linked").text
+    assert "Als bezahlt übernehmen" in page and "+ Teilzahlung" in page
+    client.post(f"/receipts/{ids[0]}/pay", data={"mode": "partial"})
+    with session_scope() as s:
+        inv = s.get(Document, 1).invoice
+        assert inv.status == "open" and inv.open_amount == 80.0
+    assert "noch 80,00 € offen" in client.get("/receipts?state=linked").text
+    client.post(f"/receipts/{ids[1]}/link", data={"doc_id": "1"})
+    client.post(f"/receipts/{ids[1]}/pay", data={"mode": "partial"})
+    with session_scope() as s:
+        inv = s.get(Document, 1).invoice
+        assert inv.status == "paid" and inv.paid_on == date(2026, 10, 5)

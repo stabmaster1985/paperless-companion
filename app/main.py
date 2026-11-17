@@ -1472,7 +1472,16 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         titles = {d.id: d.title for d in session.scalars(select(Document).where(
             Document.id.in_([r.document_id for r in rows if r.document_id] or [-1])))}
         fixed = receipts.fixed_documents(session)
+        # Rechnungen hinter zugeordneten Buchungen: Zahlungsstand und welche Buchungen dort schon zählen
+        invoices = {}
+        for d in session.scalars(select(Document).where(Document.id.in_(
+                [r.document_id for r in rows if r.document_id and r.state == "linked"] or [-1]))):
+            if d.invoice is not None:
+                paid_tx = {m.tx_id for m in payments.partial_payments(session, d.invoice)}
+                invoices[d.id] = {"inv": d.invoice, "paid_tx": paid_tx, "pending": d.review_state == "pending",
+                                  "suggested_tx": (payments.payment_for(session, d) or {}).get("tx_id")}
         return render(request, "receipts.html", rows=rows, state=state, msg=msg, STATES=receipts.STATES, sort=sort,
+                      invoices=invoices,
                       totals=receipts.linked_totals(session),
                       overview=receipts.overview(session), ignored=receipts.ignored_counterparties(session),
                       titles=titles, settings=settings, fixed=fixed, party_key=receipts.party_key,
@@ -1551,6 +1560,25 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         finally:
             paperless.close()
 
+    @app.post("/receipts/{row_id}/pay")
+    def receipts_pay(row_id: int, mode: str = Form("full"), state: str = Form("linked"),
+                     session: Session = Depends(get_session)):
+        """Zugeordnete Buchung auch als Zahlung der Rechnung übernehmen (ganz oder als Teilzahlung)."""
+        from app.firefly import Transaction
+
+        row = session.get(ReceiptCheck, row_id)
+        doc = session.get(Document, row.document_id) if row and row.document_id else None
+        if doc is None or doc.invoice is None:
+            raise HTTPException(404)
+        tx = Transaction(journal_id=row.tx_id, group_id=row.tx_group_id, date=row.tx_date, amount=row.amount,
+                         counterparty=row.counterparty or "", iban=None, description=row.description or "", text="")
+        if mode == "partial":
+            result, _ = payments.add_partial(session, doc, tx)
+        else:
+            result, _ = payments.choose(session, doc, tx, take=())
+        msg = f"„{doc.title or doc.id}“: Buchung vom {row.tx_date:%d.%m.%Y} {result}"
+        return RedirectResponse(f"/receipts?state={quote(state)}&msg={quote(msg)}#tx-{row_id}", status_code=303)
+
     @app.post("/receipts/{row_id}/{action}")
     def receipts_action(row_id: int, action: str, doc_id: str = Form(""), state: str = Form("open"), mode: str = Form("doc"),
                         session: Session = Depends(get_session)):
@@ -1568,6 +1596,10 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                 else:
                     receipts.link(session, row, ids[0])
                     msg = "Beleg zugeordnet (nur im Companion)"
+                    linked_doc = session.get(Document, ids[0])
+                    if linked_doc.invoice is not None and linked_doc.invoice.status == "open":
+                        msg += (" – die Rechnung ist noch offen: im Reiter „Zugeordnet“ kannst du die Buchung als Zahlung "
+                                "oder Teilzahlung übernehmen")
         elif action == "ignore":
             receipts.ignore(row)
             msg = "Als „kein Beleg nötig“ markiert"
