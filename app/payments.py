@@ -407,12 +407,18 @@ def search(session: Session, doc: Document, client: FireflyClient, today: date, 
     d = search_defaults(doc)
     words = _words(q)
     incoming = doc.kind == "reimbursement"  # Erstattung: Geldeingänge statt Abbuchungen
+    partial_ids: set[str] = set()
     if incoming:
         used = reimbursements.used_transactions(session, exclude=doc.id)
-        current = (doc.reimbursement.tx_id if doc.reimbursement else None) or ((doc.suggestions or {}).get("_deposit") or {}).get("tx_id")
+        rec = doc.reimbursement
+        if rec is not None and rec.tx_id:
+            current, current_state = rec.tx_id, rec.tx_state or "suggested"
+        else:
+            current, current_state = ((doc.suggestions or {}).get("_deposit") or {}).get("tx_id"), "prefilled"
     else:
         used = _used_transactions(session, exclude_doc=doc.id)
-        current = (payment_for(session, doc) or {}).get("tx_id")
+        p = payment_for(session, doc) or {}
+        current, current_state = p.get("tx_id"), p.get("state")
         partial_ids = {m.tx_id for m in partial_payments(session, doc.invoice)}
         used -= partial_ids
     found = []
@@ -434,6 +440,9 @@ def search(session: Session, doc: Document, client: FireflyClient, today: date, 
             continue
         found.append({"tx": tx, "score": points, "reasons": reasons, "used": tx.journal_id in used,
                       "current": tx.journal_id == current or tx.journal_id in partial_ids,
+                      # accepted = übernommen; suggested/prefilled = nur vorgeschlagen bzw. in der Inbox vorbelegt
+                      "partial": tx.journal_id in partial_ids and len(partial_ids) > 1,
+                      "state": "accepted" if tx.journal_id in partial_ids else (current_state if tx.journal_id == current else None),
                       "diff": abs(tx.amount - amount) if amount is not None else 0.0})
     found.sort(key=lambda f: (-f["score"], f["diff"], abs((f["tx"].date - (start + (end - start) / 2)).days)))
     return found[:limit]

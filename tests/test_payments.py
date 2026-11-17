@@ -250,7 +250,7 @@ def test_search_choose_and_clear_in_inbox(review_client, mock_api):
     html = review_client.get("/documents/1/firefly-search", params={"amount": "79,00", "q": "Stadtwerke",
                                                                     "start": "2026-10-01", "end": "2026-10-31"}).text
     assert html.index("79,00") < html.index("78,00")  # exakter Betrag zuerst
-    assert "zugeordnet<" in html and "Diese übernehmen" in html and "Betrag ähnlich" in html
+    assert "vorbelegt<" in html and "Werte übernehmen" in html and "Diese übernehmen" in html and "Betrag ähnlich" in html
     assert dict(route.calls.last.request.url.params)["start"] == "2026-10-01"
     r = review_client.post("/documents/1/payment", data={"tx_id": "901", "group_id": "501", "date": "2026-10-12",
                                                          "amount": "79.0", "counterparty": "Stadtwerke Musterstadt",

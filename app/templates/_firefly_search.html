@@ -9,18 +9,20 @@
       <strong>{{ tx.date|d }} · {{ tx.amount|eur }}</strong> an {{ tx.counterparty or 'unbekannt' }}
       {% if tx.description %}<small class="muted">– „{{ tx.description }}“</small>{% endif %}
       <span class="sim-reasons">{% for r in f.reasons %}<span class="pill">{{ r }}</span>{% endfor %}
-        {%- if f.current %}<span class="pill ok">zugeordnet</span>{% elif f.used %}<span class="pill warn" title="Diese Buchung ist schon einem anderen Dokument zugeordnet">anderem Dokument zugeordnet</span>{% endif %}</span>
+        {%- if f.current and f.state == 'accepted' %}<span class="pill ok" title="Übernommen – mit „Werte erneut übernehmen“ kannst du Betrag, Aussteller und IBAN nochmal aus der Buchung setzen">übernommen</span>
+        {%- elif f.current %}<span class="pill warn" title="{{ 'In der Inbox vorbelegt – wird beim Bestätigen gespeichert' if f.state == 'prefilled' else 'Nur vorgeschlagen, noch nicht übernommen' }}">{{ 'vorbelegt' if f.state == 'prefilled' else 'vorgeschlagen' }}</span>{% elif f.used %}<span class="pill warn" title="Diese Buchung ist schon einem anderen Dokument zugeordnet">anderem Dokument zugeordnet</span>{% endif %}</span>
     </div>
     <div class="ff-actions">
       {{ txlinks(tx.group_id, tx.date) }}
-      {% if not f.current %}
+      {% if not f.partial %}{# eine von mehreren Teilzahlungen: „übernehmen“ würde die anderen lösen #}
       <form method="post" action="/documents/{{ doc.id }}/payment" class="inline ff-choose">
         {% for k, v in [('tx_id', tx.journal_id), ('group_id', tx.group_id), ('date', tx.date.isoformat()), ('amount', tx.amount),
                         ('counterparty', tx.counterparty), ('iban', tx.iban or ''), ('description', tx.description)] %}
         <input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
-        <button class="small primary">Diese übernehmen</button>
+        <button class="small primary">{{ 'Werte erneut übernehmen' if f.current and f.state == 'accepted' else ('Werte übernehmen' if f.current else 'Diese übernehmen') }}</button>
       </form>
-      {% if doc.kind == 'invoice' and doc.invoice and doc.review_state != 'pending' %}
+      {% endif %}
+      {% if not f.current and doc.kind == 'invoice' and doc.invoice and doc.review_state != 'pending' %}
       <form method="post" action="/documents/{{ doc.id }}/payment" class="inline ff-choose">
         {% for k, v in [('tx_id', tx.journal_id), ('group_id', tx.group_id), ('date', tx.date.isoformat()), ('amount', tx.amount),
                         ('counterparty', tx.counterparty), ('iban', tx.iban or ''), ('description', tx.description)] %}
@@ -28,7 +30,6 @@
         <input type="hidden" name="partial" value="1">
         <button class="small" title="Zusätzlich zu bisherigen Zahlungen zuordnen (Ratenzahlung, Anzahlung)">+ Teilzahlung</button>
       </form>
-      {% endif %}
       {% endif %}
     </div>
   </li>

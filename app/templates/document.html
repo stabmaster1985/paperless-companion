@@ -80,6 +80,7 @@ document.querySelectorAll('#viewer .tab[data-tab]').forEach((tab) => tab.addEven
   an {{ pay.counterparty or 'unbekannt' }}{% if pay.description %} – „{{ pay.description }}“{% endif %}
   <br><small>Treffer über: {{ pay.reasons }}. „Status“, „Bezahlt am“{% if 'Betrag aus Buchung' in pay.reasons %} und „Betrag“{% endif %} sind daraus vorbelegt – bitte prüfen.
   Buchung prüfen:{{ txlinks(pay.group_id, pay.date) }}</small>
+  <button type="button" class="small" onclick="ffOpen()" title="Betrag, Aussteller und IBAN aus der Buchung eintragen">Weitere Werte übernehmen …</button>
 </div>
 {% elif doc.invoice %}
 {% set linked = payment_of(doc) %}
@@ -101,6 +102,8 @@ document.querySelectorAll('#viewer .tab[data-tab]').forEach((tab) => tab.addEven
   {{ 'Bezahlt laut' if linked.state == 'accepted' else 'Passende' }} Firefly-Buchung vom {{ linked.date[8:10] }}.{{ linked.date[5:7] }}.{{ linked.date[:4] }} · {{ linked.amount|eur }}
   an {{ linked.counterparty or 'unbekannt' }}{% if linked.description %} – „{{ linked.description }}“{% endif %}
   <br><small>{% if linked.reasons %}Treffer über: {{ linked.reasons }}. {% endif %}Buchung prüfen:{{ txlinks(linked.group_id, linked.date) }}</small>
+  {% if linked.state == 'suggested' %}<br><small>Nur vorgeschlagen – noch nichts übernommen.</small>{% endif %}
+  <button type="button" class="small {{ 'primary' if linked.state == 'suggested' }}" onclick="ffOpen()">{{ 'Buchung übernehmen …' if linked.state == 'suggested' else 'Werte aus der Buchung übernehmen …' }}</button>
 </div>
 {% endif %}
 {% endif %}
@@ -160,6 +163,14 @@ document.querySelectorAll('#viewer .tab[data-tab]').forEach((tab) => tab.addEven
   <div class="ff-results" aria-live="polite"></div>
 </details>
 <script>
+// Firefly-Suche aufklappen und gleich suchen (Knopf „übernehmen …“ im Hinweis oben)
+function ffOpen() {
+  const panel = document.getElementById('firefly');
+  if (!panel) return;
+  panel.open = true;
+  panel.querySelector('.ff-form').requestSubmit();
+  panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
 document.querySelectorAll('.ff-form').forEach((form) => form.addEventListener('submit', async (e) => {
   e.preventDefault();
   const out = form.parentElement.querySelector('.ff-results');
