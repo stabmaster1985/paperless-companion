@@ -1,9 +1,6 @@
 {% from "macros.html" import txlinks %}
 {# Ergebnisliste „In Firefly suchen“ – wird per JS in die Dokumentseite geladen #}
-{% if found %}
-<p class="muted"><small>{{ found|length }} Buchungen vom {{ start|d }} bis {{ end|d }}, beste Treffer zuerst.</small></p>
-<ul class="ff-list">
-  {% for f in found %}{% set tx = f.tx %}
+{% macro ff_item(f) %}{% set tx = f.tx %}
   <li class="ff-item {{ 'current' if f.current }}">
     <div class="ff-main">
       <strong>{{ tx.date|d }} · {{ tx.amount|eur }}</strong> an {{ tx.counterparty or 'unbekannt' }}
@@ -33,8 +30,26 @@
       {% endif %}
     </div>
   </li>
-  {% endfor %}
+{% endmacro %}
+{% set fits = found|selectattr('amount_ok')|list + found|rejectattr('amount_ok')|selectattr('current')|list %}
+{% set others = found|rejectattr('amount_ok')|rejectattr('current')|list %}
+{% if found %}
+{% if fits %}
+<p class="muted"><small>{{ fits|length }} Buchung{{ 'en' if fits|length != 1 }} vom {{ start|d }} bis {{ end|d }}{% if amount is not none %} mit passendem Betrag (±5 %){% endif %}, beste Treffer zuerst.</small></p>
+<ul class="ff-list">
+  {% for f in fits %}{{ ff_item(f) }}{% endfor %}
 </ul>
+{% else %}
+<p class="muted">Keine Abbuchung mit passendem Betrag vom {{ start|d }} bis {{ end|d }}.</p>
+{% endif %}
+{% if others %}
+<details class="ff-others" {{ 'open' if not fits }}>
+  <summary>{{ others|length }} weitere Buchung{{ 'en' if others|length != 1 }} mit anderem Betrag (Empfänger, Rechnungsnr. oder IBAN passt) – z.B. für Teilzahlungen</summary>
+  <ul class="ff-list">
+    {% for f in others %}{{ ff_item(f) }}{% endfor %}
+  </ul>
+</details>
+{% endif %}
 {% else %}
 <p class="muted">Keine passende Abbuchung vom {{ start|d }} bis {{ end|d }} gefunden. Zeitraum erweitern oder Betrag/Suchtext ändern.</p>
 {% endif %}

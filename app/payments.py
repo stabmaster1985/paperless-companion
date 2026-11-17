@@ -438,7 +438,8 @@ def search(session: Session, doc: Document, client: FireflyClient, today: date, 
             points, reasons = points + 25, [*reasons, "Suchtext"]
         if not reasons:
             continue
-        found.append({"tx": tx, "score": points, "reasons": reasons, "used": tx.journal_id in used,
+        amount_ok = amount is None or abs(tx.amount - amount) <= max(1.0, amount * 0.05)
+        found.append({"tx": tx, "score": points, "reasons": reasons, "used": tx.journal_id in used, "amount_ok": amount_ok,
                       "current": tx.journal_id == current or tx.journal_id in partial_ids,
                       # accepted = übernommen; suggested/prefilled = nur vorgeschlagen bzw. in der Inbox vorbelegt
                       "partial": tx.journal_id in partial_ids and len(partial_ids) > 1,

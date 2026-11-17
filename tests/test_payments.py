@@ -252,6 +252,15 @@ def test_search_choose_and_clear_in_inbox(review_client, mock_api):
     assert html.index("79,00") < html.index("78,00")  # exakter Betrag zuerst
     assert "vorbelegt<" in html and "Werte übernehmen" in html and "Diese übernehmen" in html and "Betrag ähnlich" in html
     assert dict(route.calls.last.request.url.params)["start"] == "2026-10-01"
+    # anderer Betrag (nur Empfänger passt): eingeklappt unter „weitere Buchungen“, nicht zwischen den Treffern
+    third = {"type": "transactions", "id": "502", "attributes": {"transactions": [{
+        "transaction_journal_id": "902", "type": "withdrawal", "date": "2026-10-20T00:00:00+02:00", "amount": "312.40",
+        "description": "Jahresabrechnung", "destination_name": "Stadtwerke Musterstadt"}]}}
+    mock_api.get(f"{FIREFLY}/api/v1/transactions").respond(json={**FIREFLY_PAGE, "data": [*FIREFLY_PAGE["data"], second, third]})
+    html = review_client.get("/documents/1/firefly-search", params={"amount": "79,00", "q": "Stadtwerke",
+                                                                    "start": "2026-10-01", "end": "2026-10-31"}).text
+    assert "2 Buchungen" in html and "1 weitere Buchung mit anderem Betrag" in html
+    assert html.index("312,40") > html.index("weitere Buchung")
     r = review_client.post("/documents/1/payment", data={"tx_id": "901", "group_id": "501", "date": "2026-10-12",
                                                          "amount": "79.0", "counterparty": "Stadtwerke Musterstadt",
                                                          "description": "Strom Oktober"})

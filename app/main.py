@@ -511,7 +511,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             return HTMLResponse(f'<p class="bad">Firefly nicht erreichbar: {exc}</p>')
         finally:
             client.close()
-        return render(request, "_firefly_search.html", doc=doc, found=found, start=start_d, end=end_d)
+        return render(request, "_firefly_search.html", doc=doc, found=found, start=start_d, end=end_d, amount=value)
 
     @app.post("/documents/{doc_id}/payment")
     async def document_payment_choose(request: Request, doc_id: int, session: Session = Depends(get_session)):
