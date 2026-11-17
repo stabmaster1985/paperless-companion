@@ -68,6 +68,7 @@ def match(session: Session, transactions: list[Transaction], settings: Settings)
     ))
     existing = list(session.scalars(select(PaymentMatch)))
     used_tx = {m.tx_id for m in existing if m.state in ("accepted", "suggested")}
+    owner = used_elsewhere(session)  # auch auf der Belegseite zugeordnete Buchungen
     known_pairs = {(m.invoice_id, m.tx_id) for m in existing}
     has_suggestion = {m.invoice_id for m in existing if m.state == "suggested"}
 
@@ -77,7 +78,8 @@ def match(session: Session, transactions: list[Transaction], settings: Settings)
             continue
         scored = []
         for tx in transactions:
-            if tx.journal_id in used_tx or (inv.id, tx.journal_id) in known_pairs:
+            if tx.journal_id in used_tx or (inv.id, tx.journal_id) in known_pairs \
+                    or owner.get(tx.journal_id, inv.document_id) != inv.document_id:
                 continue
             if (result := score(inv, tx)) is not None:
                 scored.append((result[0], inv, tx, result[1]))
@@ -167,12 +169,27 @@ def score_candidate(c: Candidate, tx: Transaction) -> tuple[int, list[str]] | No
     return (points, reasons + ["Betrag aus Buchung"]) if points >= PARTIAL_MIN else None
 
 
+def used_elsewhere(session: Session, exclude_doc: int | None = None) -> dict[str, int]:
+    """Buchungen, die schon einem Dokument gehören (tx_id -> Dokument): Zahlungsabgleich (übernommen oder
+    vorgeschlagen), in der Inbox vorbelegt und auf der Belegseite zugeordnet. Eine Buchung bezahlt nur ein Dokument –
+    sie wird für andere nicht mehr vorgeschlagen."""
+    from app.models import ReceiptCheck
+
+    used: dict[str, int] = {}
+    for m in session.scalars(select(PaymentMatch).where(PaymentMatch.state.in_(("accepted", "suggested")))
+                             .options(selectinload(PaymentMatch.invoice))):
+        if m.invoice is not None:
+            used.setdefault(m.tx_id, m.invoice.document_id)
+    for doc in session.scalars(select(Document).where(Document.review_state == "pending")):
+        if (p := (doc.suggestions or {}).get("_payment")) and p.get("tx_id"):
+            used.setdefault(p["tx_id"], doc.id)
+    for row in session.scalars(select(ReceiptCheck).where(ReceiptCheck.state == "linked", ReceiptCheck.document_id.is_not(None))):
+        used.setdefault(row.tx_id, row.document_id)
+    return {tx: d for tx, d in used.items() if d != exclude_doc}
+
+
 def _used_transactions(session: Session, exclude_doc: int | None = None) -> set[str]:
-    used = {m.tx_id for m in session.scalars(select(PaymentMatch).where(PaymentMatch.state.in_(("accepted", "suggested"))))}
-    for doc in session.scalars(select(Document).where(Document.review_state == "pending", Document.kind == "invoice")):
-        if doc.id != exclude_doc and (p := (doc.suggestions or {}).get("_payment")):
-            used.add(p.get("tx_id"))
-    return used
+    return set(used_elsewhere(session, exclude_doc))
 
 
 def best_payment(c: Candidate, transactions: list[Transaction], used: set[str]):
@@ -409,18 +426,21 @@ def search(session: Session, doc: Document, client: FireflyClient, today: date, 
     incoming = doc.kind == "reimbursement"  # Erstattung: Geldeingänge statt Abbuchungen
     partial_ids: set[str] = set()
     if incoming:
-        used = reimbursements.used_transactions(session, exclude=doc.id)
+        from app.models import Reimbursement
+
+        used = {r.tx_id: r.document_id for r in session.scalars(select(Reimbursement).where(Reimbursement.tx_id.is_not(None)))
+                if r.document_id != doc.id}
         rec = doc.reimbursement
         if rec is not None and rec.tx_id:
             current, current_state = rec.tx_id, rec.tx_state or "suggested"
         else:
             current, current_state = ((doc.suggestions or {}).get("_deposit") or {}).get("tx_id"), "prefilled"
     else:
-        used = _used_transactions(session, exclude_doc=doc.id)
+        used = used_elsewhere(session, exclude_doc=doc.id)
         p = payment_for(session, doc) or {}
         current, current_state = p.get("tx_id"), p.get("state")
         partial_ids = {m.tx_id for m in partial_payments(session, doc.invoice)}
-        used -= partial_ids
+        used = {k: v for k, v in used.items() if k not in partial_ids}
     found = []
     for tx in (client.deposits if incoming else client.withdrawals)(start, min(end, today)):
         points, reasons = 0, []
@@ -439,7 +459,10 @@ def search(session: Session, doc: Document, client: FireflyClient, today: date, 
         if not reasons:
             continue
         amount_ok = amount is None or abs(tx.amount - amount) <= max(1.0, amount * 0.05)
-        found.append({"tx": tx, "score": points, "reasons": reasons, "used": tx.journal_id in used, "amount_ok": amount_ok,
+        owner_id = used.get(tx.journal_id)
+        owner_doc = session.get(Document, owner_id) if owner_id else None
+        found.append({"tx": tx, "score": points, "reasons": reasons, "used": owner_id is not None, "amount_ok": amount_ok,
+                      "used_by": {"id": owner_id, "title": owner_doc.title if owner_doc else f"#{owner_id}"} if owner_id else None,
                       "current": tx.journal_id == current or tx.journal_id in partial_ids,
                       # accepted = übernommen; suggested/prefilled = nur vorgeschlagen bzw. in der Inbox vorbelegt
                       "partial": tx.journal_id in partial_ids and len(partial_ids) > 1,

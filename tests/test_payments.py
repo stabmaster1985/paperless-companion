@@ -355,3 +355,18 @@ def test_choose_and_clear_without_reload(review_client):
         assert sugg["amount"]["value"] == 79.0 and sugg["amount"]["source"] == "firefly" and "iban" not in sugg
     r = review_client.post("/documents/1/payment/clear", headers={"X-Requested-With": "fetch"})
     assert r.json()["previous"] == "2026-10-12" and r.json()["date_field"] == "paid_on" and "gelöst" in r.json()["msg"]
+
+
+def test_assigned_transaction_not_reused(db, settings):
+    """Eine auf der Belegseite (oder per Abgleich) zugeordnete Buchung wird keiner anderen Rechnung vorgeschlagen."""
+    from app.models import ReceiptCheck
+
+    with db() as s:
+        add_invoice(s, 1, 78.0, issuer="Stadtwerke")
+        add_invoice(s, 2, 78.0, issuer="Stadtwerke")
+        s.add(ReceiptCheck(tx_id="900", tx_group_id="500", tx_date=date(2026, 10, 10), amount=78.0, counterparty="Stadtwerke",
+                           state="linked", decided=True, document_id=2))
+    with db() as s:
+        payments.match(s, [tx("900", date(2026, 10, 10), 78.0, "Stadtwerke", "Abschlag")], settings)
+        assert [(m.invoice.document_id, m.tx_id) for m in s.query(PaymentMatch)] == [(2, "900")]  # nur für Dokument 2
+        assert payments.used_elsewhere(s, exclude_doc=1) == {"900": 2}

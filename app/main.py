@@ -272,12 +272,47 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             kind_counts[d.kind] = kind_counts.get(d.kind, 0) + 1
         correspondents = sorted({d.correspondent for d in all_pending if d.correspondent}, key=metadata.locale_key)
         active = {k: v for k, v in flt.items() if v}
-        response = render(request, "inbox.html", docs=docs, msg=msg, flt=flt, kind_counts=kind_counts,
+        quick = {d.id: quick_check(d) for d in docs if d.kind in pipeline.FIELD_TYPES}
+        response = render(request, "inbox.html", docs=docs, msg=msg, flt=flt, kind_counts=kind_counts, quick=quick,
+                          QUICK_FIELDS=QUICK_FIELDS,
                           total=len(all_pending), filtered=len(without_kind), correspondents=correspondents,
                           has_unnamed=any(not d.correspondent for d in all_pending),
                           qs=lambda **kw: urlencode({k: v for k, v in {**active, **kw}.items() if v}))
         response.set_cookie(INBOX_COOKIE, urlencode(active), max_age=30 * 86400, samesite="lax")
         return response
+
+    def confirm_document(session: Session, doc: Document, values: dict) -> None:
+        """Wie „Bestätigen“ auf der Prüfseite, nur mit den angezeigten Werten (Sammelbestätigung)."""
+        learning.record_accuracy(session, doc, doc.kind, values)
+        pipeline.apply_values(session, doc, doc.kind, values)
+        pipeline.record_confirmation(doc, doc.kind, values, {}, {})
+        if doc.kind == "reimbursement":
+            reimbursements.record_confirmed(doc)
+        doc.review_state = "confirmed"
+        doc.auto_confirmed = False
+        payments.record_confirmed_payment(session, doc)
+        doc.writeback_pending = True
+
+    @app.post("/inbox/confirm")
+    async def inbox_confirm(request: Request, session: Session = Depends(get_session)):
+        form = await request.form(max_fields=MAX_FORM_FIELDS)
+        done, skipped = 0, 0
+        for raw in form.getlist("ids"):
+            doc = session.get(Document, int(raw)) if str(raw).isdigit() else None
+            if doc is None or doc.review_state != "pending" or doc.kind not in pipeline.FIELD_TYPES:
+                continue
+            values, missing = quick_check(doc)
+            if missing:
+                skipped += 1
+                continue
+            confirm_document(session, doc, values)
+            done += 1
+        if done:
+            request_worker(app)
+        msg = f"{done} Dokument{'e' if done != 1 else ''} bestätigt"
+        if skipped:
+            msg += f", {skipped} übersprungen (Angaben fehlen – bitte einzeln prüfen)"
+        return RedirectResponse(f"/inbox?msg={quote(msg)}", status_code=303)
 
     @app.get("/search")
     def search(q: str = "", session: Session = Depends(get_session)):
@@ -2084,6 +2119,38 @@ def field_badges(doc: Document, from_record: bool) -> dict:
         # in der Inbox zählen aktuelle Vorschläge aus Firefly (Formular ist damit vorbelegt)
         badges.update({k: {**v, "confirmed": False} for k, v in sugg.items() if v.get("source") == "firefly"})
     return badges
+
+
+QUICK_FIELDS = {  # was auf der Inbox-Karte angezeigt wird (Feld, Bezeichnung)
+    "invoice": [("issuer", ""), ("amount", ""), ("due_date", "fällig"), ("paid_on", "bezahlt")],
+    "contract": [("provider", ""), ("monthly_cost", "€/Monat"), ("start_date", "ab"), ("end_date", "bis")],
+    "warranty": [("product", ""), ("purchase_date", "gekauft"), ("months", "Monate")],
+    "reimbursement": [("payer", ""), ("amount", ""), ("statement_date", "vom")],
+}
+
+
+def quick_check(doc: Document) -> tuple[dict, list[str]]:
+    """Werte für die Sammelbestätigung und was dafür noch fehlt."""
+    values = pipeline.parse_values(doc.kind, form_values(doc)[0])
+    missing = []
+    if doc.kind == "invoice":
+        if values.get("amount") is None:
+            missing.append("Betrag")
+        settled = values.get("payment_method") == "debit" or values.get("status") == "paid"
+        if not settled and values.get("due_date") is None:
+            missing.append("Fälligkeit")
+    elif doc.kind == "contract":
+        if not (values.get("name") or values.get("provider")):
+            missing.append("Anbieter")
+        if values.get("start_date") is None and values.get("end_date") is None:
+            missing.append("Beginn oder Laufzeitende")
+    elif doc.kind == "warranty":
+        if values.get("purchase_date") is None:
+            missing.append("Kaufdatum")
+    elif doc.kind == "reimbursement":
+        if values.get("amount") is None:
+            missing.append("Betrag")
+    return values, missing
 
 
 def form_values(doc: Document) -> tuple[dict, bool]:

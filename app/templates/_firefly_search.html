@@ -7,7 +7,7 @@
       {% if tx.description %}<small class="muted">– „{{ tx.description }}“</small>{% endif %}
       <span class="sim-reasons">{% for r in f.reasons %}<span class="pill">{{ r }}</span>{% endfor %}
         {%- if f.current and f.state == 'accepted' %}<span class="pill ok" title="Übernommen – mit „Werte erneut übernehmen“ kannst du Betrag, Aussteller und IBAN nochmal aus der Buchung setzen">übernommen</span>
-        {%- elif f.current %}<span class="pill warn" title="{{ 'In der Inbox vorbelegt – wird beim Bestätigen gespeichert' if f.state == 'prefilled' else 'Nur vorgeschlagen, noch nicht übernommen' }}">{{ 'vorbelegt' if f.state == 'prefilled' else 'vorgeschlagen' }}</span>{% elif f.used %}<span class="pill warn" title="Diese Buchung ist schon einem anderen Dokument zugeordnet">anderem Dokument zugeordnet</span>{% endif %}</span>
+        {%- elif f.current %}<span class="pill warn" title="{{ 'In der Inbox vorbelegt – wird beim Bestätigen gespeichert' if f.state == 'prefilled' else 'Nur vorgeschlagen, noch nicht übernommen' }}">{{ 'vorbelegt' if f.state == 'prefilled' else 'vorgeschlagen' }}</span>{% elif f.used_by %}<span class="pill warn">gehört zu <a href="/documents/{{ f.used_by.id }}" target="_blank" rel="noopener">{{ f.used_by.title }}</a></span>{% endif %}</span>
     </div>
     <div class="ff-actions">
       {{ txlinks(tx.group_id, tx.date) }}
@@ -31,8 +31,10 @@
     </div>
   </li>
 {% endmacro %}
-{% set fits = found|selectattr('amount_ok')|list + found|rejectattr('amount_ok')|selectattr('current')|list %}
-{% set others = found|rejectattr('amount_ok')|rejectattr('current')|list %}
+{% set taken = found|selectattr('used')|rejectattr('current')|list %}
+{% set free = found|rejectattr('used')|list + found|selectattr('used')|selectattr('current')|list %}
+{% set fits = free|selectattr('amount_ok')|list + free|rejectattr('amount_ok')|selectattr('current')|list %}
+{% set others = free|rejectattr('amount_ok')|rejectattr('current')|list %}
 {% if found %}
 {% if fits %}
 <p class="muted"><small>{{ fits|length }} Buchung{{ 'en' if fits|length != 1 }} vom {{ start|d }} bis {{ end|d }}{% if amount is not none %} mit passendem Betrag (±5 %){% endif %}, beste Treffer zuerst.</small></p>
@@ -47,6 +49,14 @@
   <summary>{{ others|length }} weitere Buchung{{ 'en' if others|length != 1 }} mit anderem Betrag (Empfänger, Rechnungsnr. oder IBAN passt) – z.B. für Teilzahlungen</summary>
   <ul class="ff-list">
     {% for f in others %}{{ ff_item(f) }}{% endfor %}
+  </ul>
+</details>
+{% endif %}
+{% if taken %}
+<details class="ff-others ff-taken">
+  <summary>{{ taken|length }} Buchung{{ 'en' if taken|length != 1 }} schon einem anderen Dokument zugeordnet – nur falls dort falsch zugeordnet</summary>
+  <ul class="ff-list">
+    {% for f in taken %}{{ ff_item(f) }}{% endfor %}
   </ul>
 </details>
 {% endif %}

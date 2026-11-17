@@ -800,3 +800,21 @@ body.docview-open { overflow: hidden; }
   .two-up > .card { margin: 0; }
   table.list select { max-width: 22rem; }
 }
+
+/* Firefly-Suche: eingeklappte Gruppen (anderer Betrag, schon zugeordnet) */
+.ff-others { margin-top: .6rem; }
+.ff-others > summary { cursor: pointer; color: var(--muted); font-size: .9rem; }
+.ff-taken .ff-item { opacity: .75; }
+
+/* Inbox: Sammelbestätigung */
+.quick-bar { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: center; }
+.quick-tools { display: inline-flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: center; }
+.quick-hint { font-size: .9rem; margin-top: .25rem; }
+.inbox-item { display: flex; gap: .4rem; align-items: stretch; }
+.inbox-item > .doc-card { flex: 1; min-width: 0; }
+.inbox-item .pick { display: flex; align-items: center; padding: 0 .35rem; cursor: pointer; }
+.inbox-item .pick input { width: 1.15rem; height: 1.15rem; }
+.inbox-item .pick input:disabled { cursor: not-allowed; opacity: .4; }
+.quick-vals { font-size: .9rem; }
+.quick-missing { font-size: .85rem; color: var(--warn); }
+button:disabled, button:disabled:hover { opacity: .5; cursor: not-allowed; }

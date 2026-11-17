@@ -408,3 +408,27 @@ def test_inbox_filter_and_next_stays_in_filter(client):
     r = client.post("/documents/902/confirm", data={"after": "next", "amount": "10"}, follow_redirects=False)
     assert r.headers["location"].startswith("/documents/900")
     assert "Police Hausrat" in client.get("/inbox?reset=1").text
+
+
+def test_inbox_quick_confirm(client):
+    """Sammelbestätigung: vollständige Dokumente mit den angezeigten Werten bestätigen, unvollständige überspringen."""
+    from app.models import Invoice
+
+    with session_scope() as s:
+        s.add(Document(id=910, title="Abschlag Gas", correspondent="Gaswerk", kind="invoice", tags=[], review_state="pending",
+                       extraction_state="done", created=date(2026, 10, 1),
+                       suggestions={"amount": {"value": 45.0, "confidence": 0.7, "source": "rule"},
+                                    "due_date": {"value": "2026-10-15", "confidence": 0.7, "source": "rule"},
+                                    "issuer": {"value": "Gaswerk", "confidence": 0.9, "source": "paperless"}}))
+        s.add(Document(id=911, title="Rechnung ohne Betrag", kind="invoice", tags=[], review_state="pending",
+                       extraction_state="done", created=date(2026, 10, 2), suggestions={}))
+    page = client.get("/inbox?reset=1").text
+    assert "Ausgewählte bestätigen" in page and "45,00 €" in page and "fällig 15.10.2026" in page
+    assert "fehlt: Betrag, Fälligkeit" in page
+    r = client.post("/inbox/confirm", data={"ids": ["910", "911"]})
+    assert "1 Dokument bestätigt, 1 übersprungen" in r.text
+    with session_scope() as s:
+        doc = s.get(Document, 910)
+        assert doc.review_state == "confirmed" and doc.invoice.amount == 45.0 and doc.invoice.due_date == date(2026, 10, 15)
+        assert doc.field_sources["amount"]["confirmed"] and doc.writeback_pending
+        assert s.get(Document, 911).review_state == "pending"
