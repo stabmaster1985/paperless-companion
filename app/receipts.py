@@ -83,8 +83,10 @@ def fixed_label(session: Session, entry) -> str:
 def fixed_target(session: Session, entry, day: date) -> tuple[int | None, str]:
     """Zu welchem Dokument gehört eine Buchung vom Tag `day` laut fester Zuordnung? Gibt (ID, Hinweis) zurück."""
     if isinstance(entry, dict) and entry.get("mode") == "latest":
-        docs = session.scalars(select(Document).where(Document.correspondent == entry["correspondent"],
-                                                      Document.created.is_not(None)).order_by(Document.created)).all()
+        # Leistungsabrechnungen derselben Krankenversicherung sind kein Beleg für den Beitrag
+        docs = [d for d in session.scalars(select(Document).where(Document.correspondent == entry["correspondent"],
+                                                                  Document.created.is_not(None)).order_by(Document.created))
+                if d.kind != "reimbursement"]
         before = [d for d in docs if d.created <= day]
         doc = before[-1] if before else (docs[0] if docs else session.get(Document, entry.get("doc")))
         if doc is None:

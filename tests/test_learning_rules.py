@@ -571,6 +571,8 @@ def test_receipts_running_payment_follows_newest_document(db, settings):
         s.add(Document(id=301, title="Stromvertrag", correspondent="Stadtwerke", created=date(2025, 1, 10), tags=[]))
         s.add(Document(id=302, title="Jahresabrechnung 2025", correspondent="Stadtwerke", created=date(2026, 2, 5), tags=[]))
         s.add(Document(id=303, title="Anderer Versorger", correspondent="Gaswerk", created=date(2026, 3, 1), tags=[]))
+        s.add(Document(id=304, title="Leistungsabrechnung", correspondent="Stadtwerke", kind="reimbursement",
+                       created=date(2026, 2, 20), tags=[]))  # zählt nicht als Beleg für den Beitrag
     txs = [tx("1", date(2025, 6, 1), 78.0, "Stadtwerke Musterstadt", "Abschlag Juni"),
            tx("2", date(2026, 1, 1), 78.0, "Stadtwerke Musterstadt", "Abschlag Januar"),
            tx("3", date(2026, 3, 1), 85.0, "Stadtwerke Musterstadt", "Abschlag März")]
