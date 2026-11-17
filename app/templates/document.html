@@ -269,6 +269,51 @@ document.querySelectorAll('.ff-form').forEach((form) => form.addEventListener('s
 })();
 </script>
 {% endif %}
+{% if doc.kind == 'invoice' and doc.invoice and doc.review_state != 'pending' %}
+{% set inv = doc.invoice %}{% set rfd = refund_defaults(doc) %}
+<details class="card refund-box" id="refund" {{ 'open' if inv.refund_amount }}>
+  <summary>{% if inv.refund_amount %}Rückerstattung: {{ inv.refund_amount|eur }} am {{ inv.refunded_on|d }}{% if inv.amount and inv.refund_amount < inv.amount %} · kostet dich noch {{ inv.net_amount|eur }}{% else %} · vollständig erstattet{% endif %}
+    {% else %}Geld zurückbekommen? Rückerstattung zuordnen{% endif %}</summary>
+  {% if inv.refund_amount %}
+  <div>{{ 'Aus Firefly' if inv.refund_tx_id else 'Von dir eingetragen' }}{% if inv.refund_tx_id %}:{{ txlinks(inv.refund_tx_group_id, inv.refunded_on) }}{% endif %}
+    <form method="post" action="/documents/{{ doc.id }}/refund" class="inline"><input type="hidden" name="action" value="clear">
+      <button class="small link">entfernen</button></form></div>
+  {% endif %}
+  <p class="muted"><small>Für Rücksendungen, Gutschriften oder Stornos: die Rechnung bleibt bezahlt, als Kosten zählt nur der Rest
+    (auch im Steuer-Export).</small></p>
+  {% if settings.firefly_url and settings.firefly_token %}
+  <form class="rf-form" data-url="/documents/{{ doc.id }}/firefly-search">
+    <input type="hidden" name="refund" value="1">
+    <div class="grid">
+      <label class="field"><span>Betrag (€)</span><input name="amount" inputmode="decimal" value="{{ '%.2f'|format(rfd.amount) if rfd.amount is not none }}" placeholder="leer = egal"></label>
+      <label class="field"><span>Suchtext (Absender, Verwendungszweck)</span><input name="q" value="{{ rfd.q }}"></label>
+      <label class="field"><span>von</span><input type="date" name="start" value="{{ rfd.start.isoformat() if rfd.start }}"></label>
+      <label class="field"><span>bis</span><input type="date" name="end" value="{{ rfd.end.isoformat() if rfd.end }}"></label>
+    </div>
+    <button class="small primary">Gutschrift in Firefly suchen</button>
+    <small class="muted">Gesucht wird unter den Geldeingängen. Teilerstattungen stehen unter „weitere Buchungen mit anderem Betrag“.</small>
+  </form>
+  <div class="rf-results" aria-live="polite"></div>
+  {% endif %}
+  <form method="post" action="/documents/{{ doc.id }}/refund" class="rf-manual">
+    <span class="muted">Oder von Hand:</span>
+    <input name="amount" inputmode="decimal" placeholder="Betrag €" aria-label="Erstatteter Betrag" value="{{ '%.2f'|format(inv.refund_amount) if inv.refund_amount }}">
+    <input type="date" name="date" aria-label="Erstattet am" value="{{ inv.refunded_on.isoformat() if inv.refunded_on }}">
+    <button class="small">Speichern</button>
+  </form>
+</details>
+<script>
+document.querySelectorAll('.rf-form').forEach((form) => form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const out = form.parentElement.querySelector('.rf-results');
+  out.innerHTML = '<p class="muted">Suche in Firefly …</p>';
+  try {
+    const r = await fetch(form.dataset.url + '?' + new URLSearchParams(new FormData(form)));
+    out.innerHTML = await r.text();
+  } catch (err) { out.innerHTML = '<p class="bad">Suche fehlgeschlagen.</p>'; }
+}));
+</script>
+{% endif %}
 <form method="post" action="/documents/{{ doc.id }}/confirm" class="card">
   <p class="legend-sources muted">Herkunft:
     <span class="badge src-rule">Regel</span> aus dem Text ·

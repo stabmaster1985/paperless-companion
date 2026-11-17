@@ -43,7 +43,8 @@
     {% set overdue = i.status == 'open' and i.payment_method != 'debit' and i.due_date and i.due_date < today %}
     <tr class="{{ 'overdue' if overdue }}">
       <td><a href="/documents/{{ i.document_id }}">{{ i.issuer or i.document.title }}</a> {{ doclink(i.document_id) }}</td>
-      <td class="nowrap">{{ i.amount|eur }}{% if i.paid_amount and i.status == 'open' %}<br><small class="muted" title="Teilzahlungen: {{ i.paid_amount|eur }} bezahlt">noch {{ i.open_amount|eur }} offen</small>{% endif %}</td>
+      <td class="nowrap">{{ i.amount|eur }}{% if i.paid_amount and i.status == 'open' %}<br><small class="muted" title="Teilzahlungen: {{ i.paid_amount|eur }} bezahlt">noch {{ i.open_amount|eur }} offen</small>{% endif %}
+        {%- if i.refund_amount %}<br><small class="muted" title="Rückerstattung am {{ i.refunded_on|d }}">{{ i.refund_amount|eur }} zurück{% if i.amount and i.refund_amount < i.amount %} · netto {{ i.net_amount|eur }}{% endif %}</small>{% endif %}</td>
       <td class="nowrap">
         {% if i.payment_method == 'debit' %}<span class="tag">Lastschrift</span>
         {% else %}{{ i.due_date|d }}{% if overdue %} <span class="tag tag-overdue">überfällig</span>{% endif %}{% endif %}

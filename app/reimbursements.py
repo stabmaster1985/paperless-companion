@@ -162,8 +162,10 @@ def score(rec: Reimbursement, doc: Document, tx: Transaction) -> tuple[int, list
 
 
 def used_transactions(session: Session, exclude: int | None = None) -> set[str]:
+    from app.payments import refund_transactions  # Rückerstattungen einzelner Rechnungen sind schon vergeben
+
     return {r.tx_id for r in session.scalars(select(Reimbursement).where(Reimbursement.tx_id.is_not(None)))
-            if r.document_id != exclude}
+            if r.document_id != exclude} | set(refund_transactions(session))
 
 
 def match(session: Session, deposits: list[Transaction]) -> int:

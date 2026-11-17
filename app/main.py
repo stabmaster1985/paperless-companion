@@ -101,6 +101,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
 
     templates.env.globals["payment_of"] = payment_of
     templates.env.globals["ff_defaults"] = payments.search_defaults
+    templates.env.globals["refund_defaults"] = payments.refund_defaults
 
     def partials_of(doc: Document) -> list:
         with session_scope() as s:
@@ -521,12 +522,14 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
 
     @app.get("/documents/{doc_id}/firefly-search", response_class=HTMLResponse)
     def document_firefly_search(request: Request, doc_id: int, amount: str = "", start: str = "", end: str = "", q: str = "",
-                                session: Session = Depends(get_session)):
-        """Buchungen in Firefly zu diesem Dokument suchen (Ergebnisliste wird in die Seite geladen)."""
+                                refund: str = "", session: Session = Depends(get_session)):
+        """Buchungen in Firefly zu diesem Dokument suchen (Ergebnisliste wird in die Seite geladen).
+        Mit refund=1: Geldeingänge als Rückerstattung einer Rechnung."""
         doc = session.get(Document, doc_id)
         if doc is None:
             raise HTTPException(404)
-        d = payments.search_defaults(doc)
+        is_refund = bool(refund) and doc.invoice is not None
+        d = payments.refund_defaults(doc) if is_refund else payments.search_defaults(doc)
         try:
             value = float(amount.replace(",", ".")) if amount.strip() else None
             start_d = date.fromisoformat(start) if start else d["start"]
@@ -541,12 +544,43 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         if client is None:
             return HTMLResponse('<p class="bad">Firefly ist nicht eingerichtet (Einstellungen → Firefly).</p>')
         try:
-            found = payments.search(session, doc, client, today(), value, start_d, end_d, q)
+            found = payments.search(session, doc, client, today(), value, start_d, end_d, q, refund=is_refund)
         except FireflyError as exc:
             return HTMLResponse(f'<p class="bad">Firefly nicht erreichbar: {exc}</p>')
         finally:
             client.close()
-        return render(request, "_firefly_search.html", doc=doc, found=found, start=start_d, end=end_d, amount=value)
+        return render(request, "_firefly_search.html", doc=doc, found=found, start=start_d, end=end_d, amount=value,
+                      refund=is_refund)
+
+    @app.post("/documents/{doc_id}/refund")
+    async def document_refund(request: Request, doc_id: int, session: Session = Depends(get_session)):
+        """Rückerstattung zu einer Rechnung: Geldeingang aus Firefly, von Hand eingetragen oder entfernen."""
+        doc = session.get(Document, doc_id)
+        if doc is None or doc.invoice is None:
+            raise HTTPException(404)
+        form = await request.form()
+        from app.firefly import Transaction
+
+        if form.get("action") == "clear":
+            payments.clear_refund(doc)
+            msg = "Rückerstattung entfernt"
+        else:
+            try:
+                amount = pipeline.coerce("float", str(form.get("amount") or ""))
+                day = pipeline.coerce("date", str(form.get("date") or ""))
+            except ValueError:
+                amount = day = None
+            if not amount or day is None:
+                return RedirectResponse(f"/documents/{doc_id}?msg={quote('Bitte Betrag und Datum der Rückerstattung angeben')}#refund",
+                                        status_code=303)
+            tx = None
+            if form.get("tx_id"):
+                tx = Transaction(journal_id=str(form["tx_id"]), group_id=str(form.get("group_id") or ""), date=day,
+                                 amount=amount, counterparty=str(form.get("counterparty") or ""), iban=None,
+                                 description="", text="")
+            result = payments.set_refund(doc, amount, day, tx)
+            msg = f"Rückerstattung {amount:.2f} € vom {day:%d.%m.%Y} gespeichert – {result}".replace(".", ",", 1)
+        return RedirectResponse(f"/documents/{doc_id}?msg={quote(msg)}#refund", status_code=303)
 
     @app.post("/documents/{doc_id}/payment")
     async def document_payment_choose(request: Request, doc_id: int, session: Session = Depends(get_session)):

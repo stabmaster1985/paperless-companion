@@ -824,3 +824,8 @@ button:disabled, button:disabled:hover { opacity: .5; cursor: not-allowed; }
 .cancel-item { border-top: 1px solid var(--border); padding: .75rem 0 .25rem; }
 .cancel-item:first-of-type { border-top: 0; }
 .cancel-doc small { display: block; }
+
+/* Rückerstattung an einer Rechnung */
+.refund-box > summary { cursor: pointer; font-weight: 600; }
+.rf-manual { display: flex; flex-wrap: wrap; gap: .4rem .6rem; align-items: center; margin-top: .75rem; }
+.rf-manual input { width: 10rem; }

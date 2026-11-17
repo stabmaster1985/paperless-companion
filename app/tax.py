@@ -59,12 +59,13 @@ def _candidates(session: Session):
     return session.scalars(select(Document).options(selectinload(Document.invoice)))
 
 
+def eur(value) -> str:
+    return "?" if value is None else f"{value:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
 def refund_notes(session: Session) -> dict[int, str]:
     """Je Rechnung die Erstattung(en), mit denen sie in Paperless verknüpft ist – Eigenanteil je Abrechnung."""
     from app import reimbursements
-
-    def eur(value):
-        return "?" if value is None else f"{value:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
 
     notes: dict[int, list[str]] = {}
     graph = reimbursements.related_graph(session)
@@ -85,7 +86,13 @@ def collect(session: Session, year: int, settings: Settings) -> list[TaxItem]:
             continue
         category = category_for(doc, settings)
         if category:
-            items.append(TaxItem(doc, category, doc.invoice.amount if doc.invoice else None, refunds.get(doc.id, "")))
+            inv = doc.invoice
+            note = refunds.get(doc.id, "")
+            if inv is not None and inv.refund_amount:  # Rücksendung/Gutschrift: nur der Rest zählt
+                text = (f"Rückerstattung {eur(inv.refund_amount)} am {inv.refunded_on:%d.%m.%Y}" if inv.refunded_on
+                        else f"Rückerstattung {eur(inv.refund_amount)}")
+                note = "; ".join(filter(None, [note, text + f", ursprünglich {eur(inv.amount)}" if inv.amount else text]))
+            items.append(TaxItem(doc, category, inv.net_amount if inv else None, note))
     items.sort(key=lambda i: (i.category.lower(), i.doc.created or i.doc.id))
     return items
 

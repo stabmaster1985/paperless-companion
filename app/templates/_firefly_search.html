@@ -11,7 +11,14 @@
     </div>
     <div class="ff-actions">
       {{ txlinks(tx.group_id, tx.date) }}
-      {% if not f.partial %}{# eine von mehreren Teilzahlungen: „übernehmen“ würde die anderen lösen #}
+      {% if refund %}
+      <form method="post" action="/documents/{{ doc.id }}/refund" class="inline">
+        {% for k, v in [('tx_id', tx.journal_id), ('group_id', tx.group_id), ('date', tx.date.isoformat()), ('amount', tx.amount),
+                        ('counterparty', tx.counterparty)] %}
+        <input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+        <button class="small primary">{{ 'Erneut übernehmen' if f.current else 'Als Rückerstattung übernehmen' }}</button>
+      </form>
+      {% elif not f.partial %}{# eine von mehreren Teilzahlungen: „übernehmen“ würde die anderen lösen #}
       <form method="post" action="/documents/{{ doc.id }}/payment" class="inline ff-choose">
         {% for k, v in [('tx_id', tx.journal_id), ('group_id', tx.group_id), ('date', tx.date.isoformat()), ('amount', tx.amount),
                         ('counterparty', tx.counterparty), ('iban', tx.iban or ''), ('description', tx.description)] %}
@@ -19,7 +26,7 @@
         <button class="small primary">{{ 'Werte erneut übernehmen' if f.current and f.state == 'accepted' else ('Werte übernehmen' if f.current else 'Diese übernehmen') }}</button>
       </form>
       {% endif %}
-      {% if not f.current and doc.kind == 'invoice' and doc.invoice and doc.review_state != 'pending' %}
+      {% if not refund and not f.current and doc.kind == 'invoice' and doc.invoice and doc.review_state != 'pending' %}
       <form method="post" action="/documents/{{ doc.id }}/payment" class="inline ff-choose">
         {% for k, v in [('tx_id', tx.journal_id), ('group_id', tx.group_id), ('date', tx.date.isoformat()), ('amount', tx.amount),
                         ('counterparty', tx.counterparty), ('iban', tx.iban or ''), ('description', tx.description)] %}
@@ -42,7 +49,7 @@
   {% for f in fits %}{{ ff_item(f) }}{% endfor %}
 </ul>
 {% else %}
-<p class="muted">Keine Abbuchung mit passendem Betrag vom {{ start|d }} bis {{ end|d }}.</p>
+<p class="muted">Keine {{ 'Gutschrift' if refund else 'Abbuchung' }} mit passendem Betrag vom {{ start|d }} bis {{ end|d }}.</p>
 {% endif %}
 {% if others %}
 <details class="ff-others" {{ 'open' if not fits }}>
@@ -61,5 +68,5 @@
 </details>
 {% endif %}
 {% else %}
-<p class="muted">Keine passende Abbuchung vom {{ start|d }} bis {{ end|d }} gefunden. Zeitraum erweitern oder Betrag/Suchtext ändern.</p>
+<p class="muted">Keine passende {{ 'Gutschrift' if refund else 'Abbuchung' }} vom {{ start|d }} bis {{ end|d }} gefunden. Zeitraum erweitern oder Betrag/Suchtext ändern.</p>
 {% endif %}

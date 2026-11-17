@@ -132,8 +132,20 @@ class Invoice(Base):
     paid_on: Mapped[date | None] = mapped_column(Date)
     # Teilzahlungen: Summe der zugeordneten Buchungen, solange die Rechnung nicht ganz bezahlt ist (sonst leer)
     paid_amount: Mapped[float | None] = mapped_column(Float)
+    # Rückerstattung (Rücksendung, Gutschrift, Storno): Geld kam ganz oder teilweise zurück
+    refund_amount: Mapped[float | None] = mapped_column(Float)
+    refunded_on: Mapped[date | None] = mapped_column(Date)
+    refund_tx_id: Mapped[str | None] = mapped_column(String)
+    refund_tx_group_id: Mapped[str | None] = mapped_column(String)
 
     document: Mapped[Document] = relationship(back_populates="invoice")
+
+    @property
+    def net_amount(self) -> float | None:
+        """Was die Rechnung dich am Ende gekostet hat (Betrag abzüglich Rückerstattung)."""
+        if self.amount is None:
+            return None
+        return round(max(self.amount - (self.refund_amount or 0), 0), 2)
 
     @property
     def open_amount(self) -> float | None:

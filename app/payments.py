@@ -416,16 +416,54 @@ def search_defaults(doc: Document) -> dict:
             "invoice_number": number, "iban": iban}
 
 
+def refund_defaults(doc: Document) -> dict:
+    """Suche nach der Rückerstattung: ab Rechnung/Zahlung ein halbes Jahr, Betrag der Rechnung, Absender = Aussteller."""
+    inv = doc.invoice
+    base = (inv.paid_on or inv.invoice_date) if inv else None
+    base = base or doc.created
+    return {"amount": inv.amount if inv else None, "start": base, "end": base + timedelta(days=180) if base else None,
+            "q": (inv.issuer if inv else None) or doc.correspondent or ""}
+
+
+def set_refund(doc: Document, amount: float, day: date, tx: Transaction | None = None) -> str:
+    inv = doc.invoice
+    inv.refund_amount, inv.refunded_on = round(amount, 2), day
+    inv.refund_tx_id, inv.refund_tx_group_id = (tx.journal_id, tx.group_id) if tx else (None, None)
+    from app import pipeline
+
+    pipeline.set_source(doc, ["refund_amount", "refunded_on"], "firefly" if tx else "manual", confirmed=True)
+    full = inv.amount is not None and inv.refund_amount >= inv.amount - 0.005
+    return "vollständig erstattet" if full else f"teilweise erstattet – kostet dich noch {inv.net_amount:.2f} €".replace(".", ",")
+
+
+def clear_refund(doc: Document) -> None:
+    inv = doc.invoice
+    inv.refund_amount = inv.refunded_on = inv.refund_tx_id = inv.refund_tx_group_id = None
+
+
+def refund_transactions(session: Session, exclude_doc: int | None = None) -> dict[str, int]:
+    """Geldeingänge, die schon als Rückerstattung einer Rechnung gelten (tx_id -> Dokument)."""
+    return {inv.refund_tx_id: inv.document_id for inv in session.scalars(select(Invoice).where(Invoice.refund_tx_id.is_not(None)))
+            if inv.document_id != exclude_doc}
+
+
 def search(session: Session, doc: Document, client: FireflyClient, today: date, amount: float | None,
-           start: date, end: date, q: str = "", limit: int = 30) -> list[dict]:
+           start: date, end: date, q: str = "", limit: int = 30, refund: bool = False) -> list[dict]:
     """Abbuchungen im Zeitraum, die zu Betrag, Suchtext, Rechnungsnr. oder IBAN passen – beste zuerst."""
     from app import reimbursements
 
     d = search_defaults(doc)
     words = _words(q)
-    incoming = doc.kind == "reimbursement"  # Erstattung: Geldeingänge statt Abbuchungen
+    incoming = doc.kind == "reimbursement" or refund  # Erstattung/Rückerstattung: Geldeingänge statt Abbuchungen
     partial_ids: set[str] = set()
-    if incoming:
+    if refund:
+        from app.models import Reimbursement
+
+        used = {r.tx_id: r.document_id for r in session.scalars(select(Reimbursement).where(Reimbursement.tx_id.is_not(None)))}
+        used.update(refund_transactions(session, exclude_doc=doc.id))
+        current = doc.invoice.refund_tx_id if doc.invoice else None
+        current_state = "accepted"
+    elif incoming:
         from app.models import Reimbursement
 
         used = {r.tx_id: r.document_id for r in session.scalars(select(Reimbursement).where(Reimbursement.tx_id.is_not(None)))

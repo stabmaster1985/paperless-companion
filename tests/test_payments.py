@@ -370,3 +370,49 @@ def test_assigned_transaction_not_reused(db, settings):
         payments.match(s, [tx("900", date(2026, 10, 10), 78.0, "Stadtwerke", "Abschlag")], settings)
         assert [(m.invoice.document_id, m.tx_id) for m in s.query(PaymentMatch)] == [(2, "900")]  # nur für Dokument 2
         assert payments.used_elsewhere(s, exclude_doc=1) == {"900": 2}
+
+
+def test_refund_on_invoice(client, mock_api):
+    """Rücksendung/Gutschrift: Geldeingang aus Firefly oder von Hand; Rechnung bleibt bezahlt, es zählt der Rest."""
+    from app import tax
+
+    with session_scope() as s:
+        doc = s.get(Document, 1)
+        doc.review_state, doc.tags = "confirmed", ["Steuer"]
+        doc.invoice.amount, doc.invoice.status = 120.0, "paid"
+    route = mock_api.get(f"{FIREFLY}/api/v1/transactions").respond(json={"data": [{"type": "transactions", "id": "77", "attributes": {
+        "transactions": [{"transaction_journal_id": "770", "type": "deposit", "date": "2026-10-20T00:00:00+02:00", "amount": "40.00",
+                          "description": "Gutschrift Rücksendung", "source_name": "Stadtwerke"}]}}],
+        "meta": {"pagination": {"total_pages": 1}}})
+    page = client.get("/documents/1").text
+    assert "Rückerstattung zuordnen" in page
+    html = client.get("/documents/1/firefly-search", params={"refund": "1", "amount": "40", "q": "Stadtwerke",
+                                                             "start": "2026-10-01", "end": "2026-10-31"}).text
+    assert "Als Rückerstattung übernehmen" in html and dict(route.calls.last.request.url.params)["type"] == "deposit"
+    r = client.post("/documents/1/refund", data={"tx_id": "770", "group_id": "77", "date": "2026-10-20", "amount": "40.0",
+                                                 "counterparty": "Stadtwerke"})
+    assert "teilweise erstattet – kostet dich noch 80,00 €" in r.text
+    with session_scope() as s:
+        inv = s.get(Document, 1).invoice
+        assert inv.status == "paid" and inv.refund_amount == 40.0 and inv.net_amount == 80.0 and inv.refund_tx_id == "770"
+        assert payments.refund_transactions(s) == {"770": 1}
+    assert "40,00 € zurück · netto 80,00" in client.get("/invoices?status=all").text
+    client.post("/documents/1/refund", data={"amount": "120,00", "date": "2026-10-21"})  # von Hand: alles zurück
+    with session_scope() as s:
+        assert s.get(Document, 1).invoice.net_amount == 0.0 and s.get(Document, 1).invoice.refund_tx_id is None
+    client.post("/documents/1/refund", data={"action": "clear"})
+    with session_scope() as s:
+        assert s.get(Document, 1).invoice.refund_amount is None
+
+
+def test_tax_counts_net_after_refund(db, settings):
+    from app import tax
+
+    with db() as s:
+        inv = add_invoice(s, 1, 120.0, created=date(2026, 3, 1))
+        inv.document.tags, inv.document.review_state = ["Steuer"], "confirmed"
+        inv.refund_amount, inv.refunded_on = 40.0, date(2026, 3, 20)
+    settings.tax_tags = "Steuer"
+    with db() as s:
+        item = next(i for i in tax.collect(s, 2026, settings) if i.doc.id == 1)
+        assert item.amount == 80.0 and item.refund == "Rückerstattung 40,00 € am 20.03.2026, ursprünglich 120,00 €"
