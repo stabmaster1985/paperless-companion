@@ -707,6 +707,17 @@ function summaryToComment() {
   </div>
 </section>
 
+{% set hist = activity_of(doc.id) %}
+{% if hist %}
+<details class="card doc-history">
+  <summary>Verlauf dieses Dokuments ({{ hist|length }}{{ '+' if hist|length >= 10 }})</summary>
+  <ul class="plain">
+    {% for e in hist %}<li><small class="muted">{{ e.at.strftime('%d.%m.%Y %H:%M') }}</small> {{ e.text }}</li>{% endfor %}
+  </ul>
+  <small><a href="/history">ganzer Verlauf →</a></small>
+</details>
+{% endif %}
+
 <div class="actions secondary">
   <form method="post" action="/documents/{{ doc.id }}/reanalyze" class="inline"><button class="small" title="{{ TIPS.analysieren }}">Neu analysieren</button></form>
   {% if doc.kind != 'other' %}

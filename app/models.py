@@ -380,3 +380,16 @@ class CaseEntry(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     case: Mapped[Case] = relationship(back_populates="entries")
+
+
+class Activity(Base):
+    """Verlauf: was du im Companion getan hast (Bestätigen, Zuordnen, Vormerken …) und wohin es geführt hat."""
+
+    __tablename__ = "activities"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    text: Mapped[str] = mapped_column(String, default="")
+    path: Mapped[str] = mapped_column(String, default="")  # ausgelöste Aktion, z.B. /documents/12/confirm
+    document_id: Mapped[int | None] = mapped_column(Integer, index=True)
+    target: Mapped[str | None] = mapped_column(String)  # Seite, auf der du danach gelandet bist

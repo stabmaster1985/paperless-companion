@@ -85,6 +85,11 @@ prüfen und mit einem Klick übernehmen.
 
 ![Sammelaufgaben](docs/screenshots/sammelaufgaben.png)
 
+**Verlauf** – was du zuletzt bearbeitet hast, wo das Dokument jetzt steht (z.B. bezahlt, wartet auf Übertragung)
+und auf welcher Seite du danach gelandet bist; je Dokument auch auf der Dokumentseite.
+
+![Verlauf](docs/screenshots/verlauf.png)
+
 **Belege** – Abbuchungen aus Firefly III ohne Dokument in Paperless. Oben stehen die mit gefundenem Vorschlag
 (ein Klick genügt), darunter die, zu denen noch ein Beleg fehlt.
 

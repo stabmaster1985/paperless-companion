@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import appsettings, bulk, cancellations, cases, mqtt, reimbursements, series, help as helptexts, identifiers, learning, paperless_rules, receipts, rules as rule_proposals, deadlines, events, fields, highlight, ics, metadata, notify, payments, pipeline, reminders, retention, selection, tax
+from app import activity, appsettings, bulk, cancellations, cases, mqtt, reimbursements, series, help as helptexts, identifiers, learning, paperless_rules, receipts, rules as rule_proposals, deadlines, events, fields, highlight, ics, metadata, notify, payments, pipeline, reminders, retention, selection, tax
 from app.config import Settings, get_settings
 from app.db import get_session, init_db, session_scope
 from app.models import Case, CaseDocument, CaseEntry, Contract, Document, Invoice, KeyValue, PaymentMatch, ReceiptCheck, RuleProposal, RetentionLog, RetentionRule, Warranty
@@ -119,6 +119,13 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             inv = s.scalar(select(Invoice).where(Invoice.refund_doc_id == doc.id))
             return {"id": inv.document_id, "title": inv.document.title, "amount": inv.refund_amount} if inv else None
 
+    def activity_of(doc_id: int) -> list:
+        tz = ZoneInfo(settings.timezone)
+        with session_scope() as s:
+            return [{"at": e.at.replace(tzinfo=timezone.utc).astimezone(tz), "text": e.text, "target": e.target}
+                    for e in activity.recent(s, document_id=doc_id, limit=10)]
+
+    templates.env.globals["activity_of"] = activity_of
     templates.env.globals["refund_docs_of"] = refund_docs_of
     templates.env.globals["refund_of"] = refund_of
     templates.env.globals["doc_title"] = doc_title
@@ -148,6 +155,27 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         response = await call_next(request)
         if request.method != "GET" and response.status_code < 400 and (bridge := getattr(app.state, "mqtt", None)):
             bridge.notify()
+        return response
+
+    @app.middleware("http")
+    async def record_activity(request: Request, call_next):
+        """Verlauf: jede Aktion mit ihrer Meldung, dem Dokument und der Seite, auf der du gelandet bist."""
+        response = await call_next(request)
+        if request.method != "POST" or response.status_code >= 400:
+            return response
+        try:
+            target, text = None, ""
+            if response.status_code in (302, 303) and (location := response.headers.get("location")):
+                target, text = activity.split_target(location)
+            elif response.headers.get("content-type", "").startswith("application/json"):
+                body = b"".join([chunk async for chunk in response.body_iterator])
+                response = Response(content=body, status_code=response.status_code, headers=dict(response.headers),
+                                    media_type="application/json")
+                text = str((json.loads(body or b"{}") or {}).get("msg") or "")
+            if text or target:
+                activity.submit(request.url.path, text, target)
+        except Exception as exc:  # noqa: BLE001 – der Verlauf darf nie eine Aktion stören
+            log.warning("Verlauf konnte nicht geschrieben werden: %s", exc)
         return response
 
     @app.middleware("http")
@@ -316,6 +344,17 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         doc.auto_confirmed = False
         payments.record_confirmed_payment(session, doc)
         doc.writeback_pending = True
+
+    @app.get("/history", response_class=HTMLResponse)
+    def history(request: Request, session: Session = Depends(get_session)):
+        """Verlauf: was du zuletzt getan hast und wo das Dokument jetzt steht."""
+        entries = activity.recent(session, limit=300)
+        docs = {d.id: d for d in session.scalars(select(Document).where(
+            Document.id.in_({e.document_id for e in entries if e.document_id} or {-1})))}
+        tz = ZoneInfo(settings.timezone)
+        local = lambda dt: dt.replace(tzinfo=timezone.utc).astimezone(tz)  # noqa: E731
+        return render(request, "history.html", entries=entries, docs=docs, local=local, state_of=activity.state_of,
+                      page_name=activity.page_name)
 
     @app.get("/bulk", response_class=HTMLResponse)
     def bulk_page(request: Request, msg: str = "", session: Session = Depends(get_session)):

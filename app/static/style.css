@@ -854,3 +854,13 @@ button:disabled, button:disabled:hover { opacity: .5; cursor: not-allowed; }
 .bulk-list > li > label input { width: 1.1rem; height: 1.1rem; }
 .bulk-list > li > div { min-width: 0; overflow-wrap: anywhere; }
 .bulk-list > li.sure { background: color-mix(in srgb, var(--ok-bg) 60%, transparent); }
+
+/* Verlauf */
+.history-filter { width: 24rem; max-width: 100%; margin-bottom: .5rem; }
+.history-day { font-size: 1rem; margin: 1rem 0 .3rem; color: var(--muted); }
+.history-item { display: flex; gap: .75rem; padding: .45rem .6rem; background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); margin-bottom: .35rem; }
+.history-time { color: var(--muted); font-variant-numeric: tabular-nums; min-width: 3rem; }
+.history-body { min-width: 0; overflow-wrap: anywhere; }
+.doc-history { margin-top: .75rem; }
+.doc-history li { margin: .15rem 0; }

@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% from "macros.html" import doclink %}
+{% block content %}
+<h1>Verlauf</h1>
+<p class="muted">Was du zuletzt im Companion getan hast – mit dem Dokument, wo es jetzt steht, und der Seite, auf der du danach
+  gelandet bist. Der Verlauf bleibt im Companion (die letzten 2000 Aktionen).</p>
+{% if entries %}
+<input type="search" class="history-filter" placeholder="Verlauf filtern: Dokument, Aktion …" aria-label="Verlauf filtern"
+  oninput="historyFilter(this.value)">
+{% set ns = namespace(day=none) %}
+<div class="history">
+  {% for e in entries %}{% set at = local(e.at) %}{% set d = docs.get(e.document_id) %}
+  {% if at.date() != ns.day %}{% set ns.day = at.date() %}<h2 class="history-day">{{ at.date()|d }}{% if at.date() == today %} · heute{% endif %}</h2>{% endif %}
+  <div class="history-item" data-text="{{ (e.text ~ ' ' ~ (d.title if d else '') ~ ' ' ~ (d.correspondent if d and d.correspondent else ''))|lower }}">
+    <span class="history-time">{{ at.strftime('%H:%M') }}</span>
+    <div class="history-body">
+      <div>{{ e.text }}</div>
+      <small class="muted">
+        {% if d %}<a href="/documents/{{ d.id }}">{{ d.title or ('#' ~ d.id) }}</a> {{ doclink(d.id) }}
+          {% set st = state_of(d) %}{% if st %} · jetzt: <strong>{{ st }}</strong>{% endif %}
+        {% elif e.document_id %}Dokument #{{ e.document_id }}{% endif %}
+        {% if e.target and not (d and e.target.startswith('/documents/' ~ d.id)) %}{{ ' · ' if d or e.document_id }}<a href="{{ e.target }}">weiter auf: {{ page_name(e.target) }}</a>{% endif %}
+      </small>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+<script>
+function historyFilter(q) {
+  q = q.trim().toLowerCase();
+  document.querySelectorAll('.history-item').forEach((el) => { el.hidden = q && !el.dataset.text.includes(q); });
+}
+</script>
+{% else %}
+<p class="empty">Noch nichts im Verlauf. Sobald du etwas bestätigst, zuordnest oder vormerkst, steht es hier.</p>
+{% endif %}
+{% endblock %}

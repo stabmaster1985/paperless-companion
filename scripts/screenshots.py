@@ -183,6 +183,20 @@ def start_demo(data: Path, port: int) -> None:
     with session_scope() as s:
         series.refresh(s)  # Serien wiederkehrender Dokumente (Abschläge, Lohnabrechnungen)
 
+    with session_scope() as s:  # Verlauf: ein paar erfundene Aktionen
+        from datetime import datetime, timedelta, timezone
+
+        from app.models import Activity
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        for minutes, text, path, doc_id, target in [
+                (95, "Art geändert: Rechnung", "/documents/3/kind", 3, "/documents/3"),
+                (60, "Firefly-Buchung vom 10.10.2026 (78,00 €) als bezahlt übernommen", "/documents/1/payment", 1, None),
+                (42, "Beleg zugeordnet (nur im Companion)", "/receipts/1/link", 1, "/receipts?state=open"),
+                (15, "„Handyvertrag“ ist als gekündigt markiert (endet 31.12.2026)", "/cancellations/2", 2, "/contracts"),
+                (3, "2 Dokumente bestätigt", "/inbox/confirm", None, "/inbox")]:
+            s.add(Activity(at=now - timedelta(minutes=minutes), text=text, path=path, document_id=doc_id, target=target))
+
     with session_scope() as s:  # Belege: Abbuchungen mit und ohne passendes Dokument
         def cand(doc_id, reason):
             return {"id": doc_id, "title": s.get(Document, doc_id).title, "reason": reason}
@@ -241,7 +255,7 @@ def shoot(base: str) -> None:
         for name, path, width, height in [
                 ("dashboard", "/", 1280, 960), ("inbox", "/inbox", 1280, 720), ("dokument", "/documents/1", 1280, 960),
                 ("rechnungen", "/invoices", 1280, 760), ("erstattungen", "/reimbursements", 1280, 900),
-                ("serien", "/series", 1280, 620), ("belege", "/receipts", 1280, 900), ("sammelaufgaben", "/bulk", 1280, 1000),
+                ("serien", "/series", 1280, 620), ("belege", "/receipts", 1280, 900), ("sammelaufgaben", "/bulk", 1280, 1000), ("verlauf", "/history", 1280, 640),
                 ("erstattung", "/documents/600", 1280, 1100), ("handy-dashboard", "/", 390, 844)]:
             p = page(width, height)
             p.goto(base + path)
