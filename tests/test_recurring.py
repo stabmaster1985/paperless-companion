@@ -78,6 +78,7 @@ def test_recurring_page_actions(client):
                           *monthly("Streamingdienst AG", 12.99, 12)])
     page = client.get("/recurring").text
     assert "Betrag geändert (1)" in page and "Ohne Vertrag (1)" in page and "Monatsbeitrag auf 34,90 € setzen" in page
+    assert "12 Abbuchungen ansehen" in page and "03.11.2026" in page  # einzelne Buchungen aufklappbar
     with session_scope() as s:
         cid = s.get(Document, 902).contract.id
         key = next(x.key for x in recurring.stored(s) if x.payee == "Streamingdienst AG")

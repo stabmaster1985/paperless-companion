@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "macros.html" import doclink %}
+{% from "macros.html" import doclink, txlinks %}
 {% block content %}
 <div class="head">
   <h1>Regelmäßige Zahlungen</h1>
@@ -9,6 +9,12 @@
 <p class="muted">Aus deinen Firefly-Abbuchungen erkannt: Zahlungen an denselben Empfänger in festem Rhythmus (monatlich, vierteljährlich,
   halbjährlich, jährlich). Hier siehst du, welche noch keinem Vertrag zugeordnet sind, wo sich der Betrag geändert hat und wo eine
   Abbuchung ausgeblieben ist. Alles bleibt im Companion.</p>
+
+{% macro bookings(s) %}<details class="rec-bookings"><summary>{{ s.amounts|length }} Abbuchungen ansehen</summary>
+  <table class="list compact"><tbody>
+    {% for b in s.bookings %}<tr><td class="nowrap">{{ b.date|d }}</td><td class="nowrap">{{ b.amount|eur }}</td>
+      <td><small class="muted">{{ b.description }}</small></td><td class="nowrap">{% if b.group_id %}{{ txlinks(b.group_id, b.date) }}{% endif %}</td></tr>{% endfor %}
+  </tbody></table></details>{% endmacro %}
 
 {% macro dismiss(token, label='ausblenden') %}<form method="post" action="/recurring/action" class="inline">
   <input type="hidden" name="action" value="dismiss"><input type="hidden" name="token" value="{{ token }}">
@@ -27,7 +33,8 @@
     <div><strong><a href="{{ c.url }}">{{ c.label }}</a></strong> {% if c.document_id %}{{ doclink(c.document_id) }}{% endif %}
       <small class="muted">· {{ s.payee }} · {{ s.rhythm }}</small><br>
       {% if item.change %}<span>Abbuchung {{ item.change[0]|eur }} → <strong>{{ item.change[1]|eur }}</strong> seit {{ item.change[2][8:10] }}.{{ item.change[2][5:7] }}.{{ item.change[2][:4] }}</span><br>{% endif %}
-      <small>Im Vertrag: {{ c.monthly_cost|eur if c.monthly_cost else 'kein Monatsbeitrag' }} pro Monat · laut Abbuchungen: <strong>{{ s.monthly|eur }}</strong> pro Monat</small></div>
+      <small>Im Vertrag: {{ c.monthly_cost|eur if c.monthly_cost else 'kein Monatsbeitrag' }} pro Monat · laut Abbuchungen: <strong>{{ s.monthly|eur }}</strong> pro Monat</small>
+      {{ bookings(s) }}</div>
     <div class="rec-actions">
       {% if item.cost_differs or not c.monthly_cost %}
       <form method="post" action="/recurring/action" class="inline"><input type="hidden" name="action" value="cost">
@@ -50,7 +57,8 @@
   <div class="rec-item">
     <div><strong>{% if item.contract %}<a href="{{ item.contract.url }}">{{ item.contract.label }}</a>{% else %}{{ s.payee }}{% endif %}</strong>
       <small class="muted">· {{ s.rhythm }} · {{ s.last_amount|eur }}</small><br>
-      <small>Letzte Abbuchung {{ s.last_date|d }} – erwartet um den <strong>{{ s.next_date|d }}</strong></small></div>
+      <small>Letzte Abbuchung {{ s.last_date|d }} – erwartet um den <strong>{{ s.next_date|d }}</strong></small>
+      {{ bookings(s) }}</div>
     <div class="rec-actions">{{ dismiss('missing:' ~ s.key ~ ':' ~ s.next_date.isoformat(), 'erledigt / ausblenden') }}</div>
   </div>
   {% endfor %}
@@ -66,7 +74,8 @@
   {% for s in data.unknown %}
   <div class="rec-item">
     <div><strong>{{ s.payee }}</strong> <small class="muted">· {{ s.rhythm }} · {{ s.amounts|length }} Abbuchungen seit {{ s.dates[0][8:10] }}.{{ s.dates[0][5:7] }}.{{ s.dates[0][:4] }}</small><br>
-      <small>{{ s.last_amount|eur }} ({{ s.monthly|eur }} pro Monat) · zuletzt {{ s.last_date|d }} · nächste um den {{ s.next_date|d }}</small></div>
+      <small>{{ s.last_amount|eur }} ({{ s.monthly|eur }} pro Monat) · zuletzt {{ s.last_date|d }} · nächste um den {{ s.next_date|d }}</small>
+      {{ bookings(s) }}</div>
     <div class="rec-actions">
       <form method="post" action="/recurring/action" class="rec-actions">
         <input type="hidden" name="action" value="link"><input type="hidden" name="key" value="{{ s.key }}">
@@ -92,7 +101,8 @@
   <p class="muted">Seit einer Weile keine Abbuchung mehr – vermutlich gekündigt. Nur zur Info; als Abo anlegen geht trotzdem.</p>
   <ul class="plain">
     {% for s in data.ended %}
-    <li><strong>{{ s.payee }}</strong> <small class="muted">· {{ s.rhythm }} · {{ s.last_amount|eur }} · {{ s.dates[0][8:10] }}.{{ s.dates[0][5:7] }}.{{ s.dates[0][:4] }} bis {{ s.last_date|d }} ({{ s.amounts|length }}×)</small></li>
+    <li><strong>{{ s.payee }}</strong> <small class="muted">· {{ s.rhythm }} · {{ s.last_amount|eur }} · {{ s.dates[0][8:10] }}.{{ s.dates[0][5:7] }}.{{ s.dates[0][:4] }} bis {{ s.last_date|d }} ({{ s.amounts|length }}×)</small>
+      {{ bookings(s) }}</li>
     {% endfor %}
   </ul>
 </details>

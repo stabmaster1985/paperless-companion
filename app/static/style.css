@@ -880,3 +880,9 @@ button:disabled, button:disabled:hover { opacity: .5; cursor: not-allowed; }
 .cancel-pop > summary { cursor: pointer; color: var(--accent); font-size: .85rem; list-style: none; white-space: nowrap; }
 .cancel-pop > summary::-webkit-details-marker { display: none; }
 .cancel-pop-form { display: flex; flex-direction: column; gap: .35rem; margin-top: .35rem; }
+.rec-bookings { margin-top: .25rem; font-size: .9rem; }
+.rec-bookings > summary { cursor: pointer; color: var(--accent); }
+.rec-bookings table.compact td { padding: .2rem .5rem; }
+.rec-item { align-items: flex-start; }
+.rec-item > div:first-child { min-width: 0; flex: 1 1 34rem; }
+.rec-bookings table.compact { width: auto; min-width: 22rem; }

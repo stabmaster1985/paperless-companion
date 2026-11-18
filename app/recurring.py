@@ -33,6 +33,8 @@ class Series:
     amounts: list[float]
     dates: list[str]
     tx_ids: list[str] = field(default_factory=list)
+    group_ids: list[str] = field(default_factory=list)  # für Links zur Buchung in Firefly
+    descriptions: list[str] = field(default_factory=list)
     contract_id: int | None = None
     covered: str | None = None  # wodurch belegt: Vertrag, laufende Zahlung, Rechnungen
 
@@ -53,6 +55,16 @@ class Series:
     @property
     def monthly(self) -> float:
         return round(self.last_amount / self.months, 2)
+
+    @property
+    def bookings(self) -> list[dict]:
+        """Einzelne Abbuchungen, neueste zuerst (für die Anzeige)."""
+        rows = []
+        for i, day in enumerate(self.dates):
+            rows.append({"date": date.fromisoformat(day), "amount": self.amounts[i],
+                         "group_id": self.group_ids[i] if i < len(self.group_ids) else None,
+                         "description": self.descriptions[i] if i < len(self.descriptions) else ""})
+        return rows[::-1]
 
     @property
     def rhythm(self) -> str:
@@ -131,7 +143,9 @@ def detect(transactions: list[Transaction], ignored: list[str] | None = None) ->
                 continue
             found.append(Series(key=f"{key}|{months}|{round(stream[0].amount)}", payee=stream[-1].counterparty,
                                 months=months, amounts=[t.amount for t in stream],
-                                dates=[t.date.isoformat() for t in stream], tx_ids=[t.journal_id for t in stream]))
+                                dates=[t.date.isoformat() for t in stream], tx_ids=[t.journal_id for t in stream],
+                                group_ids=[t.group_id for t in stream],
+                                descriptions=[(t.description or "")[:120] for t in stream]))
     return found
 
 
@@ -202,7 +216,8 @@ def run(session: Session, transactions: list[Transaction]) -> int:
 
 def stored(session: Session) -> list[Series]:
     data = _kv(session, KEY)
-    return evaluate(session, [Series(**d) for d in data] if isinstance(data, list) else [])
+    known = set(Series.__dataclass_fields__)
+    return evaluate(session, [Series(**{k: v for k, v in d.items() if k in known}) for d in data] if isinstance(data, list) else [])
 
 
 def findings(session: Session, today: date) -> dict:
