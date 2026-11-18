@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="head">
+  <h1>{{ c.label }} <span class="tag">Abo ohne Dokument</span></h1>
+  <a class="small" href="/contracts">← Verträge</a>
+</div>
+{% if msg %}<div class="notice ok">{{ msg }}</div>{% endif %}
+<p class="muted">Dieses Abo gibt es nur im Companion – ohne Dokument in Paperless. Es zählt wie ein Vertrag: Fixkosten, Kündigungsfrist,
+  Erinnerungen, Preisänderungen. Abbuchungen an den Firefly-Empfänger unten gelten auf der Belegseite als belegt.</p>
+
+{% if deadline %}
+<div class="deadline">
+  {% if c.status == 'cancelled' %}Gekündigt am {{ c.cancelled_on|d }}{% if c.cancel_effective %}, endet am <strong>{{ c.cancel_effective|d }}</strong>{% endif %}.
+  {% elif deadline.missing_info %}Für eine Fristberechnung fehlen Angaben.
+  {% elif deadline.anytime %}Jederzeit kündbar – frühestes Vertragsende bei Kündigung heute: <strong>{{ deadline.term_end|d }}</strong>.
+  {% elif deadline.cancel_by %}Kündigung muss eingehen bis <strong>{{ deadline.cancel_by|d }}</strong> (Vertragsende {{ deadline.term_end|d }}).
+  {% else %}Vertrag {{ 'endete' if deadline.ended else 'endet automatisch' }} am <strong>{{ deadline.term_end|d }}</strong>.{% endif %}
+</div>
+{% endif %}
+
+<form method="post" action="/contracts/{{ c.id }}" class="card">
+  <div class="grid">
+    <label class="field"><span>Bezeichnung</span><input name="name" value="{{ c.name or '' }}" required></label>
+    <label class="field"><span>Anbieter</span><input name="provider" value="{{ c.provider or '' }}"></label>
+    <label class="field"><span>Empfänger in Firefly</span><input name="payee" value="{{ c.payee or '' }}"
+      title="Name, unter dem die Abbuchungen in Firefly erscheinen – darüber erkennt der Companion sie"></label>
+    <label class="field"><span>Kundennummer</span><input name="contract_number" value="{{ c.contract_number or '' }}"></label>
+    <label class="field"><span>Kosten pro Monat (€)</span><input name="monthly_cost" inputmode="decimal" value="{{ '%.2f'|format(c.monthly_cost) if c.monthly_cost is not none }}"></label>
+    <label class="field"><span>Beginn</span><input type="date" name="start_date" value="{{ c.start_date.isoformat() if c.start_date }}"></label>
+    <label class="field"><span>Mindestlaufzeit (Monate)</span><input name="initial_term_months" inputmode="numeric" value="{{ c.initial_term_months or '' }}"></label>
+    <label class="field"><span>Danach</span><select name="renewal_mode">
+      {% for k, l in [('indefinite', 'läuft unbefristet weiter'), ('renews', 'verlängert sich automatisch'), ('none', 'endet automatisch')] %}<option value="{{ k }}" {{ 'selected' if c.renewal_mode == k }}>{{ l }}</option>{% endfor %}</select></label>
+    <label class="field"><span>Verlängerung um (Monate)</span><input name="renewal_months" inputmode="numeric" value="{{ c.renewal_months or '' }}"></label>
+    <label class="field"><span>Kündigungsfrist</span><input name="notice_value" inputmode="numeric" value="{{ c.notice_value or '' }}"></label>
+    <label class="field"><span>Einheit</span><select name="notice_unit">
+      {% for k, l in [('months', 'Monate'), ('weeks', 'Wochen'), ('days', 'Tage')] %}<option value="{{ k }}" {{ 'selected' if c.notice_unit == k }}>{{ l }}</option>{% endfor %}</select></label>
+    <label class="field"><span>Kündigung zum</span><select name="notice_to">
+      {% for k, l in [('any', 'beliebigen Tag'), ('month_end', 'Monatsende'), ('term_end', 'Laufzeitende'), ('quarter_end', 'Quartalsende')] %}<option value="{{ k }}" {{ 'selected' if c.notice_to == k }}>{{ l }}</option>{% endfor %}</select></label>
+    <label class="field"><span>Festes Laufzeitende</span><input type="date" name="end_date" value="{{ c.end_date.isoformat() if c.end_date }}"></label>
+    <label class="field"><span>Status</span><select name="status">
+      {% for k, l in [('active', 'aktiv'), ('cancelled', 'gekündigt'), ('ended', 'beendet')] %}<option value="{{ k }}" {{ 'selected' if c.status == k }}>{{ l }}</option>{% endfor %}</select></label>
+    <label class="field"><span>Gekündigt am</span><input type="date" name="cancelled_on" value="{{ c.cancelled_on.isoformat() if c.cancelled_on }}"></label>
+  </div>
+  <label class="field wide"><span>Notizen</span><textarea name="notes" rows="2">{{ c.notes or '' }}</textarea></label>
+  <div class="actions"><button class="primary" name="action" value="save">Speichern</button>
+    <button class="small link" name="action" value="delete" formnovalidate onclick="return confirm('Abo „{{ c.label }}“ löschen?')">Abo löschen</button></div>
+</form>
+
+{% if series %}
+<section class="card">
+  <h2>Abbuchungen</h2>
+  {% for s in series %}
+  <p><strong>{{ s.payee }}</strong> · {{ s.rhythm }} · zuletzt {{ s.last_date|d }} über {{ s.last_amount|eur }} · nächste um den {{ s.next_date|d }}</p>
+  <ul class="plain">{% for i in range(s.dates|length)|reverse %}{% set d = s.dates[i] %}<li><small>{{ d[8:10] }}.{{ d[5:7] }}.{{ d[:4] }} · {{ s.amounts[i]|eur }}</small></li>{% endfor %}</ul>
+  {% endfor %}
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>Dokument anhängen</h2>
+  <p class="muted">Kommt doch noch ein Dokument (Vertragsbestätigung, Rechnung als PDF), hänge es an – dann wird aus dem Abo ein normaler Vertrag.</p>
+  <form method="post" action="/contracts/{{ c.id }}" class="inline">
+    <input type="hidden" name="action" value="attach">
+    <input name="doc_id" inputmode="numeric" placeholder="Paperless-ID" aria-label="Paperless-ID" required>
+    <button class="small">Anhängen</button>
+  </form>
+</section>
+{% endblock %}

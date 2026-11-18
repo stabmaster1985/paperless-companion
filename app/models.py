@@ -86,10 +86,14 @@ class Document(Base):
 
 
 class Contract(Base):
+    """Vertrag. Ohne Dokument (document_id leer) ist es ein „Abo ohne Dokument“ (z.B. Streaming), das nur im
+    Companion existiert und über den Firefly-Empfänger (payee) seine Abbuchungen erkennt."""
+
     __tablename__ = "contracts"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    document_id: Mapped[int] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"), unique=True)
+    document_id: Mapped[int | None] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"), unique=True, nullable=True)
+    payee: Mapped[str | None] = mapped_column(String)  # Empfänger in Firefly (für Abos ohne Dokument)
     name: Mapped[str] = mapped_column(String, default="")
     provider: Mapped[str | None] = mapped_column(String)
     contract_number: Mapped[str | None] = mapped_column(String)
@@ -113,7 +117,19 @@ class Contract(Base):
     cancellation_doc_id: Mapped[int | None] = mapped_column(Integer)
     notes: Mapped[str | None] = mapped_column(Text)
 
-    document: Mapped[Document] = relationship(back_populates="contract")
+    document: Mapped[Document | None] = relationship(back_populates="contract")
+
+    @property
+    def virtual(self) -> bool:
+        return self.document_id is None
+
+    @property
+    def url(self) -> str:
+        return f"/documents/{self.document_id}" if self.document_id else f"/contracts/{self.id}"
+
+    @property
+    def label(self) -> str:
+        return self.name or self.provider or (f"#{self.document_id}" if self.document_id else "Abo")
 
 
 class Invoice(Base):

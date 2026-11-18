@@ -196,10 +196,19 @@ def start_demo(data: Path, port: int) -> None:
         start = date.today().replace(day=3) - relativedelta(months=11)
         demo = [rec_tx(i, start + relativedelta(months=i), 19.99 if i < 8 else 24.99, s.get(Document, 2).correspondent or "Mobilfunk")
                 for i in range(12)]
-        demo += [rec_tx(i, start + relativedelta(months=i), 12.99, "Streamingdienst Muster") for i in range(12)]
-        demo += [rec_tx(i, start + relativedelta(months=3 * i, days=10), 89.0, "Tierversicherung Muster") for i in range(4)]
-        demo += [rec_tx(i, start + relativedelta(months=i, days=5), 39.0, "Zeitschriftenverlag Muster") for i in range(7)]
+        demo += [rec_tx(i, start + relativedelta(months=i), 12.99, "Streamingdienst Flimmer") for i in range(12)]
+        demo += [rec_tx(i, start + relativedelta(months=3 * i, days=10), 89.0, "Tierversicherung Pfote") for i in range(4)]
+        demo += [rec_tx(i, start + relativedelta(months=i, days=5), 39.0, "Zeitschriftenverlag Seite") for i in range(7)]
         recurring.run(s, demo)
+        from app.models import Contract
+
+        abo = Contract(name="Streamingdienst", provider="Streamingdienst Flimmer", payee="Streamingdienst Flimmer",
+                       monthly_cost=12.99, start_date=start, renewal_mode="indefinite", notice_value=1,
+                       notice_unit="months", notice_to="any", status="active")
+        s.add(abo)
+        s.flush()
+        streaming = next(x for x in recurring.stored(s) if x.payee == "Streamingdienst Flimmer")
+        recurring.link_contract(s, streaming.key, abo.id)
 
     with session_scope() as s:  # Verlauf: ein paar erfundene Aktionen
         from datetime import datetime, timedelta, timezone
@@ -273,7 +282,7 @@ def shoot(base: str) -> None:
         for name, path, width, height in [
                 ("dashboard", "/", 1280, 960), ("inbox", "/inbox", 1280, 720), ("dokument", "/documents/1", 1280, 960),
                 ("rechnungen", "/invoices", 1280, 760), ("erstattungen", "/reimbursements", 1280, 900),
-                ("serien", "/series", 1280, 620), ("belege", "/receipts", 1280, 900), ("sammelaufgaben", "/bulk", 1280, 1000), ("verlauf", "/history", 1280, 640), ("regelmaessig", "/recurring", 1280, 1000),
+                ("serien", "/series", 1280, 620), ("belege", "/receipts", 1280, 900), ("sammelaufgaben", "/bulk", 1280, 1000), ("verlauf", "/history", 1280, 640), ("regelmaessig", "/recurring", 1280, 1000), ("vertraege", "/contracts", 1280, 640),
                 ("erstattung", "/documents/600", 1280, 1100), ("handy-dashboard", "/", 390, 844)]:
             p = page(width, height)
             p.goto(base + path)

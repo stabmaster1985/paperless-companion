@@ -7,9 +7,9 @@
 {% set rc = recurring_counts %}
 {% if rc.unknown or rc.changed or rc.missing %}
 <div class="notice warn">Aus deinen Abbuchungen:
-  {% if rc.changed %}<strong>{{ rc.changed }}</strong> Verträge mit geändertem Betrag{% endif %}{% if rc.changed and (rc.missing or rc.unknown) %} · {% endif %}
-  {% if rc.missing %}<strong>{{ rc.missing }}</strong> ausgebliebene Abbuchungen{% endif %}{% if rc.missing and rc.unknown %} · {% endif %}
-  {% if rc.unknown %}<strong>{{ rc.unknown }}</strong> regelmäßige Zahlungen ohne Vertrag{% endif %}
+  {% if rc.changed %}<strong>{{ rc.changed }}</strong> {{ 'Vertrag' if rc.changed == 1 else 'Verträge' }} mit geändertem Betrag{% endif %}{% if rc.changed and (rc.missing or rc.unknown) %} · {% endif %}
+  {% if rc.missing %}<strong>{{ rc.missing }}</strong> {{ 'ausgebliebene Abbuchung' if rc.missing == 1 else 'ausgebliebene Abbuchungen' }}{% endif %}{% if rc.missing and rc.unknown %} · {% endif %}
+  {% if rc.unknown %}<strong>{{ rc.unknown }}</strong> {{ 'regelmäßige Zahlung' if rc.unknown == 1 else 'regelmäßige Zahlungen' }} ohne Vertrag{% endif %}
   – <a href="/recurring">ansehen →</a></div>
 {% endif %}
 
@@ -25,7 +25,7 @@
     <div class="grid">
       <label class="field"><span>Vertrag</span>
         <select name="contract_id"><option value="">– bitte wählen –</option>
-          {% for c in all_contracts %}<option value="{{ c.id }}" {{ 'selected' if item.contract and item.contract.id == c.id }}>{{ c.name or c.provider or ('#' ~ c.document_id) }}{% if c.provider and c.name %} ({{ c.provider }}){% endif %} · #{{ c.document_id }}{% if c.status != 'active' %} – {{ 'gekündigt' if c.status == 'cancelled' else 'beendet' }}{% endif %}</option>{% endfor %}
+          {% for c in all_contracts %}<option value="{{ c.id }}" {{ 'selected' if item.contract and item.contract.id == c.id }}>{{ c.label }}{% if c.provider and c.name %} ({{ c.provider }}){% endif %}{% if c.document_id %} · #{{ c.document_id }}{% else %} · ohne Dokument{% endif %}{% if c.status != 'active' %} – {{ 'gekündigt' if c.status == 'cancelled' else 'beendet' }}{% endif %}</option>{% endfor %}
         </select></label>
       <label class="field"><span>oder Paperless-ID</span><input name="contract_doc" inputmode="numeric" placeholder="z.B. 1234"
         title="Paperless-ID des Vertragsdokuments – hat Vorrang vor der Auswahl"></label>
@@ -40,6 +40,10 @@
   {% endfor %}
 </section>
 {% endif %}
+<form method="post" action="/contracts/new" class="inline new-abo">
+  <input name="name" placeholder="z.B. Netflix" aria-label="Name des Abos" required>
+  <button class="small" title="Abo ohne Dokument anlegen – nur im Companion, z.B. für Streaming oder App-Abos">Abo ohne Dokument anlegen</button>
+</form>
 {% if rows %}
 <div class="table-wrap"><table class="list">
   <thead><tr><th>Vertrag</th><th>Kündigen bis</th><th class="hide-sm">Laufzeitende</th><th class="hide-sm">Frist</th><th>€/Monat</th><th></th></tr></thead>
@@ -47,7 +51,7 @@
   {% for c, d in rows %}
     {% set days = (d.cancel_by - today).days if d.cancel_by else none %}
     <tr class="{{ 'inactive' if c.status != 'active' }}">
-      <td><a href="/documents/{{ c.document_id }}">{{ c.name }}</a> {{ doclink(c.document_id) }}<br><small>{{ c.provider or '' }}</small></td>
+      <td><a href="{{ c.url }}">{{ c.label }}</a> {% if c.document_id %}{{ doclink(c.document_id) }}{% else %}<span class="tag" title="Nur im Companion – kein Dokument in Paperless">Abo ohne Dokument</span>{% endif %}<br><small>{{ c.provider or '' }}</small></td>
       <td class="nowrap">
         {% if c.status == 'cancelled' %}<span class="tag">gekündigt {{ c.cancelled_on|d }}</span>
           {% if c.cancellation_doc_id %}<br><small><a href="/documents/{{ c.cancellation_doc_id }}">Bestätigung</a> {{ doclink(c.cancellation_doc_id) }}</small>{% endif %}

@@ -875,3 +875,5 @@ button:disabled, button:disabled:hover { opacity: .5; cursor: not-allowed; }
 .rec-id { width: 9rem; }
 .rec-changed { border-top: 4px solid #d97706; }
 .rec-missing { border-top: 4px solid #b91c1c; }
+.new-abo { display: flex; flex-wrap: wrap; gap: .4rem; margin: .25rem 0 .75rem; }
+.new-abo input { width: 14rem; }

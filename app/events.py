@@ -29,10 +29,13 @@ class Event:
     key: str
     amount: float | None = None
     case_id: int | None = None
+    contract_id: int | None = None  # Abo ohne Dokument
 
     @property
     def url(self) -> str:
-        return f"/cases/{self.case_id}" if self.case_id else f"/documents/{self.document_id}"
+        if self.case_id:
+            return f"/cases/{self.case_id}"
+        return f"/documents/{self.document_id}" if self.document_id else f"/contracts/{self.contract_id}"
 
     @property
     def label(self) -> str:
@@ -57,15 +60,15 @@ def collect(session: Session, today: date) -> list[Event]:
         result = deadlines.compute(deadlines.terms_from_contract(c), today)
         if result.cancel_by and not result.anytime:
             events.append(Event(
-                date=result.cancel_by, type="cancel", title=c.name,
+                date=result.cancel_by, type="cancel", title=c.label,
                 detail=f"Kündigung muss bis {fmt_date(result.cancel_by)} eingehen, sonst Verlängerung "
                        f"(aktuelles Laufzeitende {fmt_date(result.term_end)}).",
-                document_id=c.document_id, key=f"contract:{c.id}:cancel",
+                document_id=c.document_id, key=f"contract:{c.id}:cancel", contract_id=c.id,
             ))
         elif c.renewal_mode == "none" and result.term_end and not result.ended:
             events.append(Event(
-                date=result.term_end, type="term_end", title=c.name,
-                detail="Vertrag endet automatisch.", document_id=c.document_id, key=f"contract:{c.id}:end",
+                date=result.term_end, type="term_end", title=c.label,
+                detail="Vertrag endet automatisch.", document_id=c.document_id, key=f"contract:{c.id}:end", contract_id=c.id,
             ))
 
     invoices = session.scalars(

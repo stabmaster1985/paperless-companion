@@ -1089,6 +1089,66 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         msg = f"„{contract.name or contract.provider}“ ist als gekündigt markiert" + (f" (endet {end:%d.%m.%Y})" if end else "")
         return RedirectResponse(f"/contracts?msg={quote(msg)}", status_code=303)
 
+    def new_abo(session: Session, name: str, payee: str | None, monthly: float | None, start: date | None) -> Contract:
+        contract = Contract(document_id=None, name=name, provider=name, payee=payee, monthly_cost=monthly, start_date=start,
+                            renewal_mode="indefinite", notice_value=1, notice_unit="months", notice_to="any", status="active")
+        session.add(contract)
+        session.flush()
+        return contract
+
+    @app.post("/contracts/new")
+    def contract_new(name: str = Form(...), session: Session = Depends(get_session)):
+        """Abo ohne Dokument von Hand anlegen (z.B. Streaming, App-Abo) – nur im Companion."""
+        contract = new_abo(session, name.strip() or "Abo", name.strip() or None, None, today())
+        return RedirectResponse(f"/contracts/{contract.id}?msg={quote('Abo angelegt – Angaben prüfen und speichern')}",
+                                status_code=303)
+
+    @app.get("/contracts/{contract_id}", response_class=HTMLResponse)
+    def contract_detail(request: Request, contract_id: int, msg: str = "", session: Session = Depends(get_session)):
+        """Abo ohne Dokument bearbeiten (Verträge mit Dokument werden auf der Dokumentseite bearbeitet)."""
+        c = session.get(Contract, contract_id)
+        if c is None:
+            raise HTTPException(404)
+        if c.document_id:
+            return RedirectResponse(f"/documents/{c.document_id}", status_code=303)
+        deadline = deadlines.compute(deadlines.terms_from_contract(c), today())
+        series = [x for x in recurring.stored(session) if x.contract_id == c.id]
+        return render(request, "contract.html", c=c, msg=msg, deadline=deadline, series=series)
+
+    @app.post("/contracts/{contract_id}")
+    async def contract_save(request: Request, contract_id: int, session: Session = Depends(get_session)):
+        c = session.get(Contract, contract_id)
+        if c is None or c.document_id:
+            raise HTTPException(404)
+        form = dict(await request.form())
+        action = form.get("action", "save")
+        if action == "delete":
+            session.delete(c)
+            return RedirectResponse(f"/contracts?msg={quote(f'Abo „{c.label}“ gelöscht')}", status_code=303)
+        if action == "attach":
+            wanted = str(form.get("doc_id") or "").strip().lstrip("#")
+            if not wanted.isdigit():
+                return RedirectResponse(f"/contracts/{c.id}?msg={quote('Bitte die Paperless-ID des Dokuments eingeben')}",
+                                        status_code=303)
+            if problem := ensure_indexed(session, int(wanted)):
+                return RedirectResponse(f"/contracts/{c.id}?msg={quote(problem)}", status_code=303)
+            doc = session.get(Document, int(wanted))
+            if doc.contract is not None:
+                return RedirectResponse(f"/contracts/{c.id}?msg={quote('Zu diesem Dokument gibt es schon einen Vertrag')}",
+                                        status_code=303)
+            c.document_id = doc.id
+            doc.kind, doc.kind_source, doc.review_state = "contract", "manual", "confirmed"
+            return RedirectResponse(f"/documents/{doc.id}?msg={quote('Dokument angehängt – das Abo ist jetzt ein Vertrag mit Dokument')}",
+                                    status_code=303)
+        values = pipeline.parse_values("contract", form)
+        for name in pipeline.FIELD_TYPES["contract"]:
+            if name in ("name", "renewal_mode", "notice_unit", "notice_to", "status"):
+                setattr(c, name, values.get(name) or getattr(c, name))
+            else:
+                setattr(c, name, values.get(name))
+        c.payee = (form.get("payee") or "").strip() or None
+        return RedirectResponse(f"/contracts/{c.id}?msg={quote('Gespeichert')}", status_code=303)
+
     @app.post("/contracts/{contract_id}/cancelled")
     def contract_cancelled(contract_id: int, cancelled_on: str = Form(""), session: Session = Depends(get_session)):
         c = session.get(Contract, contract_id)
@@ -1096,8 +1156,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             raise HTTPException(404)
         c.status = "cancelled"
         c.cancelled_on = pipeline.coerce("date", cancelled_on) or today()
-        c.document.writeback_pending = True
-        pipeline.set_source(c.document, ["status", "cancelled_on"], "manual", confirmed=True)
+        pipeline.touch_contract(c, ["status", "cancelled_on"])
         return RedirectResponse("/contracts", status_code=303)
 
     @app.get("/invoices", response_class=HTMLResponse)
@@ -1155,6 +1214,11 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         if action == "dismiss":
             recurring.dismiss(session, token)
             msg = "Ausgeblendet"
+        elif action == "abo" and series is not None:
+            contract = new_abo(session, series.payee, series.payee, series.monthly, date.fromisoformat(series.dates[0]))
+            recurring.link_contract(session, series.key, contract.id)
+            return RedirectResponse(f"/contracts/{contract.id}?msg={quote('Abo angelegt – Kündigungsfrist und Laufzeit prüfen')}",
+                                    status_code=303)
         elif action == "link" and series is not None:
             contract = session.get(Contract, int(contract_id)) if contract_id.isdigit() else None
             if doc_id.strip().lstrip("#").isdigit():  # Paperless-ID des Vertragsdokuments
@@ -1171,7 +1235,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             recurring.link_contract(session, series.key, contract.id)
             if contract.monthly_cost is None:
                 contract.monthly_cost = series.monthly
-                pipeline.set_source(contract.document, "monthly_cost", "firefly", confirmed=True)
+                pipeline.touch_contract(contract, "monthly_cost", "firefly")
             msg = f"„{series.payee}“ gehört zu „{contract.name or contract.provider}“"
         elif action == "cost" and contract_id.isdigit():
             contract = session.get(Contract, int(contract_id))
@@ -1179,7 +1243,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             if contract is not None and value:
                 old = contract.monthly_cost
                 contract.monthly_cost = value
-                pipeline.set_source(contract.document, "monthly_cost", "firefly", confirmed=True)
+                pipeline.touch_contract(contract, "monthly_cost", "firefly")
                 msg = (f"Monatsbeitrag „{contract.name or contract.provider}“: {value:.2f} € (vorher "
                        f"{old:.2f} €)" if old else f"Monatsbeitrag „{contract.name or contract.provider}“: {value:.2f} €").replace(".", ",")
             else:

@@ -286,6 +286,7 @@ def check(session: Session, transactions: list[Transaction], settings: Settings,
     linked = _linked_transactions(session)
     ignored = ignored_counterparties(session)
     learned, fixed = aliases(session), fixed_documents(session)
+    abos = _abos(session)
     searches = 0
     start = min((tx.date for tx in transactions), default=date.today()) - timedelta(days=120)
     invoices = list(session.scalars(select(Invoice).options(selectinload(Invoice.document))))
@@ -314,6 +315,8 @@ def check(session: Session, transactions: list[Transaction], settings: Settings,
             row.note = PAYMENT_NOTE
         elif _is_ignored(tx.counterparty, ignored):
             row.state, row.candidates, row.note = "ignored", None, "Empfänger ausgeblendet"
+        elif abo := abo_for(abos, tx.counterparty, tx.date):
+            row.state, row.candidates, row.note = "ignored", None, f"{ABO_NOTE}: {abo.label}"
         elif (target := fixed_target(session, fixed.get(party_key(tx.counterparty)), tx.date, tx.amount))[0]:
             row.state, row.document_id, row.candidates = "linked", target[0], None
             row.note = target[1]
@@ -396,6 +399,26 @@ def ignore(row: ReceiptCheck, note: str = "kein Beleg nötig") -> None:
 
 
 PAYMENT_NOTE = "über den Zahlungsabgleich"
+ABO_NOTE = "Abo ohne Dokument"
+
+
+def _abos(session: Session) -> list:
+    """Abos ohne Dokument mit Firefly-Empfänger (laufend oder gekündigt)."""
+    from app.models import Contract
+
+    return [c for c in session.scalars(select(Contract).where(Contract.document_id.is_(None), Contract.payee.is_not(None),
+                                                              Contract.status.in_(("active", "cancelled"))))]
+
+
+def abo_for(abos: list, counterparty: str, day: date):
+    """Gehört eine Buchung an diesen Empfänger zu einem Abo ohne Dokument?"""
+    key = party_key(counterparty)
+    for c in abos:
+        if key and party_key(c.payee) == key:
+            if c.status == "cancelled" and c.cancel_effective and day > c.cancel_effective:
+                continue
+            return c
+    return None
 
 
 def sync_payments(session: Session) -> int:
@@ -403,13 +426,21 @@ def sync_payments(session: Session) -> int:
     Eine Buchung, die du an einer Rechnung als Zahlung bzw. Teilzahlung übernommen hast, gilt sofort als belegt –
     und wird wieder offen, wenn du die Zahlung dort löst. Deine eigenen Entscheidungen bleiben unangetastet."""
     linked = _linked_transactions(session)
+    abos = _abos(session)
     changed = 0
     for row in session.scalars(select(ReceiptCheck).where(ReceiptCheck.decided.is_(False))):
         doc_id = linked.get(row.tx_id)
+        abo = abo_for(abos, row.counterparty, row.tx_date) if doc_id is None else None
         if doc_id is not None and (row.state != "linked" or row.document_id != doc_id):
             row.state, row.document_id, row.candidates, row.note = "linked", doc_id, row.candidates, PAYMENT_NOTE
             changed += 1
         elif doc_id is None and row.state == "linked" and row.note == PAYMENT_NOTE:
+            reopen(row)
+            changed += 1
+        if abo is not None and row.state in ("missing", "candidate"):
+            row.state, row.note = "ignored", f"{ABO_NOTE}: {abo.label}"  # belegt durch das Abo
+            changed += 1
+        elif abo is None and row.state == "ignored" and (row.note or "").startswith(ABO_NOTE):
             reopen(row)
             changed += 1
     return changed

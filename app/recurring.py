@@ -135,10 +135,14 @@ def detect(transactions: list[Transaction], ignored: list[str] | None = None) ->
     return found
 
 
+GENERIC = {"gmbh", "mbh", "und", "der", "die", "das", "service", "services", "deutschland", "germany", "europe", "online",
+           "international", "gesellschaft", "sarl", "ltd", "inc", "bank", "zahlung", "lastschrift", "muster"}
+
+
 def _words(text: str | None) -> set[str]:
     import re
 
-    return {w for w in re.findall(r"[a-zäöüß0-9]+", (text or "").lower()) if len(w) >= 3}
+    return {w for w in re.findall(r"[a-zäöüß0-9]+", (text or "").lower()) if len(w) >= 3 and w not in GENERIC}
 
 
 def match_contract(session: Session, s: Series, links: dict) -> Contract | None:
@@ -149,6 +153,8 @@ def match_contract(session: Session, s: Series, links: dict) -> Contract | None:
     for c in session.scalars(select(Contract).where(Contract.status.in_(("active", "cancelled")))):
         names = _words(c.provider) | _words(c.document.correspondent if c.document else "")
         points = len(payee & names) * 2 + len(payee & _words(c.name))
+        if c.payee and party_key(c.payee) == party_key(s.payee):
+            points += 5  # beim Abo hinterlegter Firefly-Empfänger
         if c.monthly_cost and abs(c.monthly_cost - s.monthly) <= max(1.0, c.monthly_cost * 0.2):
             points += 1
         if points > best_points:

@@ -117,8 +117,7 @@ def apply(session: Session, doc: Document, contract: Contract, cancelled_on: dat
     contract.cancelled_on = cancelled_on or doc.created or date.today()
     contract.cancel_effective = effective
     contract.cancellation_doc_id = doc.id
-    contract.document.writeback_pending = True
-    pipeline.set_source(contract.document, ["status", "cancelled_on"], "manual", confirmed=True)
+    pipeline.touch_contract(contract, ["status", "cancelled_on"])
     if doc.kind == "contract" and doc.review_state == "pending":
         doc.kind, doc.kind_source, doc.review_state = "other", "manual", "none"  # war fälschlich als Vertrag erkannt
         doc.contract = None

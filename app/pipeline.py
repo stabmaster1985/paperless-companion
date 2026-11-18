@@ -726,6 +726,13 @@ def mark_changed(doc: Document) -> None:
     doc.writeback_pending = True
 
 
+def touch_contract(contract, names, source: str = "manual") -> None:
+    """Geänderte Vertragsfelder vermerken – beim Abo ohne Dokument gibt es nichts nach Paperless zu übertragen."""
+    if contract.document is not None:
+        contract.document.writeback_pending = True
+        set_source(contract.document, names, source, confirmed=True)
+
+
 def link_target(doc: Document) -> list[int]:
     """Direkte Verknüpfungen („gehört zu“) dieses Dokuments – mit deiner Vormerkung, sonst wie in Paperless."""
     proposed = doc.proposed_fields or {}
