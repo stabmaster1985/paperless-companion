@@ -30,6 +30,33 @@
   </table></div>
 </section>
 {% endif %}
+{% if refund_hits %}
+<section class="card" id="rueckerstattungen">
+  <h2>Mögliche Rückerstattungen ({{ refund_hits|length }})</h2>
+  <p class="muted">Geld vom Aussteller einer bezahlten Rechnung – vielleicht eine Rücksendung, Gutschrift oder ein Storno. Übernehmen trägt
+    es als Rückerstattung ein (die Rechnung bleibt bezahlt, als Kosten zählt nur der Rest).</p>
+  <div class="table-wrap"><table class="list">
+    <thead><tr><th>Rechnung</th><th>Geldeingang</th><th class="hide-sm">Treffer</th><th></th></tr></thead>
+    <tbody>
+    {% for i in refund_hits %}{% set r = i.refund_suggestion %}
+      <tr>
+        <td><a href="/documents/{{ i.document_id }}#refund">{{ i.issuer or i.document.title }}</a> {{ doclink(i.document_id) }}<br>
+          <small>{{ i.amount|eur }}{% if i.paid_on %} · bezahlt {{ i.paid_on|d }}{% endif %}</small></td>
+        <td>{{ r.date[8:10] }}.{{ r.date[5:7] }}.{{ r.date[:4] }} · {{ r.amount|eur }}<br>
+          <small class="muted">{{ r.counterparty }}{% if r.description %} – {{ r.description }}{% endif %}</small>{{ txlinks(r.group_id, r.date) }}</td>
+        <td class="hide-sm"><span class="badge">{{ r.reasons }}</span></td>
+        <td class="nowrap">
+          <form method="post" action="/documents/{{ i.document_id }}/refund" class="inline"><input type="hidden" name="action" value="accept-suggestion">
+            <input type="hidden" name="back" value="/invoices"><button class="small primary">Als Rückerstattung</button></form>
+          <form method="post" action="/documents/{{ i.document_id }}/refund" class="inline"><input type="hidden" name="action" value="reject-suggestion">
+            <input type="hidden" name="back" value="/invoices"><button class="small link">passt nicht</button></form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</section>
+{% endif %}
 {% if reminders %}
 <section class="card remind-card" id="mahnungen">
   <h2>Mahnungen ({{ reminders|length }})</h2>

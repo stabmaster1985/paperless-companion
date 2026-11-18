@@ -316,14 +316,24 @@ document.querySelectorAll('.ff-form').forEach((form) => form.addEventListener('s
 {% endif %}
 {% if doc.kind == 'invoice' and doc.invoice and doc.review_state != 'pending' %}
 {% set inv = doc.invoice %}{% set rfd = refund_defaults(doc) %}
-<details class="card refund-box" id="refund" {{ 'open' if inv.refund_amount or inv.refund_doc_id }}>
+<details class="card refund-box" id="refund" {{ 'open' if inv.refund_amount or inv.refund_doc_id or inv.refund_suggestion }}>
   <summary>{% if inv.refund_amount %}Rückerstattung: {{ inv.refund_amount|eur }} am {{ inv.refunded_on|d }}{% if inv.amount and inv.refund_amount < inv.amount %} · kostet dich noch {{ inv.net_amount|eur }}{% else %} · vollständig erstattet{% endif %}
+    {% elif inv.refund_suggestion %}Mögliche Rückerstattung gefunden – bitte prüfen
     {% elif inv.refund_doc_id %}Rückerstattung: Gutschrift-Beleg zugeordnet, Betrag fehlt noch
     {% else %}Geld zurückbekommen? Rückerstattung zuordnen{% endif %}</summary>
   {% if inv.refund_amount %}
   <div>{{ 'Aus Firefly' if inv.refund_tx_id else ('Betrag und Datum aus dem Beleg bzw. von dir' if inv.refund_doc_id else 'Von dir eingetragen') }}{% if inv.refund_tx_id %}:{{ txlinks(inv.refund_tx_group_id, inv.refunded_on) }}{% endif %}
     <form method="post" action="/documents/{{ doc.id }}/refund" class="inline"><input type="hidden" name="action" value="clear">
       <button class="small link">entfernen</button></form></div>
+  {% endif %}
+  {% if inv.refund_suggestion %}{% set r = inv.refund_suggestion %}
+  <div class="notice ok"><strong>Gefunden:</strong> Geldeingang am {{ r.date[8:10] }}.{{ r.date[5:7] }}.{{ r.date[:4] }} · {{ r.amount|eur }}
+    von {{ r.counterparty }}{% if r.description %} – „{{ r.description }}“{% endif %} {{ txlinks(r.group_id, r.date) }}
+    <small class="muted">({{ r.reasons }})</small>
+    <form method="post" action="/documents/{{ doc.id }}/refund" class="inline"><input type="hidden" name="action" value="accept-suggestion">
+      <button class="small primary">Als Rückerstattung übernehmen</button></form>
+    <form method="post" action="/documents/{{ doc.id }}/refund" class="inline"><input type="hidden" name="action" value="reject-suggestion">
+      <button class="small link">passt nicht</button></form></div>
   {% endif %}
   <p class="muted"><small>Für Rücksendungen, Gutschriften oder Stornos: die Rechnung bleibt bezahlt, als Kosten zählt nur der Rest
     (auch im Steuer-Export).</small></p>

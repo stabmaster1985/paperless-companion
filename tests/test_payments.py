@@ -493,3 +493,27 @@ def test_collective_payment_for_several_invoices(db, settings):
     with db() as s:
         payments.match(s, [tx("s2", date(2026, 9, 21), 100.0, "Schreiner Holz", "")], settings)
         assert s.query(PaymentMatch).filter_by(tx_id="s2").count() == 0
+
+
+def test_suggest_refund_for_paid_invoice(client, mock_api):
+    """Geld vom Aussteller nach der Zahlung: als Rückerstattung vorgeschlagen, mit einem Klick übernommen."""
+    with session_scope() as s:
+        doc = s.get(Document, 1)
+        doc.review_state, doc.invoice.amount, doc.invoice.status = "confirmed", 59.99, "paid"
+        doc.invoice.paid_on, doc.invoice.issuer = date(2026, 10, 1), "Online-Shop"
+    deposits = [Transaction(journal_id="d1", group_id="g1", date=date(2026, 10, 12), amount=59.99, counterparty="Online-Shop GmbH",
+                            iban=None, description="Erstattung Retoure 4711", text="Erstattung Retoure 4711"),
+                Transaction(journal_id="d2", group_id="g2", date=date(2026, 10, 13), amount=59.99, counterparty="Arbeitgeber",
+                            iban=None, description="Lohn", text="Lohn")]
+    with session_scope() as s:
+        assert payments.suggest_refunds(s, deposits) == 1
+        sug = s.get(Document, 1).invoice.refund_suggestion
+        assert sug["tx_id"] == "d1" and "Erstattung im Text" in sug["reasons"]
+    assert "Mögliche Rückerstattungen (1)" in client.get("/invoices").text
+    page = client.get("/bulk").text
+    assert 'value="rf:1" checked' in page  # gleicher Betrag + Erstattung im Text: sicher
+    client.post("/documents/1/refund", data={"action": "accept-suggestion"})
+    with session_scope() as s:
+        inv = s.get(Document, 1).invoice
+        assert inv.refund_amount == 59.99 and inv.refund_tx_id == "d1" and inv.refund_suggestion is None
+        assert payments.suggest_refunds(s, deposits) == 0  # schon erstattet

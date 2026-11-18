@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings
 from app.firefly import FireflyClient, Transaction
-from app.models import Document, Reimbursement
+from app.models import Invoice, Document, Reimbursement
 
 STATUS = {"open": "Geld erwartet", "received": "erhalten"}
 STOPWORDS = {"gmbh", "mbh", "und", "der", "die", "das", "versicherung", "krankenversicherung", "ag", "a.g.", "vvag",
@@ -165,7 +165,9 @@ def used_transactions(session: Session, exclude: int | None = None) -> set[str]:
     from app.payments import refund_transactions  # Rückerstattungen einzelner Rechnungen sind schon vergeben
 
     return {r.tx_id for r in session.scalars(select(Reimbursement).where(Reimbursement.tx_id.is_not(None)))
-            if r.document_id != exclude} | set(refund_transactions(session))
+            if r.document_id != exclude} | set(refund_transactions(session)) | {
+        inv.refund_suggestion["tx_id"] for inv in session.scalars(select(Invoice).where(Invoice.refund_suggestion.is_not(None)))
+        if inv.refund_suggestion}
 
 
 def match(session: Session, deposits: list[Transaction]) -> int:

@@ -300,6 +300,14 @@ def run(session: Session, client: FireflyClient, settings: Settings, today: date
     from app import reimbursements
 
     result["refunds_found"] = reimbursements.run(session, client, settings, today)
+    # Rückerstattungen zu bezahlten Rechnungen (Rücksendung, Gutschrift) unter den Geldeingängen suchen
+    paid_since = today - timedelta(days=settings.firefly_lookback_days + 183)
+    try:
+        deposits = list(client.deposits(max(paid_since, today - timedelta(days=400)), today))
+        result["invoice_refunds"] = suggest_refunds(session, deposits)
+    except Exception as exc:  # noqa: BLE001 – Rückerstattungen sind ein Zusatz, der Abgleich bleibt gültig
+        log.warning("Rückerstattungen suchen fehlgeschlagen: %s", exc)
+        result["invoice_refunds"] = 0
     _remember(session, result)
     return result
 
@@ -438,6 +446,73 @@ def set_refund(doc: Document, amount: float, day: date, tx: Transaction | None =
     pipeline.set_source(doc, ["refund_amount", "refunded_on"], "firefly" if tx else "manual", confirmed=True)
     full = inv.amount is not None and inv.refund_amount >= inv.amount - 0.005
     return "vollständig erstattet" if full else f"teilweise erstattet – kostet dich noch {inv.net_amount:.2f} €".replace(".", ",")
+
+
+REFUND_HINT = re.compile(r"erstatt|gutschrift|storno|rücksend|ruecksend|retoure|rückzahlung|rueckzahlung|refund|return",
+                         re.IGNORECASE)
+
+
+def suggest_refunds(session: Session, deposits: list[Transaction]) -> int:
+    """Geldeingänge vom Aussteller einer bezahlten Rechnung (bis 6 Monate nach Zahlung) als Rückerstattung vorschlagen.
+    Gleicher Betrag genügt; ein kleinerer nur mit Hinweis wie „Erstattung/Gutschrift/Retoure“ im Verwendungszweck.
+    Nie automatisch übernommen."""
+    from app.models import Reimbursement
+
+    taken = {r.tx_id for r in session.scalars(select(Reimbursement).where(Reimbursement.tx_id.is_not(None)))}
+    taken |= set(refund_transactions(session))
+    taken |= {inv.refund_suggestion["tx_id"] for inv in session.scalars(select(Invoice).where(
+        Invoice.refund_suggestion.is_not(None))) if inv.refund_suggestion}
+    found = 0
+    invoices = session.scalars(select(Invoice).where(Invoice.status == "paid", Invoice.amount.is_not(None),
+                                                     Invoice.refund_amount.is_(None), Invoice.refund_suggestion.is_(None))
+                               .options(selectinload(Invoice.document)))
+    for inv in invoices:
+        issuer = inv.issuer or (inv.document.correspondent if inv.document else "") or ""
+        base = inv.paid_on or inv.invoice_date or (inv.document.created if inv.document else None)
+        if not issuer or base is None:
+            continue
+        rejected = set(inv.refund_rejected or [])
+        best = None
+        for tx in deposits:
+            if tx.journal_id in taken or tx.journal_id in rejected or not base <= tx.date <= base + timedelta(days=183):
+                continue
+            if not _words(issuer) & _words(f"{tx.counterparty} {tx.description}"):
+                continue
+            same = abs(tx.amount - inv.amount) <= 0.01
+            hint = bool(REFUND_HINT.search(f"{tx.description} {tx.text}"))
+            if not same and not (hint and tx.amount < inv.amount):
+                continue
+            points = (60 if same else 30) + (30 if hint else 0) + 20
+            number = inv.invoice_number
+            if number and len(number) >= 3 and _compact(number) in _compact(tx.text):
+                points += 40
+            if best is None or points > best[0]:
+                best = (points, tx, same, hint)
+        if best is None:
+            continue
+        points, tx, same, hint = best
+        reasons = ["gleicher Betrag" if same else "Teilbetrag", "Absender = Aussteller", *(["Erstattung im Text"] if hint else [])]
+        inv.refund_suggestion = {"tx_id": tx.journal_id, "group_id": tx.group_id, "date": tx.date.isoformat(),
+                                 "amount": tx.amount, "counterparty": tx.counterparty[:200],
+                                 "description": tx.description[:300], "score": points, "reasons": ", ".join(reasons)}
+        taken.add(tx.journal_id)
+        found += 1
+    return found
+
+
+def accept_refund_suggestion(doc: Document) -> str:
+    sug = doc.invoice.refund_suggestion or {}
+    tx = Transaction(journal_id=sug["tx_id"], group_id=sug.get("group_id") or "", date=date.fromisoformat(sug["date"]),
+                     amount=sug["amount"], counterparty=sug.get("counterparty") or "", iban=None, description="", text="")
+    doc.invoice.refund_suggestion = None
+    return set_refund(doc, tx.amount, tx.date, tx)
+
+
+def reject_refund_suggestion(doc: Document) -> None:
+    inv = doc.invoice
+    if inv.refund_suggestion:
+        inv.refund_rejected = [*(inv.refund_rejected or []), inv.refund_suggestion["tx_id"]]
+    inv.refund_suggestion = None
 
 
 def clear_refund(doc: Document) -> None:

@@ -388,6 +388,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             "rc": bulk.receipt_items(session),
             "doc": bulk.inbox_items(session, quick_check),
             "cancel": bulk.cancel_items(session),
+            "rf": bulk.refund_items(session),
         }
         return render(request, "bulk.html", msg=msg, sections=sections, QUICK_FIELDS=QUICK_FIELDS,
                       firefly_enabled=settings.firefly_enabled)
@@ -414,7 +415,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     @app.post("/bulk")
     async def bulk_apply(request: Request, session: Session = Depends(get_session)):
         form = await request.form(max_fields=MAX_FORM_FIELDS)
-        done = {"pay": 0, "rc": 0, "doc": 0, "cancel": 0}
+        done = {"pay": 0, "rc": 0, "doc": 0, "cancel": 0, "rf": 0}
         skipped = 0
         for key in form.getlist("pick"):
             parts = str(key).split(":")
@@ -435,6 +436,11 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                         continue
                     confirm_document(session, doc, values)
                     done["doc"] += 1
+                elif parts[0] == "rf":
+                    doc = session.get(Document, int(parts[1]))
+                    if doc is not None and doc.invoice is not None and doc.invoice.refund_suggestion:
+                        payments.accept_refund_suggestion(doc)
+                        done["rf"] += 1
                 elif parts[0] == "cancel":
                     doc, contract = session.get(Document, int(parts[1])), session.get(Contract, int(parts[2]))
                     item = next((c for c in cancellations.pending(session) if doc and c["doc"].id == doc.id), None)
@@ -447,7 +453,8 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         if done["doc"]:
             request_worker(app)
         labels = [(done["pay"], "Zahlungen übernommen"), (done["rc"], "Belege zugeordnet"),
-                  (done["doc"], "Dokumente bestätigt"), (done["cancel"], "Verträge als gekündigt markiert")]
+                  (done["doc"], "Dokumente bestätigt"), (done["cancel"], "Verträge als gekündigt markiert"),
+                  (done["rf"], "Rückerstattungen übernommen")]
         msg = ", ".join(f"{n} {label}" for n, label in labels if n) or "Nichts ausgewählt"
         if skipped:
             msg += f" · {skipped} übersprungen (Angaben fehlen)"
@@ -784,7 +791,12 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         form = await request.form()
         from app.firefly import Transaction
 
-        if form.get("action") == "clear":
+        if form.get("action") == "accept-suggestion" and doc.invoice.refund_suggestion:
+            msg = "Gefundene Rückerstattung übernommen – " + payments.accept_refund_suggestion(doc)
+        elif form.get("action") == "reject-suggestion":
+            payments.reject_refund_suggestion(doc)
+            msg = "Vorschlag verworfen – dieser Geldeingang wird nicht wieder vorgeschlagen"
+        elif form.get("action") == "clear":
             payments.clear_refund(doc)
             msg = "Rückerstattung entfernt"
         elif form.get("action") == "doc-clear":
@@ -813,7 +825,9 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                                  description="", text="")
             result = payments.set_refund(doc, amount, day, tx)
             msg = f"Rückerstattung {amount:.2f} € vom {day:%d.%m.%Y} gespeichert – {result}".replace(".", ",", 1)
-        return RedirectResponse(f"/documents/{doc_id}?msg={quote(msg)}#refund", status_code=303)
+        back = str(form.get("back") or "")
+        target = back if back.startswith("/") and not back.startswith("//") else f"/documents/{doc_id}"
+        return RedirectResponse(f"{target}{'&' if '?' in target else '?'}msg={quote(msg)}#refund", status_code=303)
 
     @app.post("/documents/{doc_id}/payment")
     async def document_payment_choose(request: Request, doc_id: int, session: Session = Depends(get_session)):
@@ -1097,10 +1111,12 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             select(Invoice.id).where(Invoice.paid_amount.is_not(None))))
         rows = session.scalars(query).all()
         reminders = dunning.pending(session)
+        refund_hits = list(session.scalars(select(Invoice).where(Invoice.refund_suggestion.is_not(None))))
         if status == "partial":
             rows = [i for i in rows if i.id in with_parts]
         return render(
             request, "invoices.html", invoices=rows, status=status, parts=parts, with_parts=with_parts, reminders=reminders,
+            refund_hits=refund_hits,
             invoice_choices=sorted(session.scalars(select(Invoice)),  # offene zuerst, dann nach Aussteller
                                    key=lambda i: (i.status != "open", (i.issuer or i.document.title or "").lower(),
                                                   i.due_date or date.max)),
@@ -1159,6 +1175,8 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                        f"{counts['suggested']} Vorschläge, {counts['accepted']} automatisch als bezahlt markiert")
             if counts["pending_found"]:
                 msg += f" · {counts['pending_found']} Zahlungen für Rechnungen in der Inbox vorbelegt"
+            if counts.get("invoice_refunds"):
+                msg += f" · {counts['invoice_refunds']} mögliche Rückerstattungen gefunden"
         except FireflyError as exc:
             msg = f"Fehler beim Abgleich: {exc}"
         finally:

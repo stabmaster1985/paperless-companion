@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import cancellations, payments
-from app.models import Document, ReceiptCheck
+from app.models import Document, Invoice, ReceiptCheck
 
 SURE_RECEIPT = 95  # Punkte (siehe receipts.score_document): Betrag + Empfänger + zeitliche Nähe
 SURE_CONFIDENCE = 0.75
@@ -71,3 +71,13 @@ def inbox_items(session: Session, quick_check) -> list[dict]:
 def cancel_items(session: Session) -> list[dict]:
     return [{"key": f"cancel:{c['doc'].id}:{c['contract'].id}", "sure": bool(c["effective"]) and not c["by_title"], **c}
             for c in cancellations.pending(session) if c["contract"] is not None]
+
+
+def refund_items(session: Session) -> list[dict]:
+    """Gefundene Rückerstattungen: sicher bei gleichem Betrag und „Erstattung/Gutschrift“ im Text bzw. Rechnungsnummer."""
+    items = []
+    for inv in session.scalars(select(Invoice).where(Invoice.refund_suggestion.is_not(None))):
+        r = inv.refund_suggestion
+        sure = "gleicher Betrag" in r["reasons"] and (r.get("score") or 0) >= 110
+        items.append({"key": f"rf:{inv.document_id}", "sure": sure, "doc": inv.document, "inv": inv, "r": r})
+    return items

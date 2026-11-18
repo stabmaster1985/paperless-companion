@@ -77,6 +77,20 @@
 </section>
 {% endif %}
 
+{% if sections.rf %}
+<section class="card bulk-sec">
+  {{ head("Rückerstattungen", sections.rf, "Geld vom Aussteller einer bezahlten Rechnung – als Rückerstattung eintragen (die Rechnung bleibt bezahlt).") }}
+  <ul class="bulk-list">
+    {% for it in sections.rf %}{% set r = it.r %}
+    <li class="{{ 'sure' if it.sure }}"><label>{{ pick(it) }}</label>
+      <div><a href="/documents/{{ it.doc.id }}#refund">{{ it.inv.issuer or it.doc.title }}</a> {{ doclink(it.doc.id) }} <small class="muted">{{ it.inv.amount|eur }}</small><br>
+        <small>← {{ r.date[8:10] }}.{{ r.date[5:7] }}.{{ r.date[:4] }} · {{ r.amount|eur }} von {{ r.counterparty }}{% if r.description %} – „{{ r.description }}“{% endif %}{{ txlinks(r.group_id, r.date) }}
+          <span class="muted">({{ r.reasons }})</span></small></div></li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
 {% if sections.cancel %}
 <section class="card bulk-sec">
   {{ head("Kündigungsbestätigungen", sections.cancel, "Vertrag als gekündigt markieren, Bestätigung daran hängen.") }}
