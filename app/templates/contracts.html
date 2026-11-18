@@ -66,7 +66,13 @@
       <td class="nowrap">{{ c.monthly_cost|eur }}</td>
       <td>
         {% if c.status == 'active' %}
-        <form method="post" action="/contracts/{{ c.id }}/cancelled" class="inline"><button class="small" title="Als gekündigt markieren">Gekündigt</button></form>
+        <details class="cancel-pop">
+          <summary class="small" title="Du hast gekündigt? Hier eintragen – nur im Companion">Kündigung eintragen …</summary>
+          <form method="post" action="/contracts/{{ c.id }}/cancelled" class="cancel-pop-form">
+            <label class="field"><span>Gekündigt am</span><input type="date" name="cancelled_on" value="{{ today.isoformat() }}"></label>
+            <button class="small primary">Als gekündigt markieren</button>
+          </form>
+        </details>
         {% endif %}
       </td>
     </tr>

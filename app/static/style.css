@@ -877,3 +877,6 @@ button:disabled, button:disabled:hover { opacity: .5; cursor: not-allowed; }
 .rec-missing { border-top: 4px solid #b91c1c; }
 .new-abo { display: flex; flex-wrap: wrap; gap: .4rem; margin: .25rem 0 .75rem; }
 .new-abo input { width: 14rem; }
+.cancel-pop > summary { cursor: pointer; color: var(--accent); font-size: .85rem; list-style: none; white-space: nowrap; }
+.cancel-pop > summary::-webkit-details-marker { display: none; }
+.cancel-pop-form { display: flex; flex-direction: column; gap: .35rem; margin-top: .35rem; }
