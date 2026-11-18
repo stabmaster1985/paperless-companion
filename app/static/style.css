@@ -886,3 +886,7 @@ button:disabled, button:disabled:hover { opacity: .5; cursor: not-allowed; }
 .rec-item { align-items: flex-start; }
 .rec-item > div:first-child { min-width: 0; flex: 1 1 34rem; }
 .rec-bookings table.compact { width: auto; min-width: 22rem; }
+.rec-docsearch { flex: 1 1 100%; }
+.rec-docsearch input { width: 100%; max-width: 30rem; }
+.rec-excluded td { opacity: .6; text-decoration: line-through; }
+.rec-excluded td:last-child { text-decoration: none; opacity: 1; }

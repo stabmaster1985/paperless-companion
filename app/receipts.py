@@ -286,7 +286,7 @@ def check(session: Session, transactions: list[Transaction], settings: Settings,
     linked = _linked_transactions(session)
     ignored = ignored_counterparties(session)
     learned, fixed = aliases(session), fixed_documents(session)
-    abos = _abos(session)
+    abos, abo_skip = _abos(session), abo_excluded(session)
     searches = 0
     start = min((tx.date for tx in transactions), default=date.today()) - timedelta(days=120)
     invoices = list(session.scalars(select(Invoice).options(selectinload(Invoice.document))))
@@ -315,7 +315,7 @@ def check(session: Session, transactions: list[Transaction], settings: Settings,
             row.note = PAYMENT_NOTE
         elif _is_ignored(tx.counterparty, ignored):
             row.state, row.candidates, row.note = "ignored", None, "Empfänger ausgeblendet"
-        elif abo := abo_for(abos, tx.counterparty, tx.date):
+        elif abo := abo_for(abos, tx.counterparty, tx.date, tx.journal_id, abo_skip):
             row.state, row.candidates, row.note = "ignored", None, f"{ABO_NOTE}: {abo.label}"
         elif (target := fixed_target(session, fixed.get(party_key(tx.counterparty)), tx.date, tx.amount))[0]:
             row.state, row.document_id, row.candidates = "linked", target[0], None
@@ -410,8 +410,17 @@ def _abos(session: Session) -> list:
                                                               Contract.status.in_(("active", "cancelled"))))]
 
 
-def abo_for(abos: list, counterparty: str, day: date):
+def abo_excluded(session: Session) -> set[str]:
+    """Buchungen, die du aus einer Abo-Serie genommen hast (gehören nicht zum Abo)."""
+    item = session.get(KeyValue, "recurring_excluded")
+    data = json.loads(item.value) if item else {}
+    return set(data) if isinstance(data, dict) else set()
+
+
+def abo_for(abos: list, counterparty: str, day: date, tx_id: str | None = None, excluded: set[str] | None = None):
     """Gehört eine Buchung an diesen Empfänger zu einem Abo ohne Dokument?"""
+    if tx_id and excluded and tx_id in excluded:
+        return None
     key = party_key(counterparty)
     for c in abos:
         if key and party_key(c.payee) == key:
@@ -426,11 +435,11 @@ def sync_payments(session: Session) -> int:
     Eine Buchung, die du an einer Rechnung als Zahlung bzw. Teilzahlung übernommen hast, gilt sofort als belegt –
     und wird wieder offen, wenn du die Zahlung dort löst. Deine eigenen Entscheidungen bleiben unangetastet."""
     linked = _linked_transactions(session)
-    abos = _abos(session)
+    abos, abo_skip = _abos(session), abo_excluded(session)
     changed = 0
     for row in session.scalars(select(ReceiptCheck).where(ReceiptCheck.decided.is_(False))):
         doc_id = linked.get(row.tx_id)
-        abo = abo_for(abos, row.counterparty, row.tx_date) if doc_id is None else None
+        abo = abo_for(abos, row.counterparty, row.tx_date, row.tx_id, abo_skip) if doc_id is None else None
         if doc_id is not None and (row.state != "linked" or row.document_id != doc_id):
             row.state, row.document_id, row.candidates, row.note = "linked", doc_id, row.candidates, PAYMENT_NOTE
             changed += 1

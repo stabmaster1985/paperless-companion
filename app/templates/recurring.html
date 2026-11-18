@@ -10,11 +10,20 @@
   halbjährlich, jährlich). Hier siehst du, welche noch keinem Vertrag zugeordnet sind, wo sich der Betrag geändert hat und wo eine
   Abbuchung ausgeblieben ist. Alles bleibt im Companion.</p>
 
-{% macro bookings(s) %}<details class="rec-bookings"><summary>{{ s.amounts|length }} Abbuchungen ansehen</summary>
+{% macro bookings(s) %}{% set ex = excluded_for(s) %}<details class="rec-bookings" id="s-{{ s.key }}"><summary>{{ s.amounts|length }} Abbuchungen ansehen{% if ex %} · {{ ex|length }} ausgenommen{% endif %}</summary>
   <table class="list compact"><tbody>
-    {% for b in s.bookings %}<tr><td class="nowrap">{{ b.date|d }}</td><td class="nowrap">{{ b.amount|eur }}</td>
-      <td><small class="muted">{{ b.description }}</small></td><td class="nowrap">{% if b.group_id %}{{ txlinks(b.group_id, b.date) }}{% endif %}</td></tr>{% endfor %}
-  </tbody></table></details>{% endmacro %}
+    {% for b in s.bookings %}{% set i = s.amounts|length - loop.index %}<tr><td class="nowrap">{{ b.date|d }}</td><td class="nowrap">{{ b.amount|eur }}</td>
+      <td><small class="muted">{{ b.description }}</small></td><td class="nowrap">{% if b.group_id %}{{ txlinks(b.group_id, b.date) }}{% endif %}</td>
+      <td><form method="post" action="/recurring/action" class="inline"><input type="hidden" name="action" value="exclude">
+        <input type="hidden" name="key" value="{{ s.key }}"><input type="hidden" name="tx" value="{{ s.tx_ids[i] }}">
+        <button class="small link" title="Gehört nicht dazu – Buchung aus der Serie nehmen, auf der Belegseite wieder frei">nicht dazu</button></form></td></tr>{% endfor %}
+    {% for e in ex %}<tr class="rec-excluded"><td class="nowrap">{{ e.date[8:10] }}.{{ e.date[5:7] }}.{{ e.date[:4] }}</td><td class="nowrap">{{ e.amount|eur }}</td>
+      <td><small class="muted">ausgenommen{% if e.description %} · {{ e.description }}{% endif %}</small></td><td class="nowrap">{% if e.group_id %}{{ txlinks(e.group_id, e.date) }}{% endif %}</td>
+      <td><form method="post" action="/recurring/action" class="inline"><input type="hidden" name="action" value="include">
+        <input type="hidden" name="tx" value="{{ e.tx_id }}"><button class="small link">wieder aufnehmen</button></form></td></tr>{% endfor %}
+  </tbody></table>
+  <small class="muted">Passen ein paar Buchungen nicht (z.B. Einzelkäufe beim selben Empfänger)? Mit „nicht dazu“ nimmst du sie heraus – sie
+    gehören dann nicht zum Vertrag/Abo und sind auf der Belegseite wieder frei.</small></details>{% endmacro %}
 
 {% macro dismiss(token, label='ausblenden') %}<form method="post" action="/recurring/action" class="inline">
   <input type="hidden" name="action" value="dismiss"><input type="hidden" name="token" value="{{ token }}">
@@ -85,6 +94,11 @@
         <input name="doc_id" inputmode="numeric" placeholder="Paperless-ID" title="oder Paperless-ID des Vertragsdokuments" aria-label="Paperless-ID des Vertrags" class="rec-id">
         <button class="small">Zuordnen</button>
       </form>
+      <div class="receipt-search rec-docsearch" data-url="/recurring/doc-search?key={{ s.key|urlencode }}&">
+        <input type="search" placeholder="Vertragsdokument suchen: Titel, Absender …" aria-label="Vertragsdokument suchen"
+          oninput="recDocSearch(this)" autocomplete="off">
+        <div class="receipt-hits" aria-live="polite"></div>
+      </div>
       <form method="post" action="/recurring/action" class="inline"><input type="hidden" name="action" value="abo">
         <input type="hidden" name="key" value="{{ s.key }}">
         <button class="small primary" title="Abo ohne Dokument anlegen (z.B. Streaming): mit Monatsbeitrag, Beginn und Kündigungsfrist">Als Abo anlegen</button></form>
@@ -123,4 +137,15 @@
   </table></div>
 </details>
 {% endif %}
+<script>
+function recDocSearch(input) {
+  const box = input.closest('.rec-docsearch'), out = box.querySelector('.receipt-hits');
+  clearTimeout(box._timer);
+  if (input.value.trim().length < 2 && !/^#?\d+$/.test(input.value.trim())) { out.innerHTML = ''; return; }
+  box._timer = setTimeout(async () => {
+    try { out.innerHTML = await (await fetch(box.dataset.url + 'q=' + encodeURIComponent(input.value))).text(); }
+    catch (e) { out.innerHTML = '<small class="bad">Suche fehlgeschlagen.</small>'; }
+  }, 300);
+}
+</script>
 {% endblock %}

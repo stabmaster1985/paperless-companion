@@ -1,0 +1,18 @@
+{% from "macros.html" import doclink %}
+{# Treffer der Dokumentsuche bei „Ohne Vertrag“ – wird per JS geladen #}
+{% if docs %}
+<ul class="plain receipt-hit-list">
+  {% for d in docs %}
+  <li>
+    <span class="cand-doc"><a href="/documents/{{ d.id }}" target="_blank" rel="noopener">{{ d.title or ('#' ~ d.id) }}</a> {{ doclink(d.id) }}
+      <small class="muted">{{ d.correspondent or 'ohne Korrespondent' }} · {{ d.created|d }} · #{{ d.id }}{% if d.contract %} · schon Vertrag{% endif %}</small></span>
+    <form method="post" action="/recurring/action" class="inline">
+      <input type="hidden" name="action" value="link"><input type="hidden" name="key" value="{{ key }}"><input type="hidden" name="doc_id" value="{{ d.id }}">
+      <button class="small" title="{{ 'Zahlungen diesem Vertrag zuordnen' if d.contract else 'Dokument wird zum Vertrag (Angaben aus den Abbuchungen) und die Zahlungen gehören dazu' }}">{{ 'Zuordnen' if d.contract else 'Als Vertrag zuordnen' }}</button>
+    </form>
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<small class="muted">Nichts gefunden. Tipp: ein Wort aus dem Titel, der Absender oder die Paperless-ID.</small>
+{% endif %}

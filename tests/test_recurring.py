@@ -86,8 +86,8 @@ def test_recurring_page_actions(client):
     client.post("/recurring/action", data={"action": "cost", "contract_id": str(cid), "monthly": "34.9"})
     with session_scope() as s:
         assert s.get(Contract, cid).monthly_cost == 34.9
-    r = client.post("/recurring/action", data={"action": "link", "key": key, "doc_id": "2"})  # Demo: noch kein Vertrag
-    assert "(noch) kein Vertrag" in r.text
+    r = client.post("/recurring/action", data={"action": "link", "key": key, "doc_id": "2"})  # Dokument wird zum Vertrag
+    assert "gehört zu" in r.text
     r = client.post("/recurring/action", data={"action": "link", "key": key, "contract_id": str(abo_id)})
     assert "gehört zu" in r.text
     with session_scope() as s:

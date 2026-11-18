@@ -1191,7 +1191,19 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         data = recurring.findings(session, today())
         contracts = sorted(session.scalars(select(Contract)), key=lambda c: (c.name or c.provider or "").lower())
         return render(request, "recurring.html", msg=msg, data=data, contracts=contracts,
+                      excluded_for=lambda x: recurring.excluded_for(session, x),
                       contract_by_id={c.id: c for c in contracts}, firefly_enabled=settings.firefly_enabled)
+
+    @app.get("/recurring/doc-search", response_class=HTMLResponse)
+    def recurring_doc_search(request: Request, key: str = "", q: str = "", session: Session = Depends(get_session)):
+        """Vertragsdokument zu einer regelmäßigen Zahlung suchen (Titel, Absender, Dateiname, Paperless-ID)."""
+        from types import SimpleNamespace
+
+        series = next((x for x in recurring.stored(session) if x.key == key), None)
+        if series is None:
+            raise HTTPException(404)
+        docs = receipts.search_documents(session, SimpleNamespace(tx_date=date.fromisoformat(series.dates[0])), q, limit=10)
+        return render(request, "_recurring_docs.html", docs=docs, key=key, q=q)
 
     @app.post("/recurring/run")
     def recurring_run(session: Session = Depends(get_session)):
@@ -1210,8 +1222,21 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
 
     @app.post("/recurring/action")
     def recurring_action(action: str = Form(...), key: str = Form(""), token: str = Form(""), contract_id: str = Form(""),
-                         doc_id: str = Form(""), monthly: str = Form(""), session: Session = Depends(get_session)):
+                         doc_id: str = Form(""), monthly: str = Form(""), tx: str = Form(""),
+                         session: Session = Depends(get_session)):
         series = next((s for s in recurring.stored(session) if s.key == key), None)
+        if action == "exclude":
+            info = recurring.exclude(session, key, tx)
+            receipts.sync_payments(session)  # auf der Belegseite sofort wieder frei
+            amount = f"{info['amount']:.2f}".replace(".", ",") if info else ""
+            msg = (f"Buchung vom {info['date'][8:10]}.{info['date'][5:7]}.{info['date'][:4]} ({amount} €) gehört nicht "
+                   "mehr dazu – auf der Belegseite wieder frei") if info else "Buchung nicht gefunden"
+            return RedirectResponse(f"/recurring?msg={quote(msg)}#s-{quote(key)}", status_code=303)
+        if action == "include":
+            info = recurring.include(session, tx)
+            receipts.sync_payments(session)
+            msg = "Buchung wieder aufgenommen" if info else "Buchung nicht gefunden"
+            return RedirectResponse(f"/recurring?msg={quote(msg)}", status_code=303)
         if action == "dismiss":
             recurring.dismiss(session, token)
             msg = "Ausgeblendet"
@@ -1226,10 +1251,16 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                 wanted = int(doc_id.strip().lstrip("#"))
                 if problem := ensure_indexed(session, wanted):
                     return RedirectResponse(f"/recurring?msg={quote(problem)}", status_code=303)
-                contract = session.get(Document, wanted).contract
-                if contract is None:
-                    msg = f"#{wanted} ist im Companion (noch) kein Vertrag – bitte öffnen, bei „Art“ Vertrag wählen und bestätigen"
-                    return RedirectResponse(f"/recurring?msg={quote(msg)}", status_code=303)
+                doc = session.get(Document, wanted)
+                contract = doc.contract
+                if contract is None:  # Dokument wird hiermit zum Vertrag – Angaben aus den Abbuchungen
+                    contract = Contract(document_id=doc.id, name=doc.title or series.payee,
+                                        provider=doc.correspondent or series.payee, payee=series.payee,
+                                        monthly_cost=series.monthly, start_date=date.fromisoformat(series.dates[0]),
+                                        renewal_mode="indefinite", notice_value=1, notice_unit="months", notice_to="any")
+                    session.add(contract)
+                    doc.kind, doc.kind_source, doc.review_state = "contract", "manual", "confirmed"
+                    session.flush()
             if contract is None:
                 return RedirectResponse(f"/recurring?msg={quote('Bitte einen Vertrag wählen oder seine Paperless-ID eingeben')}",
                                         status_code=303)

@@ -66,3 +66,49 @@ def test_edit_attach_and_delete_abo(client):
     client.post(f"/contracts/{wid}", data={"action": "delete"})
     with session_scope() as s:
         assert s.get(Contract, wid) is None
+
+
+def test_exclude_bookings_from_abo_and_free_them(client):
+    """90 % passen, 10 % nicht: Abo anlegen, abweichende Buchungen herausnehmen – sie sind auf der Belegseite wieder frei."""
+    from app.firefly import Transaction
+
+    txs = monthly("Online-Kaufhaus", 8.99, 12)  # Mitgliedschaft
+    odd = Transaction(journal_id="odd1", group_id="godd", date=date(2026, 7, 10), amount=9.49, counterparty="Online-Kaufhaus",
+                      iban=None, description="Einkauf", text="Einkauf")
+    with session_scope() as s:
+        recurring.run(s, [*txs, odd])
+        key = recurring.stored(s)[0].key
+        s.add(ReceiptCheck(tx_id="odd1", tx_group_id="godd", tx_date=date(2026, 7, 10), amount=9.49,
+                           counterparty="Online-Kaufhaus", state="missing"))
+    assert "nicht dazu" in client.get("/recurring").text
+    client.post("/recurring/action", data={"action": "abo", "key": key})
+    client.get("/receipts")
+    with session_scope() as s:
+        assert s.query(ReceiptCheck).filter_by(tx_id="odd1").one().state == "ignored"  # erst mal vom Abo erfasst
+    r = client.post("/recurring/action", data={"action": "exclude", "key": key, "tx": "odd1"})
+    assert "auf der Belegseite wieder frei" in r.text
+    with session_scope() as s:
+        assert s.query(ReceiptCheck).filter_by(tx_id="odd1").one().state == "missing"
+        series = recurring.stored(s)[0]
+        assert "odd1" not in series.tx_ids and len(series.tx_ids) == 12
+        assert recurring.excluded(s)["odd1"]["amount"] == 9.49
+    with session_scope() as s:  # auch ein neuer Lauf nimmt sie nicht wieder auf
+        recurring.run(s, [*txs, odd])
+        assert "odd1" not in recurring.stored(s)[0].tx_ids
+    client.post("/recurring/action", data={"action": "include", "tx": "odd1"})
+    with session_scope() as s:
+        assert "odd1" in recurring.stored(s)[0].tx_ids and not recurring.excluded(s)
+
+
+def test_search_document_and_make_it_the_contract(client):
+    with session_scope() as s:
+        recurring.run(s, monthly("Fitnessstudio Muster", 29.9, 12))
+        key = recurring.stored(s)[0].key
+        s.add(Document(id=950, title="Mitgliedsvertrag Fitness", correspondent="Fitnessstudio", tags=[], kind="other"))
+    hits = client.get("/recurring/doc-search", params={"key": key, "q": "mitglieds"}).text
+    assert "Mitgliedsvertrag Fitness" in hits and "Als Vertrag zuordnen" in hits
+    r = client.post("/recurring/action", data={"action": "link", "key": key, "doc_id": "950"})
+    assert "gehört zu" in r.text
+    with session_scope() as s:
+        doc = s.get(Document, 950)
+        assert doc.kind == "contract" and doc.contract.monthly_cost == 29.9 and doc.contract.payee == "Fitnessstudio Muster"

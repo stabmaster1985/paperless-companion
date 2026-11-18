@@ -21,6 +21,7 @@ from app.receipts import fixed_documents, has_fixed, ignored_counterparties, par
 KEY = "recurring"
 DISMISSED_KEY = "recurring_dismissed"
 LINKS_KEY = "recurring_links"  # Serie -> Vertrag (von dir zugeordnet)
+EXCLUDED_KEY = "recurring_excluded"  # tx_id -> Angaben: von dir aus einer Serie genommene Buchungen
 RHYTHMS = [(1, 30, 6), (3, 91, 15), (6, 182, 20), (12, 365, 25)]  # Monate, Tage, Toleranz
 NAMES = {1: "monatlich", 3: "vierteljährlich", 6: "halbjährlich", 12: "jährlich"}
 
@@ -129,9 +130,11 @@ def _rhythm(dates: list[date]) -> int | None:
     return None
 
 
-def detect(transactions: list[Transaction], ignored: list[str] | None = None) -> list[Series]:
+def detect(transactions: list[Transaction], ignored: list[str] | None = None, excluded: set[str] | None = None) -> list[Series]:
     by_payee: dict[str, list[Transaction]] = {}
     for tx in transactions:
+        if excluded and tx.journal_id in excluded:
+            continue  # von dir aus der Serie genommen
         key = party_key(tx.counterparty)
         if key and not _is_ignored(tx.counterparty, ignored or []):
             by_payee.setdefault(key, []).append(tx)
@@ -209,7 +212,7 @@ def _kv_set(session: Session, key: str, value) -> None:
 
 def run(session: Session, transactions: list[Transaction]) -> int:
     """Serien aus den Abbuchungen erkennen und speichern. Gibt die Anzahl zurück."""
-    series = evaluate(session, detect(transactions, ignored_counterparties(session)))
+    series = evaluate(session, detect(transactions, ignored_counterparties(session), set(excluded(session))))
     _kv_set(session, KEY, [asdict(s) for s in series])
     return len(series)
 
@@ -218,6 +221,64 @@ def stored(session: Session) -> list[Series]:
     data = _kv(session, KEY)
     known = set(Series.__dataclass_fields__)
     return evaluate(session, [Series(**{k: v for k, v in d.items() if k in known}) for d in data] if isinstance(data, list) else [])
+
+
+def excluded(session: Session) -> dict[str, dict]:
+    data = _kv(session, EXCLUDED_KEY)
+    return data if isinstance(data, dict) else {}
+
+
+def _save_series(session: Session, series: list[Series]) -> None:
+    _kv_set(session, KEY, [{k: v for k, v in asdict(x).items() if k not in ("contract_id", "covered")} for x in series])
+
+
+def exclude(session: Session, series_key: str, tx_id: str) -> dict | None:
+    """Eine Buchung aus der Serie nehmen: Sie gehört dann nicht mehr zum Vertrag/Abo und ist auf der Belegseite
+    wieder frei. Gibt die Angaben der Buchung zurück."""
+    series = stored(session)
+    target = next((x for x in series if x.key == series_key and tx_id in x.tx_ids), None)
+    if target is None:
+        return None
+    i = target.tx_ids.index(tx_id)
+    info = {"key": series_key, "payee": target.payee, "date": target.dates[i], "amount": target.amounts[i],
+            "group_id": target.group_ids[i] if i < len(target.group_ids) else None,
+            "description": target.descriptions[i] if i < len(target.descriptions) else ""}
+    for name in ("tx_ids", "dates", "amounts", "group_ids", "descriptions"):
+        values = getattr(target, name)
+        if i < len(values):
+            values.pop(i)
+    _save_series(session, [x for x in series if x.tx_ids])
+    items = excluded(session)
+    items[tx_id] = info
+    _kv_set(session, EXCLUDED_KEY, items)
+    return info
+
+
+def include(session: Session, tx_id: str) -> dict | None:
+    """Ausgenommene Buchung wieder in ihre Serie aufnehmen."""
+    items = excluded(session)
+    info = items.pop(tx_id, None)
+    if info is None:
+        return None
+    _kv_set(session, EXCLUDED_KEY, items)
+    series = stored(session)
+    target = next((x for x in series if x.key == info["key"]), None) or next(
+        (x for x in series if party_key(x.payee) == party_key(info["payee"])), None)
+    if target is not None:
+        rows = list(zip(target.dates, target.amounts, target.tx_ids,
+                        target.group_ids or [None] * len(target.dates), target.descriptions or [""] * len(target.dates)))
+        rows.append((info["date"], info["amount"], tx_id, info.get("group_id"), info.get("description") or ""))
+        rows.sort(key=lambda r: r[0])
+        target.dates, target.amounts, target.tx_ids, target.group_ids, target.descriptions = (list(c) for c in zip(*rows))
+        _save_series(session, series)
+    return info
+
+
+def excluded_for(session: Session, s: Series) -> list[dict]:
+    """Ausgenommene Buchungen, die zu dieser Serie gehörten (gleicher Empfänger)."""
+    return sorted(({"tx_id": t, **info} for t, info in excluded(session).items()
+                   if info.get("key") == s.key or party_key(info.get("payee", "")) == party_key(s.payee)),
+                  key=lambda x: x["date"], reverse=True)
 
 
 def findings(session: Session, today: date) -> dict:
