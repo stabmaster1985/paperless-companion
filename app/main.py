@@ -139,6 +139,19 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     templates.env.globals["refund_of"] = refund_of
     templates.env.globals["doc_title"] = doc_title
 
+    def partial_suggestions_of(doc: Document) -> list:
+        with session_scope() as s:
+            inv = s.get(Document, doc.id).invoice
+            if inv is None:
+                return []
+            return [{"id": m.id, "date": m.tx_date, "amount": m.amount, "counterparty": m.counterparty, "reasons": m.reasons,
+                     "group_id": m.tx_group_id}
+                    for m in s.scalars(select(PaymentMatch).where(PaymentMatch.invoice_id == inv.id,
+                                                                  PaymentMatch.state == "suggested").order_by(PaymentMatch.tx_date))
+                    if m.reasons.startswith(payments.PARTIAL_REASON)]
+
+    templates.env.globals["partial_suggestions_of"] = partial_suggestions_of
+
     def partials_of(doc: Document) -> list:
         with session_scope() as s:
             return [{"tx_id": m.tx_id, "group_id": m.tx_group_id, "date": m.tx_date, "amount": m.amount,
@@ -1031,7 +1044,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                       all_contracts=sorted(session.scalars(select(Contract)), key=lambda c: (c.name or "").lower()))
 
     @app.post("/cancellations/{doc_id}")
-    def cancellation_action(doc_id: int, action: str = Form("apply"), contract_id: str = Form(""),
+    def cancellation_action(doc_id: int, action: str = Form("apply"), contract_id: str = Form(""), contract_doc: str = Form(""),
                             cancelled_on: str = Form(""), effective: str = Form(""),
                             session: Session = Depends(get_session)):
         """Kündigungsbestätigung übernehmen (Vertrag als gekündigt markieren) oder ausblenden."""
@@ -1042,6 +1055,14 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             cancellations.dismiss(doc)
             return RedirectResponse(f"/contracts?msg={quote('Ausgeblendet')}", status_code=303)
         contract = session.get(Contract, int(contract_id)) if contract_id.isdigit() else None
+        if wanted := contract_doc.strip().lstrip("#"):  # Paperless-ID des Vertragsdokuments
+            if wanted.isdigit() and (problem := ensure_indexed(session, int(wanted))):
+                return RedirectResponse(f"/contracts?msg={quote(problem)}#kuendigungen", status_code=303)
+            cdoc = session.get(Document, int(wanted)) if wanted.isdigit() else None
+            if cdoc is None or cdoc.contract is None:
+                msg = f"#{wanted} ist im Companion (noch) kein Vertrag – bitte erst öffnen, bei „Art“ Vertrag wählen und bestätigen"
+                return RedirectResponse(f"/contracts?msg={quote(msg)}#kuendigungen", status_code=303)
+            contract = cdoc.contract
         if contract is None:
             return RedirectResponse(f"/contracts?msg={quote('Bitte den Vertrag auswählen')}#kuendigungen", status_code=303)
         try:
@@ -1080,14 +1101,16 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             rows = [i for i in rows if i.id in with_parts]
         return render(
             request, "invoices.html", invoices=rows, status=status, parts=parts, with_parts=with_parts, reminders=reminders,
-            invoice_choices=sorted(session.scalars(select(Invoice).where(Invoice.status == "open")),
-                                   key=lambda i: ((i.issuer or "").lower(), i.due_date or date.max)),
+            invoice_choices=sorted(session.scalars(select(Invoice)),  # offene zuerst, dann nach Aussteller
+                                   key=lambda i: (i.status != "open", (i.issuer or i.document.title or "").lower(),
+                                                  i.due_date or date.max)),
             matches=payments.suggestions(session), msg=msg, SOURCE_LABELS=pipeline.SOURCE_LABELS,
             firefly_enabled=settings.firefly_enabled,
         )
 
     @app.post("/reminders/{doc_id}")
-    def reminder_action(doc_id: int, action: str = Form("apply"), invoice_doc: str = Form(""), day: str = Form(""),
+    def reminder_action(doc_id: int, action: str = Form("apply"), invoice_doc: str = Form(""), invoice_id: str = Form(""),
+                        day: str = Form(""),
                         due: str = Form(""), fee: str = Form(""), take_due: str = Form(""), link: str = Form(""),
                         session: Session = Depends(get_session)):
         """Mahnung der Rechnung zuordnen (nur im Companion) oder ausblenden."""
@@ -1097,9 +1120,17 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         if action == "dismiss":
             dunning.dismiss(doc)
             return RedirectResponse(f"/invoices?msg={quote('Ausgeblendet')}#mahnungen", status_code=303)
-        target = session.get(Document, int(invoice_doc)) if invoice_doc.isdigit() else None
-        if target is None or target.invoice is None:
-            return RedirectResponse(f"/invoices?msg={quote('Bitte die Rechnung auswählen')}#mahnungen", status_code=303)
+        wanted = invoice_id.strip().lstrip("#") or invoice_doc  # Paperless-ID hat Vorrang vor der Auswahl
+        if wanted.isdigit() and (problem := ensure_indexed(session, int(wanted))):
+            return RedirectResponse(f"/invoices?msg={quote(problem)}#mahnungen", status_code=303)
+        target = session.get(Document, int(wanted)) if wanted.isdigit() else None
+        if target is None:
+            return RedirectResponse(f"/invoices?msg={quote('Bitte die Rechnung auswählen oder ihre Paperless-ID eingeben')}#mahnungen",
+                                    status_code=303)
+        if target.invoice is None:
+            msg = (f"#{target.id} „{target.title}“ ist im Companion (noch) keine Rechnung – bitte erst öffnen, bei „Art“ "
+                   "Rechnung wählen und bestätigen")
+            return RedirectResponse(f"/invoices?msg={quote(msg)}#mahnungen", status_code=303)
         try:
             day_d, due_d = pipeline.coerce("date", day or None), pipeline.coerce("date", due or None)
             fee_v = pipeline.coerce("float", fee or None)
@@ -1135,7 +1166,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         return RedirectResponse(f"/invoices?msg={quote(msg)}", status_code=303)
 
     @app.post("/payments/{match_id}/{decision}")
-    def payments_decide(match_id: int, decision: str, session: Session = Depends(get_session)):
+    def payments_decide(match_id: int, decision: str, back: str = Form(""), session: Session = Depends(get_session)):
         if decision == "accept":
             found = payments.accept(session, match_id)
         elif decision == "reject":
@@ -1145,7 +1176,10 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         if found is None:
             raise HTTPException(404)
         request_worker(app)
-        return RedirectResponse("/invoices", status_code=303)
+        target = back if back.startswith("/") and not back.startswith("//") else "/invoices"
+        msg = ("Teilzahlung übernommen" if found.reasons.startswith(payments.PARTIAL_REASON) else "Zahlung übernommen") \
+            if decision == "accept" else "Vorschlag abgelehnt – wird nicht wieder vorgeschlagen"
+        return RedirectResponse(f"{target}{'&' if '?' in target else '?'}msg={quote(msg)}", status_code=303)
 
     @app.post("/invoices/{invoice_id}/paid")
     def invoice_paid(invoice_id: int, session: Session = Depends(get_session)):

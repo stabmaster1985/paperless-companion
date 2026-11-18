@@ -73,3 +73,19 @@ def test_assign_reminder_on_invoices_page(settings, mock_api):
         assert "1× gemahnt" in c.get("/invoices").text and "Mahnungen (" not in c.get("/invoices").text
         assert "Mahnung zur Rechnung" in c.get("/documents/803").text
         assert "1× gemahnt:" in c.get("/documents/800").text
+
+
+def test_assign_reminder_by_paperless_id(settings, mock_api):
+    app = create_app(settings, start_worker=False)
+    with TestClient(app) as c:
+        run_all(session_scope, settings)
+        with session_scope() as s:
+            add_invoice(s, status="paid")  # bezahlte Rechnungen stehen auch zur Auswahl
+            s.add(Document(id=804, title="Zahlungserinnerung", tags=[], created=date(2026, 11, 2), kind="other",
+                           suggestions={"_reminder": {"invoice": None, "due": None, "fee": None, "date": "2026-11-02"}}))
+        page = c.get("/invoices").text
+        assert "oder Paperless-ID" in page and "· bezahlt · #800" in page
+        r = c.post("/reminders/804", data={"invoice_id": "#2"})  # Handyvertrag: keine Rechnung
+        assert "(noch) keine Rechnung" in r.text
+        r = c.post("/reminders/804", data={"invoice_id": "800", "invoice_doc": ""})
+        assert "zugeordnet" in r.text and "schon bezahlt" in r.text

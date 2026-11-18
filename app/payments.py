@@ -74,8 +74,8 @@ def match(session: Session, transactions: list[Transaction], settings: Settings)
 
     candidates: list[tuple[int, Invoice, Transaction, list[str]]] = []
     for inv in invoices:
-        if inv.id in has_suggestion:
-            continue
+        if inv.id in has_suggestion or inv.paid_amount:
+            continue  # teilweise bezahlte Rechnungen: siehe partial_suggestions
         scored = []
         for tx in transactions:
             if tx.journal_id in used_tx or (inv.id, tx.journal_id) in known_pairs \
@@ -93,6 +93,7 @@ def match(session: Session, transactions: list[Transaction], settings: Settings)
         candidates.append(best)
 
     counts = {"suggested": 0, "accepted": 0}
+    counts["suggested"] += partial_suggestions(session, invoices, transactions, used_tx, known_pairs, owner)
     for points, inv, tx, reasons in sorted(candidates, key=lambda c: -c[0]):
         if tx.journal_id in used_tx:
             continue
@@ -627,6 +628,60 @@ def choose(session: Session, doc: Document, tx: Transaction, take=TAKE) -> tuple
 
         pipeline.set_source(doc, list(values), "firefly", 0.9, True)
     return "als bezahlt übernommen", form
+
+
+PARTIAL_REASON = "Teilzahlung"
+
+
+def partial_suggestions(session: Session, invoices: list[Invoice], transactions: list[Transaction], used_tx: set[str],
+                        known_pairs: set, owner: dict[str, int]) -> int:
+    """Weitere Raten für teilweise bezahlte Rechnungen vorschlagen: Buchungen nach der ersten Rate, die wie die
+    bisherigen Teilzahlungen aussehen (gleicher Betrag und Empfänger) oder genau den Rest begleichen – zusammen
+    höchstens bis zum offenen Betrag. Nie automatisch übernommen."""
+    found = 0
+    for inv in invoices:
+        paid = partial_payments(session, inv)
+        if not paid or inv.status != "open" or (inv.open_amount or 0) <= 0.005:
+            continue
+        open_amount = inv.open_amount
+        pending = [m for m in session.scalars(select(PaymentMatch).where(
+            PaymentMatch.invoice_id == inv.id, PaymentMatch.state == "suggested"))]
+        budget = round(open_amount - sum(m.amount for m in pending), 2)
+        amounts = {m.amount for m in paid}
+        names = set().union(*(_words(f"{m.counterparty} {m.description}") for m in paid))
+        payees = set().union(*(_words(m.counterparty) for m in paid))
+        first = min(m.tx_date for m in paid)
+        scored = []
+        for tx in transactions:
+            if tx.journal_id in used_tx or (inv.id, tx.journal_id) in known_pairs \
+                    or owner.get(tx.journal_id, inv.document_id) != inv.document_id:
+                continue
+            if tx.date < first - timedelta(days=5) or tx.amount > open_amount + 0.005:
+                continue
+            same = any(abs(tx.amount - a) <= 0.005 for a in amounts)
+            rest = abs(tx.amount - open_amount) <= 0.005
+            payee = bool(payees & _words(tx.counterparty))
+            if not (same or rest) or not (payee or (rest and names & _words(f"{tx.counterparty} {tx.description}"))):
+                continue  # gleicher Betrag an jemand anderen ist keine Rate dieser Rechnung
+            points, reasons = 50, [PARTIAL_REASON, "Restbetrag" if rest else "Betrag wie bisherige Raten"]
+            if payee:
+                points, reasons = points + 30, [*reasons, "Empfänger wie bisher"]
+            if inv.invoice_number and len(inv.invoice_number) >= 3 and _compact(inv.invoice_number) in _compact(tx.text):
+                points, reasons = points + 40, [*reasons, "Rechnungsnr."]
+            if inv.iban and tx.iban and inv.iban.replace(" ", "").upper() == tx.iban:
+                points, reasons = points + 30, [*reasons, "IBAN"]
+            scored.append((tx.date, points, tx, reasons))
+        for _, points, tx, reasons in sorted(scored, key=lambda c: c[0]):  # der Reihe nach, bis der Rest erreicht ist
+            if tx.amount > budget + 0.005:
+                continue
+            session.add(PaymentMatch(
+                invoice_id=inv.id, tx_id=tx.journal_id, tx_group_id=tx.group_id, tx_date=tx.date, amount=tx.amount,
+                counterparty=tx.counterparty[:200], description=tx.description[:300], score=points,
+                reasons=", ".join(reasons), state="suggested"))
+            used_tx.add(tx.journal_id)
+            budget = round(budget - tx.amount, 2)
+            found += 1
+    return found
 
 
 def partial_payments(session: Session, inv: Invoice | None) -> list[PaymentMatch]:

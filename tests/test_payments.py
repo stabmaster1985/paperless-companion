@@ -443,3 +443,28 @@ def test_refund_document(client):
     client.post("/documents/1/refund", data={"action": "doc-clear"})
     with session_scope() as s:
         assert s.get(Document, 1).invoice.refund_doc_id is None and s.get(Document, 1).invoice.refund_amount == 40.0
+
+
+def test_suggest_further_installments(db, settings):
+    """Teilweise bezahlte Rechnung: weitere Buchungen wie die bisherigen Raten werden vorgeschlagen – bis zum Rest,
+    nicht an andere Empfänger, nie automatisch übernommen."""
+    settings.firefly_auto_accept = True
+    with db() as s:
+        inv = add_invoice(s, 1, 300.0, issuer="Möbelhaus", invoice_number="RE-77")
+        inv.document.review_state = "confirmed"
+    with db() as s:
+        payments.add_partial(s, s.get(Document, 1), tx("r1", date(2026, 9, 1), 100.0, "Möbelhaus GmbH", "Rate 1"))
+    later = [tx("r2", date(2026, 10, 1), 100.0, "Möbelhaus GmbH", "Rate 2"),
+             tx("x1", date(2026, 10, 2), 100.0, "Tankstelle", "Tanken"),           # gleicher Betrag, anderer Empfänger
+             tx("r3", date(2026, 11, 1), 100.0, "Möbelhaus GmbH", "Rate 3"),
+             tx("r4", date(2026, 12, 1), 100.0, "Möbelhaus GmbH", "Rate 4")]     # wäre über dem Rest
+    with db() as s:
+        counts = payments.match(s, later, settings)
+        sugg = {m.tx_id: m for m in s.query(PaymentMatch).filter_by(state="suggested")}
+        assert set(sugg) == {"r2", "r3"} and counts["accepted"] == 0
+        assert sugg["r2"].reasons.startswith("Teilzahlung") and "Empfänger wie bisher" in sugg["r2"].reasons
+        payments.accept(s, sugg["r2"].id)
+        inv = s.get(Document, 1).invoice
+        assert inv.status == "open" and inv.open_amount == 100.0  # als Teilzahlung, nicht „bezahlt“
+        payments.accept(s, sugg["r3"].id)
+        assert s.get(Document, 1).invoice.status == "paid"

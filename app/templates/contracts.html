@@ -17,8 +17,10 @@
     <div class="grid">
       <label class="field"><span>Vertrag</span>
         <select name="contract_id"><option value="">– bitte wählen –</option>
-          {% for c in all_contracts %}<option value="{{ c.id }}" {{ 'selected' if item.contract and item.contract.id == c.id }}>{{ c.name or c.provider or ('#' ~ c.document_id) }}{% if c.provider and c.name %} ({{ c.provider }}){% endif %}{% if c.status != 'active' %} – {{ 'gekündigt' if c.status == 'cancelled' else 'beendet' }}{% endif %}</option>{% endfor %}
+          {% for c in all_contracts %}<option value="{{ c.id }}" {{ 'selected' if item.contract and item.contract.id == c.id }}>{{ c.name or c.provider or ('#' ~ c.document_id) }}{% if c.provider and c.name %} ({{ c.provider }}){% endif %} · #{{ c.document_id }}{% if c.status != 'active' %} – {{ 'gekündigt' if c.status == 'cancelled' else 'beendet' }}{% endif %}</option>{% endfor %}
         </select></label>
+      <label class="field"><span>oder Paperless-ID</span><input name="contract_doc" inputmode="numeric" placeholder="z.B. 1234"
+        title="Paperless-ID des Vertragsdokuments – hat Vorrang vor der Auswahl"></label>
       <label class="field"><span>Gekündigt am</span><input type="date" name="cancelled_on" value="{{ item.date.isoformat() if item.date }}"></label>
       <label class="field"><span>Vertrag endet am</span><input type="date" name="effective" value="{{ item.effective.isoformat() if item.effective }}"></label>
     </div>

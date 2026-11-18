@@ -117,6 +117,21 @@ document.querySelectorAll('#viewer .tab[data-tab]').forEach((tab) => tab.addEven
         <button class="small link" title="Diese Teilzahlung lösen">lösen</button></form></li>
     {% endfor %}
   </ul>
+  {% set psugg = partial_suggestions_of(doc) %}
+  {% if psugg %}
+  <div class="partial-sugg"><strong>Passt vermutlich auch:</strong>
+    <ul class="plain">
+      {% for p in psugg %}
+      <li>{{ p.date|d }} · {{ p.amount|eur }} an {{ p.counterparty or 'unbekannt' }} {{ txlinks(p.group_id, p.date) }}
+        <small class="muted">({{ p.reasons }})</small>
+        <form method="post" action="/payments/{{ p.id }}/accept" class="inline"><input type="hidden" name="back" value="/documents/{{ doc.id }}">
+          <button class="small primary">Als Teilzahlung</button></form>
+        <form method="post" action="/payments/{{ p.id }}/reject" class="inline"><input type="hidden" name="back" value="/documents/{{ doc.id }}">
+          <button class="small link">passt nicht</button></form></li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
 </div>
 {% elif linked and linked.state != 'prefilled' %}
 <div class="notice {{ 'ok' if linked.state == 'accepted' else '' }}">
