@@ -91,11 +91,16 @@ def _streams(txs: list[Transaction]) -> list[list[Transaction]]:
     """Buchungen eines Empfängers in Ströme ähnlicher Beträge teilen (Abo neben Einzelkäufen)."""
     streams: list[list[Transaction]] = []
     for tx in sorted(txs, key=lambda t: t.date):
+        # Vergleich mit dem üblichen Betrag des Stroms (Median der letzten drei), nicht nur mit der letzten Buchung –
+        # sonst „wandert“ ein Strom schrittweise über ganz unterschiedliche Beträge
+        fitting = []
         for s in streams:
-            last = s[-1].amount
-            if abs(tx.amount - last) <= max(1.0, last * 0.25) and tx.date > s[-1].date:
-                s.append(tx)
-                break
+            typical = median(t.amount for t in s[-3:])
+            diff = abs(tx.amount - typical)
+            if diff <= max(1.0, typical * 0.25) and tx.date > s[-1].date:
+                fitting.append((diff, s))
+        if fitting:
+            min(fitting, key=lambda f: f[0])[1].append(tx)
         else:
             streams.append([tx])
     # Preiserhöhung: ein Strom endet, ein anderer mit höherem/niedrigerem Betrag setzt direkt danach fort -> zusammenführen
@@ -105,6 +110,9 @@ def _streams(txs: list[Transaction]) -> list[list[Transaction]]:
         def continues(m: list[Transaction]) -> bool:
             if len(m) < 2 or m[-1].date >= s[0].date or not 0.6 <= s[0].amount / m[-1].amount <= 1.6:
                 return False
+            amounts = [t.amount for t in (*m, *s)]
+            if max(amounts) / min(amounts) > 1.6:
+                return False  # keine Kette aus vielen kleinen Schritten
             gap = median((b.date - a.date).days for a, b in zip(m, m[1:]))  # setzt im gleichen Rhythmus fort?
             return abs((s[0].date - m[-1].date).days - gap) <= max(6, gap * 0.2)
 
@@ -188,7 +196,25 @@ def evaluate(session: Session, series: list[Series]) -> list[Series]:
     for s in series:
         contract = match_contract(session, s, links)
         s.contract_id = contract.id if contract else None
-        if contract:
+    # Mehrere Serien desselben Empfängers am selben Vertrag (z.B. Abo und Einzelkäufe beim Versandhändler):
+    # automatisch nur die passendste behalten – von dir zugeordnete bleiben immer
+    by_contract: dict[int, list[Series]] = {}
+    for s in series:
+        if s.contract_id and links.get(s.key) != s.contract_id:
+            by_contract.setdefault(s.contract_id, []).append(s)
+    for cid, group in by_contract.items():
+        if len(group) < 2:
+            continue
+        contract = session.get(Contract, cid)
+        if contract is not None and contract.monthly_cost:
+            best = min(group, key=lambda x: abs(x.monthly - contract.monthly_cost))
+        else:
+            best = max(group, key=lambda x: (len(x.amounts), x.dates[-1]))
+        for s in group:
+            if s is not best:
+                s.contract_id = None
+    for s in series:
+        if s.contract_id:
             s.covered = "Vertrag"
         elif has_fixed(fixed, s.payee, s.last_amount):
             s.covered = "feste Zuordnung"
@@ -252,6 +278,11 @@ def exclude(session: Session, series_key: str, tx_id: str) -> dict | None:
     items[tx_id] = info
     _kv_set(session, EXCLUDED_KEY, items)
     return info
+
+
+def exclude_many(session: Session, series_key: str, tx_ids: list[str]) -> int:
+    """Mehrere Buchungen auf einmal aus der Serie nehmen."""
+    return sum(1 for t in tx_ids if exclude(session, series_key, t))
 
 
 def include(session: Session, tx_id: str) -> dict | None:

@@ -1,17 +1,51 @@
 {% from "macros.html" import txlinks %}
-{# Abbuchungen einer regelmäßigen Zahlung – mit „nicht dazu“ / „wieder aufnehmen“ (Seite Regelmäßige Zahlungen, Vertrag, Abo) #}
-{% macro bookings(s, back='', open=false) %}{% set ex = excluded_for(s) %}<details class="rec-bookings" id="s-{{ s.key }}" {{ 'open' if open }}><summary>{{ s.amounts|length }} Abbuchungen ansehen{% if ex %} · {{ ex|length }} ausgenommen{% endif %}</summary>
-  <table class="list compact"><tbody>
-    {% for b in s.bookings %}{% set i = s.amounts|length - loop.index %}<tr><td class="nowrap">{{ b.date|d }}</td><td class="nowrap">{{ b.amount|eur }}</td>
-      <td><small class="muted">{{ b.description }}</small></td><td class="nowrap">{% if b.group_id %}{{ txlinks(b.group_id, b.date) }}{% endif %}</td>
-      <td><form method="post" action="/recurring/action" class="inline"><input type="hidden" name="action" value="exclude"><input type="hidden" name="back" value="{{ back }}">
-        <input type="hidden" name="key" value="{{ s.key }}"><input type="hidden" name="tx" value="{{ s.tx_ids[i] }}">
-        <button class="small link" title="Gehört nicht dazu – Buchung aus der Serie nehmen, auf der Belegseite wieder frei">nicht dazu</button></form></td></tr>{% endfor %}
-    {% for e in ex %}<tr class="rec-excluded"><td class="nowrap">{{ e.date[8:10] }}.{{ e.date[5:7] }}.{{ e.date[:4] }}</td><td class="nowrap">{{ e.amount|eur }}</td>
-      <td><small class="muted">ausgenommen{% if e.description %} · {{ e.description }}{% endif %}</small></td><td class="nowrap">{% if e.group_id %}{{ txlinks(e.group_id, e.date) }}{% endif %}</td>
-      <td><form method="post" action="/recurring/action" class="inline"><input type="hidden" name="action" value="include"><input type="hidden" name="back" value="{{ back }}">
-        <input type="hidden" name="tx" value="{{ e.tx_id }}"><button class="small link">wieder aufnehmen</button></form></td></tr>{% endfor %}
-  </tbody></table>
-  <small class="muted">Passen ein paar Buchungen nicht (z.B. Einzelkäufe beim selben Empfänger)? Mit „nicht dazu“ nimmst du sie heraus – sie
-    gehören dann nicht zum Vertrag/Abo und sind auf der Belegseite wieder frei.</small></details>{% endmacro %}
-
+{# Abbuchungen einer regelmäßigen Zahlung – einzeln oder angehakt herausnehmen, ausgenommene wieder aufnehmen
+   (Seite Regelmäßige Zahlungen, Vertrag, Abo). Ein Formular für die ganze Liste. #}
+{% macro bookings(s, back='', open=false) %}{% set ex = excluded_for(s) %}
+<details class="rec-bookings" id="s-{{ s.key }}" {{ 'open' if open }}>
+  <summary>{{ s.amounts|length }} Abbuchungen ansehen{% if ex %} · {{ ex|length }} ausgenommen{% endif %}</summary>
+  <form method="post" action="/recurring/bookings" class="rec-book-form">
+    <input type="hidden" name="key" value="{{ s.key }}"><input type="hidden" name="back" value="{{ back }}">
+    <div class="rec-book-tools">
+      <button type="button" class="small link" onclick="recPick(this, 'odd')" title="Alle Buchungen anhaken, deren Betrag vom häufigsten Betrag abweicht">abweichende Beträge anhaken</button>
+      <button type="button" class="small link" onclick="recPick(this, 'all')">alle</button>
+      <button type="button" class="small link" onclick="recPick(this, 'none')">keine</button>
+      <button class="small" name="op" value="exclude">Angehakte herausnehmen (<span class="rec-n">0</span>)</button>
+    </div>
+    <table class="list compact"><tbody>
+      {% for b in s.bookings %}{% set i = s.amounts|length - loop.index %}
+      <tr><td><input type="checkbox" name="tx" value="{{ s.tx_ids[i] }}" data-amount="{{ b.amount }}" onchange="recCount(this)" aria-label="anhaken"></td>
+        <td class="nowrap">{{ b.date|d }}</td><td class="nowrap">{{ b.amount|eur }}</td>
+        <td><small class="muted">{{ b.description }}</small></td><td class="nowrap">{% if b.group_id %}{{ txlinks(b.group_id, b.date) }}{% endif %}</td>
+        <td><button class="small link" name="exclude_one" value="{{ s.tx_ids[i] }}" title="Gehört nicht dazu – auf der Belegseite wieder frei">nicht dazu</button></td></tr>
+      {% endfor %}
+      {% for e in ex %}<tr class="rec-excluded"><td></td><td class="nowrap">{{ e.date[8:10] }}.{{ e.date[5:7] }}.{{ e.date[:4] }}</td><td class="nowrap">{{ e.amount|eur }}</td>
+        <td><small class="muted">ausgenommen{% if e.description %} · {{ e.description }}{% endif %}</small></td><td class="nowrap">{% if e.group_id %}{{ txlinks(e.group_id, e.date) }}{% endif %}</td>
+        <td><button class="small link" name="include_one" value="{{ e.tx_id }}">wieder aufnehmen</button></td></tr>{% endfor %}
+    </tbody></table>
+  </form>
+  <small class="muted">Passen ein paar Buchungen nicht (z.B. Einzelkäufe beim selben Empfänger)? Anhaken und herausnehmen – sie gehören dann
+    nicht zum Vertrag/Abo und sind auf der Belegseite wieder frei.</small>
+</details>
+<script>
+if (!window.recPick) {
+  window.recCount = (el) => {
+    const form = el.closest('form');
+    form.querySelector('.rec-n').textContent = form.querySelectorAll('input[name=tx]:checked').length;
+  };
+  window.recPick = (btn, mode) => {
+    const form = btn.closest('form'), boxes = [...form.querySelectorAll('input[name=tx]')];
+    let typical = null;
+    if (mode === 'odd') {  // häufigster Betrag = der übliche
+      const counts = {};
+      boxes.forEach((b) => { counts[b.dataset.amount] = (counts[b.dataset.amount] || 0) + 1; });
+      typical = Number(Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0]);
+    }
+    boxes.forEach((b) => {
+      b.checked = mode === 'all' || (mode === 'odd' && Math.abs(Number(b.dataset.amount) - typical) > Math.max(0.01, typical * 0.02));
+    });
+    recCount(btn);
+  };
+}
+</script>
+{% endmacro %}

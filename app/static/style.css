@@ -890,3 +890,4 @@ button:disabled, button:disabled:hover { opacity: .5; cursor: not-allowed; }
 .rec-docsearch input { width: 100%; max-width: 30rem; }
 .rec-excluded td { opacity: .6; text-decoration: line-through; }
 .rec-excluded td:last-child { text-decoration: none; opacity: 1; }
+.rec-book-tools { display: flex; flex-wrap: wrap; gap: .3rem .6rem; align-items: center; margin: .3rem 0; }

@@ -1207,6 +1207,24 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         return render(request, "recurring.html", msg=msg, data=data, contracts=contracts,
                       contract_by_id={c.id: c for c in contracts}, firefly_enabled=settings.firefly_enabled)
 
+    @app.post("/recurring/bookings")
+    async def recurring_bookings(request: Request, session: Session = Depends(get_session)):
+        """Buchungsliste einer Serie: einzelne oder angehakte Buchungen herausnehmen, ausgenommene wieder aufnehmen."""
+        form = await request.form()
+        key, back = str(form.get("key") or ""), str(form.get("back") or "")
+        target = back if back.startswith("/") and not back.startswith("//") else "/recurring"
+        if one := form.get("include_one"):
+            msg = "Buchung wieder aufgenommen" if recurring.include(session, str(one)) else "Buchung nicht gefunden"
+        else:
+            ids = [str(form["exclude_one"])] if form.get("exclude_one") else [str(t) for t in form.getlist("tx")]
+            if not ids:
+                return RedirectResponse(f"{target}?msg={quote('Keine Buchung angehakt')}#s-{quote(key)}", status_code=303)
+            count = recurring.exclude_many(session, key, ids)
+            msg = (f"{count} Buchung{'en' if count != 1 else ''} herausgenommen – gehören nicht mehr dazu und sind auf der "
+                   "Belegseite wieder frei")
+        receipts.sync_payments(session)
+        return RedirectResponse(f"{target}?msg={quote(msg)}#s-{quote(key)}", status_code=303)
+
     @app.get("/recurring/doc-search", response_class=HTMLResponse)
     def recurring_doc_search(request: Request, key: str = "", q: str = "", session: Session = Depends(get_session)):
         """Vertragsdokument zu einer regelmäßigen Zahlung suchen (Titel, Absender, Dateiname, Paperless-ID)."""

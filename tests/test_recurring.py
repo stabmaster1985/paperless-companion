@@ -112,3 +112,19 @@ def test_long_history_and_ended_subscriptions(db, settings):
         f = recurring.findings(s, TODAY)
         assert [x.payee for x in f["unknown"]] == ["Streamingdienst AG"]
         assert [x.payee for x in f["ended"]] == ["Altes Fitnessstudio"]
+
+
+def test_streams_do_not_drift_and_one_series_per_contract(db):
+    """Beträge, die schrittweise wandern (10 → 12 → 14,5 …), werden keine Serie mehr; pro Vertrag automatisch nur die
+    passendste Serie desselben Empfängers."""
+    drift = [tx(i, date(2026, 1, 5) + relativedelta(months=i), round(10 * 1.2 ** i, 2), "Versand AG") for i in range(8)]
+    assert all(max(x.amounts) / min(x.amounts) < 1.6 for x in recurring.detect(drift))
+    with db() as s:
+        doc = Document(id=970, title="Prime", correspondent="Versand AG", kind="contract", tags=[])
+        doc.contract = Contract(name="Prime", provider="Versand AG", monthly_cost=8.99)
+        s.add(doc)
+    with db() as s:
+        recurring.run(s, [*monthly("Versand AG", 8.99, 12), *monthly("Versand AG", 49.0, 12, start=date(2025, 12, 15))])
+        series = recurring.stored(s)
+        assert len(series) == 2
+        assert [x.last_amount for x in series if x.contract_id] == [8.99]  # nur das Abo, nicht die anderen Käufe

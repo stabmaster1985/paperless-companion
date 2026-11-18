@@ -85,7 +85,7 @@ def test_exclude_bookings_from_abo_and_free_them(client):
     client.get("/receipts")
     with session_scope() as s:
         assert s.query(ReceiptCheck).filter_by(tx_id="odd1").one().state == "ignored"  # erst mal vom Abo erfasst
-    r = client.post("/recurring/action", data={"action": "exclude", "key": key, "tx": "odd1"})
+    r = client.post("/recurring/bookings", data={"key": key, "exclude_one": "odd1"})
     assert "auf der Belegseite wieder frei" in r.text
     with session_scope() as s:
         assert s.query(ReceiptCheck).filter_by(tx_id="odd1").one().state == "missing"
@@ -95,7 +95,7 @@ def test_exclude_bookings_from_abo_and_free_them(client):
     with session_scope() as s:  # auch ein neuer Lauf nimmt sie nicht wieder auf
         recurring.run(s, [*txs, odd])
         assert "odd1" not in recurring.stored(s)[0].tx_ids
-    client.post("/recurring/action", data={"action": "include", "tx": "odd1"})
+    client.post("/recurring/bookings", data={"key": key, "include_one": "odd1"})
     with session_scope() as s:
         assert "odd1" in recurring.stored(s)[0].tx_ids and not recurring.excluded(s)
 
@@ -126,7 +126,18 @@ def test_contract_page_shows_bookings(client):
         tx_id = recurring.stored(s)[0].tx_ids[-1]
     page = client.get("/documents/960").text
     assert "Abbuchungen" in page and "12 Abbuchungen ansehen" in page and 'name="back" value="/documents/960"' in page
-    r = client.post("/recurring/action", data={"action": "exclude", "key": key, "tx": tx_id, "back": "/documents/960"},
+    r = client.post("/recurring/bookings", data={"key": key, "exclude_one": tx_id, "back": "/documents/960"},
                     follow_redirects=False)
     assert r.headers["location"].startswith("/documents/960?msg=")
     assert "11 Abbuchungen ansehen · 1 ausgenommen" in client.get("/documents/960").text
+
+
+def test_exclude_several_bookings_at_once(client):
+    with session_scope() as s:
+        recurring.run(s, monthly("Mobilfunk AG", 19.99, 12))
+        series = recurring.stored(s)[0]
+        key, ids = series.key, series.tx_ids[:3]
+    r = client.post("/recurring/bookings", data={"key": key, "tx": ids, "op": "exclude"})
+    assert "3 Buchungen herausgenommen" in r.text
+    with session_scope() as s:
+        assert len(recurring.stored(s)[0].tx_ids) == 9 and set(recurring.excluded(s)) == set(ids)
