@@ -79,6 +79,12 @@ Welche Rechnungen dazugehören, kommt aus den Paperless-Verknüpfungen („gehö
 
 ![Erstattung mit verknüpften Rechnungen](docs/screenshots/erstattung.png)
 
+**Sammelaufgaben** – alles, was der Companion selbst zuordnen kann, auf einer Seite: Zahlungen zu Rechnungen,
+Belege zu Buchungen, vollständige Inbox-Dokumente und Kündigungsbestätigungen. Sichere Fälle sind vorausgewählt –
+prüfen und mit einem Klick übernehmen.
+
+![Sammelaufgaben](docs/screenshots/sammelaufgaben.png)
+
 **Belege** – Abbuchungen aus Firefly III ohne Dokument in Paperless. Oben stehen die mit gefundenem Vorschlag
 (ein Klick genügt), darunter die, zu denen noch ein Beleg fehlt.
 

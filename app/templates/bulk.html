@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% from "macros.html" import doclink, txlinks %}
+{% block content %}
+<div class="head">
+  <h1>Sammelaufgaben</h1>
+  {% if firefly_enabled %}<form method="post" action="/bulk/refresh" class="inline"><button class="small" title="Zahlungen zu Rechnungen und Belege zu Buchungen neu suchen">Firefly jetzt abgleichen</button></form>{% endif %}
+</div>
+{% if msg %}<div class="notice ok">{{ msg }}</div>{% endif %}
+<p class="muted">Hier sammelt der Companion, was er selbst zuordnen kann. <strong>Vorausgewählt</strong> sind nur die sicheren Fälle
+  (z.B. Betrag <em>und</em> Rechnungsnummer passen) – prüf die Liste kurz und übernimm sie mit einem Klick. Die übrigen kannst du dazu
+  anhaken oder einzeln öffnen. Alles bleibt im Companion; nach Paperless geht nichts automatisch.</p>
+
+{% set total = sections.values()|map('length')|sum %}
+{% if not total %}
+<p class="empty">Gerade gibt es nichts zu sammeln.{% if firefly_enabled %} Tipp: „Firefly jetzt abgleichen“ sucht neue Zahlungen und Belege.{% endif %}</p>
+{% else %}
+<form method="post" action="/bulk" id="bulk-form">
+<div class="actions bulk-bar">
+  <button type="submit" class="primary" id="bulk-go">Ausgewählte übernehmen (<span id="bulk-n">0</span>)</button>
+  <button type="button" class="small" onclick="bulkPick('sure')">nur sichere</button>
+  <button type="button" class="small" onclick="bulkPick('all')">alle</button>
+  <button type="button" class="small link" onclick="bulkPick('none')">keine</button>
+</div>
+
+{% macro head(title, items, hint) %}
+<h2 class="bulk-h">{{ title }} <span class="count">{{ items|length }}</span>
+  <small class="muted">· {{ items|selectattr('sure')|list|length }} sicher</small></h2>
+<p class="muted bulk-hint">{{ hint }}</p>
+{% endmacro %}
+
+{% macro pick(item) %}<input type="checkbox" name="pick" value="{{ item.key }}" {% if item.sure %}checked {% endif %}data-sure="{{ 1 if item.sure else 0 }}" onchange="bulkCount()" aria-label="auswählen">{% endmacro %}
+
+{% if sections.pay %}
+<section class="card bulk-sec">
+  {{ head("Zahlungen zu offenen Rechnungen", sections.pay, "Firefly-Abbuchung passt zur Rechnung – übernehmen setzt sie auf bezahlt (Datum = Buchungstag).") }}
+  <ul class="bulk-list">
+    {% for it in sections.pay %}{% set m = it.match %}
+    <li class="{{ 'sure' if it.sure }}"><label>{{ pick(it) }}</label>
+      <div><a href="/documents/{{ it.doc.id }}">{{ m.invoice.issuer or it.doc.title }}</a> {{ doclink(it.doc.id) }}
+        <small class="muted">{{ m.invoice.amount|eur }}{% if m.invoice.invoice_number %} · Nr. {{ m.invoice.invoice_number }}{% endif %}</small><br>
+        <small>← {{ m.tx_date|d }} · {{ m.amount|eur }} an {{ m.counterparty or 'unbekannt' }}{% if m.description %} – „{{ m.description }}“{% endif %}{{ txlinks(m.tx_group_id, m.tx_date) }}</small>
+        <small class="sim-reasons">{% for r in m.reasons.split(', ') %}<span class="pill">{{ r }}</span>{% endfor %}</small></div></li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{% if sections.rc %}
+<section class="card bulk-sec">
+  {{ head("Belege zu Buchungen", sections.rc, "Buchung ohne Beleg – der beste gefundene Beleg wird zugeordnet (wie „Das ist der Beleg“).") }}
+  <ul class="bulk-list">
+    {% for it in sections.rc %}{% set r = it.row %}
+    <li class="{{ 'sure' if it.sure }}"><label>{{ pick(it) }}</label>
+      <div><strong>{{ r.tx_date|d }} · {{ r.amount|eur }}</strong> an {{ r.counterparty or 'unbekannt' }}{% if r.description %} <small class="muted">– „{{ r.description }}“</small>{% endif %}{{ txlinks(r.tx_group_id, r.tx_date) }}<br>
+        <small>→ <a href="/documents/{{ it.cand.id }}">{{ it.cand.title or ('#' ~ it.cand.id) }}</a> {{ doclink(it.cand.id) }}
+          <span class="muted">({{ it.cand.reason }})</span>{% if it.more %} · <a href="/receipts#tx-{{ r.id }}">{{ it.more }} weitere{{ 'r' if it.more == 1 }} Vorschlag</a>{% endif %}</small></div></li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{% if sections.doc %}
+<section class="card bulk-sec">
+  {{ head("Inbox: vollständige Dokumente", sections.doc, "Alle nötigen Angaben sind erkannt – bestätigen mit den angezeigten Werten. Verträge sind nie vorausgewählt (Kündigungsfristen bitte selbst ansehen).") }}
+  <ul class="bulk-list">
+    {% for it in sections.doc %}{% set d = it.doc %}{% set v = it["values"] %}
+    <li class="{{ 'sure' if it.sure }}"><label>{{ pick(it) }}</label>
+      <div><a href="/documents/{{ d.id }}">{{ d.title or ('#' ~ d.id) }}</a> {{ doclink(d.id) }} <span class="kind-pill k-{{ d.kind }}">{{ KINDS[d.kind] }}</span><br>
+        <small>{%- set parts = [] %}
+          {%- for name, label in QUICK_FIELDS.get(d.kind, []) if v.get(name) is not none and v.get(name) != '' %}
+            {%- set x = v[name] %}
+            {%- set shown = x|d if x is not string and x.year is defined else (x|eur if x is number and name != 'months' else x) %}
+            {%- set _ = parts.append((label ~ ' ' if label else '') ~ shown) %}
+          {%- endfor %}{{ parts|join(' · ') }}</small></div></li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{% if sections.cancel %}
+<section class="card bulk-sec">
+  {{ head("Kündigungsbestätigungen", sections.cancel, "Vertrag als gekündigt markieren, Bestätigung daran hängen.") }}
+  <ul class="bulk-list">
+    {% for it in sections.cancel %}
+    <li class="{{ 'sure' if it.sure }}"><label>{{ pick(it) }}</label>
+      <div><a href="/documents/{{ it.doc.id }}">{{ it.doc.title or ('#' ~ it.doc.id) }}</a> {{ doclink(it.doc.id) }}<br>
+        <small>→ {{ it.contract.name or it.contract.provider }} · gekündigt {{ it.date|d }}{% if it.effective %} · endet {{ it.effective|d }}{% else %} · <span class="soon">Vertragsende unbekannt</span>{% endif %}</small></div></li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+</form>
+<script>
+function bulkCount() {
+  const n = document.querySelectorAll('#bulk-form input[name=pick]:checked').length;
+  document.getElementById('bulk-n').textContent = n;
+  document.getElementById('bulk-go').disabled = n === 0;
+}
+function bulkPick(mode) {
+  document.querySelectorAll('#bulk-form input[name=pick]').forEach((c) => {
+    c.checked = mode === 'all' || (mode === 'sure' && c.dataset.sure === '1');
+  });
+  bulkCount();
+}
+bulkCount();
+</script>
+{% endif %}
+{% endblock %}

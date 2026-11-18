@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import appsettings, cancellations, cases, mqtt, reimbursements, series, help as helptexts, identifiers, learning, paperless_rules, receipts, rules as rule_proposals, deadlines, events, fields, highlight, ics, metadata, notify, payments, pipeline, reminders, retention, selection, tax
+from app import appsettings, bulk, cancellations, cases, mqtt, reimbursements, series, help as helptexts, identifiers, learning, paperless_rules, receipts, rules as rule_proposals, deadlines, events, fields, highlight, ics, metadata, notify, payments, pipeline, reminders, retention, selection, tax
 from app.config import Settings, get_settings
 from app.db import get_session, init_db, session_scope
 from app.models import Case, CaseDocument, CaseEntry, Contract, Document, Invoice, KeyValue, PaymentMatch, ReceiptCheck, RuleProposal, RetentionLog, RetentionRule, Warranty
@@ -313,6 +313,79 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         doc.auto_confirmed = False
         payments.record_confirmed_payment(session, doc)
         doc.writeback_pending = True
+
+    @app.get("/bulk", response_class=HTMLResponse)
+    def bulk_page(request: Request, msg: str = "", session: Session = Depends(get_session)):
+        """Sammelaufgaben: sichere Zuordnungen aus allen Bereichen, gesammelt übernehmen."""
+        sections = {
+            "pay": bulk.payment_items(session),
+            "rc": bulk.receipt_items(session),
+            "doc": bulk.inbox_items(session, quick_check),
+            "cancel": bulk.cancel_items(session),
+        }
+        return render(request, "bulk.html", msg=msg, sections=sections, QUICK_FIELDS=QUICK_FIELDS,
+                      firefly_enabled=settings.firefly_enabled)
+
+    @app.post("/bulk/refresh")
+    def bulk_refresh(session: Session = Depends(get_session)):
+        """Firefly einmal abgleichen: Zahlungen zu Rechnungen und Belege zu Buchungen neu suchen."""
+        client = make_firefly(settings)
+        if client is None:
+            return RedirectResponse(f"/bulk?msg={quote('Firefly III ist nicht eingerichtet')}", status_code=303)
+        paperless = make_paperless(settings, timeout=30)
+        try:
+            pay = payments.run(session, client, settings, today())
+            found = receipts.run(session, client, settings, today(), paperless)
+            msg = (f"Firefly abgeglichen: {pay['suggested'] + pay['accepted']} Zahlungen zu Rechnungen, "
+                   f"{found['candidate']} Buchungen mit möglichem Beleg")
+        except (FireflyError, PaperlessError) as exc:
+            msg = f"Abgleich nicht möglich: {exc}"
+        finally:
+            client.close()
+            paperless.close()
+        return RedirectResponse(f"/bulk?msg={quote(msg)}", status_code=303)
+
+    @app.post("/bulk")
+    async def bulk_apply(request: Request, session: Session = Depends(get_session)):
+        form = await request.form(max_fields=MAX_FORM_FIELDS)
+        done = {"pay": 0, "rc": 0, "doc": 0, "cancel": 0}
+        skipped = 0
+        for key in form.getlist("pick"):
+            parts = str(key).split(":")
+            try:
+                if parts[0] == "pay" and payments.accept(session, int(parts[1])):
+                    done["pay"] += 1
+                elif parts[0] == "rc":
+                    row = session.get(ReceiptCheck, int(parts[1]))
+                    if row is not None and not row.decided and receipts.link(session, row, int(parts[2])):
+                        done["rc"] += 1
+                elif parts[0] == "doc":
+                    doc = session.get(Document, int(parts[1]))
+                    if doc is None or doc.review_state != "pending":
+                        continue
+                    values, missing = quick_check(doc)
+                    if missing:
+                        skipped += 1
+                        continue
+                    confirm_document(session, doc, values)
+                    done["doc"] += 1
+                elif parts[0] == "cancel":
+                    doc, contract = session.get(Document, int(parts[1])), session.get(Contract, int(parts[2]))
+                    item = next((c for c in cancellations.pending(session) if doc and c["doc"].id == doc.id), None)
+                    if doc is not None and contract is not None and item is not None:
+                        cancellations.apply(session, doc, contract, item["date"], item["effective"])
+                        done["cancel"] += 1
+            except (ValueError, IndexError):
+                continue
+            session.flush()
+        if done["doc"]:
+            request_worker(app)
+        labels = [(done["pay"], "Zahlungen übernommen"), (done["rc"], "Belege zugeordnet"),
+                  (done["doc"], "Dokumente bestätigt"), (done["cancel"], "Verträge als gekündigt markiert")]
+        msg = ", ".join(f"{n} {label}" for n, label in labels if n) or "Nichts ausgewählt"
+        if skipped:
+            msg += f" · {skipped} übersprungen (Angaben fehlen)"
+        return RedirectResponse(f"/bulk?msg={quote(msg)}", status_code=303)
 
     @app.post("/inbox/confirm")
     async def inbox_confirm(request: Request, session: Session = Depends(get_session)):

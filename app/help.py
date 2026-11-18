@@ -62,6 +62,14 @@ PAGES: dict[str, tuple[str, list[str]]] = {
         "Mit einem Tag für erstattungsfähige Rechnungen (Einstellungen → Firefly) siehst du hier auch Rechnungen, zu denen noch "
         "keine Erstattung verknüpft ist. In Paperless wird nichts geändert.",
     ]),
+    "/bulk": ("Sammelaufgaben", [
+        "Hier sammelt der Companion aus allen Bereichen, was er selbst zuordnen kann: Zahlungen zu offenen Rechnungen, Belege zu "
+        "Buchungen, vollständig erkannte Dokumente in der Inbox und Kündigungsbestätigungen.",
+        "Vorausgewählt sind nur sichere Fälle – z.B. Betrag und Rechnungsnummer bzw. IBAN passen, oder Betrag und Empfänger "
+        "bei nur einem guten Treffer. Verträge sind nie vorausgewählt. Mit „alle“ wählst du auch die unsicheren aus.",
+        "„Firefly jetzt abgleichen“ sucht vorher neue Zahlungen und Belege. Übernommen wird nur im Companion – nach Paperless "
+        "überträgst du wie gewohnt unter „Für Paperless“.",
+    ]),
     "/receipts": ("Belege", [
         "Abbuchungen aus Firefly III, zu denen kein Dokument in Paperless zugeordnet ist – so merkst du rechtzeitig, "
         "wenn ein Kassenbon oder eine Rechnung fehlt (Garantie, Steuer).",

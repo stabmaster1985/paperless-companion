@@ -18,7 +18,8 @@
   {% set nav_todo = inbox_count + outgoing_count + receipts_missing %}
   {% set nav_groups = [
     ('Erledigen', nav_todo, [('/inbox', 'Inbox', inbox_count, 'Neue Dokumente prüfen'), ('/paperless-changes', 'Für Paperless', outgoing_count, 'Vorschläge sammeln und übertragen'),
-                         ('/review', 'Vorschläge durchgehen', 0, 'Einzeln mit Vorschau'), ('/receipts', 'Belege', receipts_missing, 'Buchungen ohne Beleg')]),
+                         ('/review', 'Vorschläge durchgehen', 0, 'Einzeln mit Vorschau'), ('/receipts', 'Belege', receipts_missing, 'Buchungen ohne Beleg'),
+                         ('/bulk', 'Sammelaufgaben', 0, 'Sichere Zuordnungen aus allen Bereichen mit einem Klick übernehmen')]),
     ('Überblick', 0, [('/invoices', 'Rechnungen', 0, ''), ('/reimbursements', 'Erstattungen', 0, 'Leistungsabrechnungen, Geldeingang, Eigenanteil'),
                       ('/contracts', 'Verträge', 0, ''), ('/warranties', 'Garantien', 0, ''),
                       ('/cases', 'Vorgänge', 0, ''), ('/tax', 'Steuer', 0, '')]),
