@@ -170,15 +170,22 @@ def _words(text: str | None) -> set[str]:
     return {w for w in re.findall(r"[a-zäöüß0-9]+", (text or "").lower()) if len(w) >= 3 and w not in GENERIC}
 
 
-def match_contract(session: Session, s: Series, links: dict) -> Contract | None:
+def _contract_index(session: Session) -> list[tuple]:
+    """Verträge mit vorbereiteten Namenswörtern (einmal je Auswertung statt je Serie)."""
+    return [(c, _words(c.provider) | _words(c.document.correspondent if c.document else ""), _words(c.name),
+             party_key(c.payee) if c.payee else None)
+            for c in session.scalars(select(Contract).where(Contract.status.in_(("active", "cancelled"))))]
+
+
+def match_contract(session: Session, s: Series, links: dict, index: list[tuple] | None = None) -> Contract | None:
     if (cid := links.get(s.key)) and (c := session.get(Contract, cid)):
         return c
     payee = _words(s.payee)
+    payee_key = party_key(s.payee)
     best, best_points = None, 0
-    for c in session.scalars(select(Contract).where(Contract.status.in_(("active", "cancelled")))):
-        names = _words(c.provider) | _words(c.document.correspondent if c.document else "")
-        points = len(payee & names) * 2 + len(payee & _words(c.name))
-        if c.payee and party_key(c.payee) == party_key(s.payee):
+    for c, names, name_words, c_payee in (index if index is not None else _contract_index(session)):
+        points = len(payee & names) * 2 + len(payee & name_words)
+        if c_payee and c_payee == payee_key:
             points += 5  # beim Abo hinterlegter Firefly-Empfänger
         if c.monthly_cost and abs(c.monthly_cost - s.monthly) <= max(1.0, c.monthly_cost * 0.2):
             points += 1
@@ -193,8 +200,9 @@ def evaluate(session: Session, series: list[Series]) -> list[Series]:
     fixed = fixed_documents(session)
     paid = {m.tx_id for m in session.scalars(select(PaymentMatch).where(PaymentMatch.state == "accepted"))}
     linked = {r.tx_id for r in session.scalars(select(ReceiptCheck).where(ReceiptCheck.state == "linked"))}
+    index = _contract_index(session)
     for s in series:
-        contract = match_contract(session, s, links)
+        contract = match_contract(session, s, links, index)
         s.contract_id = contract.id if contract else None
     # Mehrere Serien desselben Empfängers am selben Vertrag (z.B. Abo und Einzelkäufe beim Versandhändler):
     # automatisch nur die passendste behalten – von dir zugeordnete bleiben immer
@@ -261,28 +269,36 @@ def _save_series(session: Session, series: list[Series]) -> None:
 def exclude(session: Session, series_key: str, tx_id: str) -> dict | None:
     """Eine Buchung aus der Serie nehmen: Sie gehört dann nicht mehr zum Vertrag/Abo und ist auf der Belegseite
     wieder frei. Gibt die Angaben der Buchung zurück."""
-    series = stored(session)
-    target = next((x for x in series if x.key == series_key and tx_id in x.tx_ids), None)
-    if target is None:
-        return None
-    i = target.tx_ids.index(tx_id)
-    info = {"key": series_key, "payee": target.payee, "date": target.dates[i], "amount": target.amounts[i],
-            "group_id": target.group_ids[i] if i < len(target.group_ids) else None,
-            "description": target.descriptions[i] if i < len(target.descriptions) else ""}
-    for name in ("tx_ids", "dates", "amounts", "group_ids", "descriptions"):
-        values = getattr(target, name)
-        if i < len(values):
-            values.pop(i)
-    _save_series(session, [x for x in series if x.tx_ids])
-    items = excluded(session)
-    items[tx_id] = info
-    _kv_set(session, EXCLUDED_KEY, items)
-    return info
+    done = exclude_many(session, series_key, [tx_id])
+    return excluded(session).get(tx_id) if done else None
 
 
 def exclude_many(session: Session, series_key: str, tx_ids: list[str]) -> int:
-    """Mehrere Buchungen auf einmal aus der Serie nehmen."""
-    return sum(1 for t in tx_ids if exclude(session, series_key, t))
+    """Mehrere Buchungen auf einmal aus der Serie nehmen – einmal lesen, einmal speichern."""
+    data = _kv(session, KEY)
+    if not isinstance(data, list):
+        return 0
+    target = next((d for d in data if d.get("key") == series_key), None)
+    if target is None:
+        return 0
+    items = excluded(session)
+    wanted, count = set(tx_ids), 0
+    for i in reversed(range(len(target.get("tx_ids", [])))):
+        tx_id = target["tx_ids"][i]
+        if tx_id not in wanted:
+            continue
+        pick = lambda name: (target.get(name) or [])[i] if i < len(target.get(name) or []) else None  # noqa: E731
+        items[tx_id] = {"key": series_key, "payee": target["payee"], "date": pick("dates"), "amount": pick("amounts"),
+                        "group_id": pick("group_ids"), "description": pick("descriptions") or ""}
+        for name in ("tx_ids", "dates", "amounts", "group_ids", "descriptions"):
+            values = target.get(name) or []
+            if i < len(values):
+                values.pop(i)
+        count += 1
+    if count:
+        _kv_set(session, KEY, [d for d in data if d.get("tx_ids")])
+        _kv_set(session, EXCLUDED_KEY, items)
+    return count
 
 
 def include(session: Session, tx_id: str) -> dict | None:
@@ -337,6 +353,15 @@ def findings(session: Session, today: date) -> dict:
                 and f"missing:{s.key}:{s.next_date.isoformat()}" not in dismissed:
             result["missing"].append({"series": s, "contract": contract})
     result["unknown"].sort(key=lambda s: -s.monthly)
+    ended = {id(x) for x in result["ended"]}
+    running = [x for x in result["all"] if id(x) not in ended
+               and today <= x.next_date + timedelta(days=x.months * 31 + (10 if x.months == 1 else 25))]
+    sums = {"total": 0.0, "contract": 0.0, "other": 0.0, "open": 0.0, "count": len(running)}
+    for x in running:
+        part = "contract" if x.covered == "Vertrag" else ("other" if x.covered else "open")
+        sums[part] += x.monthly
+        sums["total"] += x.monthly
+    result["sums"] = {k: round(v, 2) if isinstance(v, float) else v for k, v in sums.items()}
     return result
 
 

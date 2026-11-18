@@ -1070,6 +1070,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         rec = recurring.findings(session, t)
         return render(request, "contracts.html", rows=rows, fixed_costs=events.monthly_fixed_costs(session), msg=msg,
                       recurring_counts={k: len(rec[k]) for k in ("unknown", "changed", "missing")},
+                      recurring_sums=rec.get("sums"),
                       cancels=cancellations.pending(session),
                       all_contracts=sorted(session.scalars(select(Contract)), key=lambda c: (c.name or "").lower()))
 

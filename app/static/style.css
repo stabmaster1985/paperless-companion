@@ -891,3 +891,7 @@ button:disabled, button:disabled:hover { opacity: .5; cursor: not-allowed; }
 .rec-excluded td { opacity: .6; text-decoration: line-through; }
 .rec-excluded td:last-child { text-decoration: none; opacity: 1; }
 .rec-book-tools { display: flex; flex-wrap: wrap; gap: .3rem .6rem; align-items: center; margin: .3rem 0; }
+.rec-sums { display: flex; flex-direction: column; gap: .4rem; }
+.rec-sum-main { display: flex; flex-wrap: wrap; gap: .3rem .75rem; align-items: baseline; }
+.rec-sum-main .num { font-size: 1.6rem; font-weight: 700; }
+.rec-sum-parts { display: flex; flex-wrap: wrap; gap: .3rem 1.25rem; font-size: .95rem; }

@@ -2,7 +2,9 @@
 {% from "macros.html" import doclink %}
 {% block content %}
 <h1>Verträge</h1>
-<p class="muted">Fixkosten laufender Verträge: <strong>{{ fixed_costs|eur }}</strong> pro Monat <small>(gekündigte zählen bis zum Vertragsende)</small></p>
+<p class="muted">Fixkosten laufender Verträge: <strong>{{ fixed_costs|eur }}</strong> pro Monat <small>(gekündigte zählen bis zum Vertragsende)</small>
+  {% if recurring_sums and recurring_sums.total %} · laut Firefly laufen regelmäßig <a href="/recurring"><strong>{{ recurring_sums.total|eur }}</strong> pro Monat</a>
+  {% if recurring_sums.open %}<small>(davon {{ recurring_sums.open|eur }} ohne Vertrag)</small>{% endif %}{% endif %}</p>
 {% if msg %}<div class="notice ok">{{ msg }}</div>{% endif %}
 {% set rc = recurring_counts %}
 {% if rc.unknown or rc.changed or rc.missing %}

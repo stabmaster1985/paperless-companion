@@ -11,6 +11,19 @@
   halbjährlich, jährlich). Hier siehst du, welche noch keinem Vertrag zugeordnet sind, wo sich der Betrag geändert hat und wo eine
   Abbuchung ausgeblieben ist. Alles bleibt im Companion.</p>
 
+{% if data.all %}{% set su = data.sums %}
+<section class="card rec-sums">
+  <div class="rec-sum-main"><span class="num">{{ su.total|eur }}</span><span>laufende regelmäßige Abbuchungen pro Monat
+    <small class="muted">· {{ (su.total * 12)|eur }} im Jahr · {{ su.count }} Zahlungen</small></span></div>
+  <div class="rec-sum-parts">
+    <span><strong>{{ su.contract|eur }}</strong> mit Vertrag/Abo</span>
+    {% if su.other %}<span><strong>{{ su.other|eur }}</strong> über Rechnungen/Belege</span>{% endif %}
+    <span class="{{ 'soon' if su.open }}"><strong>{{ su.open|eur }}</strong> ohne Vertrag</span>
+  </div>
+  <small class="muted">Monatlich umgerechnet (vierteljährlich ÷ 3, jährlich ÷ 12), nur Zahlungen, die noch laufen.</small>
+</section>
+{% endif %}
+
 {% macro dismiss(token, label='ausblenden') %}<form method="post" action="/recurring/action" class="inline">
   <input type="hidden" name="action" value="dismiss"><input type="hidden" name="token" value="{{ token }}">
   <button class="small link">{{ label }}</button></form>{% endmacro %}

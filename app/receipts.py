@@ -180,7 +180,8 @@ def _linked_transactions(session: Session) -> dict[str, int]:
                              .options(selectinload(PaymentMatch.invoice))):
         if m.invoice is not None:
             linked[m.tx_id] = m.invoice.document_id
-    for doc_id, sugg in session.execute(select(Document.id, Document.suggestions)):
+    # vorbelegte Zahlungen gibt es nur bei Dokumenten in der Inbox
+    for doc_id, sugg in session.execute(select(Document.id, Document.suggestions).where(Document.review_state == "pending")):
         p = (sugg or {}).get("_payment") if isinstance(sugg, dict) else None
         if p and p.get("tx_id"):
             linked.setdefault(p["tx_id"], doc_id)

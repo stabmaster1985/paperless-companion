@@ -128,3 +128,16 @@ def test_streams_do_not_drift_and_one_series_per_contract(db):
         series = recurring.stored(s)
         assert len(series) == 2
         assert [x.last_amount for x in series if x.contract_id] == [8.99]  # nur das Abo, nicht die anderen Käufe
+
+
+def test_sum_of_running_payments(db):
+    with db() as s:
+        doc = Document(id=980, title="Fitness", correspondent="Fitnessstudio Muster", kind="contract", tags=[])
+        doc.contract = Contract(name="Fitness", provider="Fitnessstudio Muster", monthly_cost=29.9)
+        s.add(doc)
+    with db() as s:
+        recurring.run(s, [*monthly("Fitnessstudio Muster", 29.9, 12), *monthly("Streamingdienst AG", 12.99, 12),
+                          *monthly("Altes Abo", 5.0, 6, start=date(2023, 1, 5))])  # längst beendet: zählt nicht
+    with db() as s:
+        sums = recurring.findings(s, TODAY)["sums"]
+        assert sums == {"total": 42.89, "contract": 29.9, "other": 0.0, "open": 12.99, "count": 2}
