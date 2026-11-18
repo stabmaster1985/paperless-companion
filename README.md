@@ -85,6 +85,11 @@ prüfen und mit einem Klick übernehmen.
 
 ![Sammelaufgaben](docs/screenshots/sammelaufgaben.png)
 
+**Regelmäßige Zahlungen** – aus den Firefly-Abbuchungen erkannt: Abos und Verträge, die noch nicht erfasst sind,
+Beitrags- oder Preiserhöhungen (Monatsbeitrag mit einem Klick übernehmen) und ausgebliebene Abbuchungen.
+
+![Regelmäßige Zahlungen](docs/screenshots/regelmaessig.png)
+
 **Verlauf** – was du zuletzt bearbeitet hast, wo das Dokument jetzt steht (z.B. bezahlt, wartet auf Übertragung)
 und auf welcher Seite du danach gelandet bist; je Dokument auch auf der Dokumentseite.
 

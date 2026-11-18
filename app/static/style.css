@@ -865,3 +865,13 @@ button:disabled, button:disabled:hover { opacity: .5; cursor: not-allowed; }
 .doc-history { margin-top: .75rem; }
 .doc-history li { margin: .15rem 0; }
 .remind-card { border-top: 4px solid #b91c1c; }
+
+/* Regelmäßige Zahlungen */
+.rec-item { display: flex; flex-wrap: wrap; gap: .5rem 1rem; justify-content: space-between; align-items: center;
+  border-top: 1px solid var(--border); padding: .6rem 0; }
+.rec-item:first-of-type { border-top: 0; }
+.rec-actions { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
+.rec-actions select { max-width: 18rem; }
+.rec-id { width: 9rem; }
+.rec-changed { border-top: 4px solid #d97706; }
+.rec-missing { border-top: 4px solid #b91c1c; }

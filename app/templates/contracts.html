@@ -4,6 +4,14 @@
 <h1>Verträge</h1>
 <p class="muted">Fixkosten laufender Verträge: <strong>{{ fixed_costs|eur }}</strong> pro Monat <small>(gekündigte zählen bis zum Vertragsende)</small></p>
 {% if msg %}<div class="notice ok">{{ msg }}</div>{% endif %}
+{% set rc = recurring_counts %}
+{% if rc.unknown or rc.changed or rc.missing %}
+<div class="notice warn">Aus deinen Abbuchungen:
+  {% if rc.changed %}<strong>{{ rc.changed }}</strong> Verträge mit geändertem Betrag{% endif %}{% if rc.changed and (rc.missing or rc.unknown) %} · {% endif %}
+  {% if rc.missing %}<strong>{{ rc.missing }}</strong> ausgebliebene Abbuchungen{% endif %}{% if rc.missing and rc.unknown %} · {% endif %}
+  {% if rc.unknown %}<strong>{{ rc.unknown }}</strong> regelmäßige Zahlungen ohne Vertrag{% endif %}
+  – <a href="/recurring">ansehen →</a></div>
+{% endif %}
 
 {% if cancels %}
 <section class="card cancel-card" id="kuendigungen">

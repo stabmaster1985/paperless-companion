@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% from "macros.html" import doclink %}
+{% block content %}
+<div class="head">
+  <h1>Regelmäßige Zahlungen</h1>
+  {% if firefly_enabled %}<form method="post" action="/recurring/run" class="inline"><button class="small" title="Abbuchungen der letzten gut 13 Monate aus Firefly auswerten">Jetzt aus Firefly erkennen</button></form>{% endif %}
+</div>
+{% if msg %}<div class="notice ok">{{ msg }}</div>{% endif %}
+<p class="muted">Aus deinen Firefly-Abbuchungen erkannt: Zahlungen an denselben Empfänger in festem Rhythmus (monatlich, vierteljährlich,
+  halbjährlich, jährlich). Hier siehst du, welche noch keinem Vertrag zugeordnet sind, wo sich der Betrag geändert hat und wo eine
+  Abbuchung ausgeblieben ist. Alles bleibt im Companion.</p>
+
+{% macro dismiss(token, label='ausblenden') %}<form method="post" action="/recurring/action" class="inline">
+  <input type="hidden" name="action" value="dismiss"><input type="hidden" name="token" value="{{ token }}">
+  <button class="small link">{{ label }}</button></form>{% endmacro %}
+
+{% if not data.all %}
+<p class="empty">Noch nichts erkannt.{% if firefly_enabled %} „Jetzt aus Firefly erkennen“ wertet deine Abbuchungen aus (das passiert auch bei jedem Firefly-Abgleich).{% endif %}</p>
+{% endif %}
+
+{% if data.changed %}
+<section class="card rec-sec rec-changed">
+  <h2>Betrag geändert ({{ data.changed|length }})</h2>
+  <p class="muted">Die Abbuchungen passen nicht mehr zum Monatsbeitrag des Vertrags – z.B. nach einer Beitrags- oder Preiserhöhung.</p>
+  {% for item in data.changed %}{% set s = item.series %}{% set c = item.contract %}
+  <div class="rec-item">
+    <div><strong><a href="/documents/{{ c.document_id }}">{{ c.name or c.provider }}</a></strong> {{ doclink(c.document_id) }}
+      <small class="muted">· {{ s.payee }} · {{ s.rhythm }}</small><br>
+      {% if item.change %}<span>Abbuchung {{ item.change[0]|eur }} → <strong>{{ item.change[1]|eur }}</strong> seit {{ item.change[2][8:10] }}.{{ item.change[2][5:7] }}.{{ item.change[2][:4] }}</span><br>{% endif %}
+      <small>Im Vertrag: {{ c.monthly_cost|eur if c.monthly_cost else 'kein Monatsbeitrag' }} pro Monat · laut Abbuchungen: <strong>{{ s.monthly|eur }}</strong> pro Monat</small></div>
+    <div class="rec-actions">
+      {% if item.cost_differs or not c.monthly_cost %}
+      <form method="post" action="/recurring/action" class="inline"><input type="hidden" name="action" value="cost">
+        <input type="hidden" name="contract_id" value="{{ c.id }}"><input type="hidden" name="monthly" value="{{ s.monthly }}">
+        <button class="small primary">Monatsbeitrag auf {{ s.monthly|eur }} setzen</button></form>
+      {% endif %}
+      {{ dismiss('changed:' ~ s.key ~ ':' ~ s.last_amount) }}
+    </div>
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
+
+{% if data.missing %}
+<section class="card rec-sec rec-missing">
+  <h2>Abbuchung ausgeblieben ({{ data.missing|length }})</h2>
+  <p class="muted">Diese Zahlungen kamen bisher regelmäßig, die letzte erwartete ist aber nicht eingegangen. Gekündigt? Konto gewechselt?
+    Oder verbucht Firefly sie anders?</p>
+  {% for item in data.missing %}{% set s = item.series %}
+  <div class="rec-item">
+    <div><strong>{% if item.contract %}<a href="/documents/{{ item.contract.document_id }}">{{ item.contract.name or item.contract.provider }}</a>{% else %}{{ s.payee }}{% endif %}</strong>
+      <small class="muted">· {{ s.rhythm }} · {{ s.last_amount|eur }}</small><br>
+      <small>Letzte Abbuchung {{ s.last_date|d }} – erwartet um den <strong>{{ s.next_date|d }}</strong></small></div>
+    <div class="rec-actions">{{ dismiss('missing:' ~ s.key ~ ':' ~ s.next_date.isoformat(), 'erledigt / ausblenden') }}</div>
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
+
+{% if data.unknown %}
+<section class="card rec-sec">
+  <h2>Ohne Vertrag ({{ data.unknown|length }})</h2>
+  <p class="muted">Regelmäßige Abbuchungen, zu denen kein Vertrag erfasst ist – oft Abos, Versicherungen oder Mitgliedschaften.
+    Ordne sie einem Vertrag zu (oder erfasse den Vertrag zuerst über sein Dokument: bei „Art“ Vertrag wählen). Fehlt beim Vertrag der
+    Monatsbeitrag, wird er aus den Abbuchungen übernommen.</p>
+  {% for s in data.unknown %}
+  <div class="rec-item">
+    <div><strong>{{ s.payee }}</strong> <small class="muted">· {{ s.rhythm }} · {{ s.amounts|length }} Abbuchungen seit {{ s.dates[0][8:10] }}.{{ s.dates[0][5:7] }}.{{ s.dates[0][:4] }}</small><br>
+      <small>{{ s.last_amount|eur }} ({{ s.monthly|eur }} pro Monat) · zuletzt {{ s.last_date|d }} · nächste um den {{ s.next_date|d }}</small></div>
+    <div class="rec-actions">
+      <form method="post" action="/recurring/action" class="rec-actions">
+        <input type="hidden" name="action" value="link"><input type="hidden" name="key" value="{{ s.key }}">
+        <select name="contract_id" aria-label="Vertrag"><option value="">Vertrag wählen …</option>
+          {% for c in contracts %}<option value="{{ c.id }}">{{ c.name or c.provider }}{% if c.provider and c.name %} ({{ c.provider }}){% endif %} · #{{ c.document_id }}</option>{% endfor %}
+        </select>
+        <input name="doc_id" inputmode="numeric" placeholder="Paperless-ID" title="oder Paperless-ID des Vertragsdokuments" aria-label="Paperless-ID des Vertrags" class="rec-id">
+        <button class="small">Zuordnen</button>
+      </form>
+      {{ dismiss('unknown:' ~ s.key, 'kein Vertrag nötig') }}
+    </div>
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
+
+{% if data.all %}
+<details class="card">
+  <summary>Alle erkannten regelmäßigen Zahlungen ({{ data.all|length }})</summary>
+  <div class="table-wrap"><table class="list">
+    <thead><tr><th>Empfänger</th><th>Rhythmus</th><th>Betrag</th><th>€/Monat</th><th class="hide-sm">zuletzt</th><th>belegt durch</th></tr></thead>
+    <tbody>
+    {% for s in data.all|sort(attribute='monthly', reverse=true) %}
+      <tr><td>{{ s.payee }}</td><td>{{ s.rhythm }}</td><td class="nowrap">{{ s.last_amount|eur }}</td><td class="nowrap">{{ s.monthly|eur }}</td>
+        <td class="hide-sm">{{ s.last_date|d }}</td>
+        <td>{% if s.contract_id and contract_by_id.get(s.contract_id) %}{% set c = contract_by_id[s.contract_id] %}<a href="/documents/{{ c.document_id }}">{{ c.name or c.provider }}</a>{% else %}{{ s.covered or '–' }}{% endif %}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</details>
+{% endif %}
+{% endblock %}

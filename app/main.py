@@ -7,7 +7,7 @@ import re
 import tempfile
 import time
 from contextlib import asynccontextmanager
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import parse_qs, quote, urlencode
 from zoneinfo import ZoneInfo
@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import activity, appsettings, bulk, cancellations, dunning, cases, mqtt, reimbursements, series, help as helptexts, identifiers, learning, paperless_rules, receipts, rules as rule_proposals, deadlines, events, fields, highlight, ics, metadata, notify, payments, pipeline, reminders, retention, selection, tax
+from app import activity, appsettings, bulk, cancellations, dunning, recurring, cases, mqtt, reimbursements, series, help as helptexts, identifiers, learning, paperless_rules, receipts, rules as rule_proposals, deadlines, events, fields, highlight, ics, metadata, notify, payments, pipeline, reminders, retention, selection, tax
 from app.config import Settings, get_settings
 from app.db import get_session, init_db, session_scope
 from app.models import Case, CaseDocument, CaseEntry, Contract, Document, Invoice, KeyValue, PaymentMatch, ReceiptCheck, RuleProposal, RetentionLog, RetentionRule, Warranty
@@ -1053,7 +1053,9 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         for c in session.scalars(select(Contract)):
             rows.append((c, deadlines.compute(deadlines.terms_from_contract(c), t)))
         rows.sort(key=lambda r: (r[0].status != "active", r[1].cancel_by or date.max))
+        rec = recurring.findings(session, t)
         return render(request, "contracts.html", rows=rows, fixed_costs=events.monthly_fixed_costs(session), msg=msg,
+                      recurring_counts={k: len(rec[k]) for k in ("unknown", "changed", "missing")},
                       cancels=cancellations.pending(session),
                       all_contracts=sorted(session.scalars(select(Contract)), key=lambda c: (c.name or "").lower()))
 
@@ -1123,6 +1125,68 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             matches=payments.suggestions(session), msg=msg, SOURCE_LABELS=pipeline.SOURCE_LABELS,
             firefly_enabled=settings.firefly_enabled,
         )
+
+    @app.get("/recurring", response_class=HTMLResponse)
+    def recurring_page(request: Request, msg: str = "", session: Session = Depends(get_session)):
+        """Regelmäßige Zahlungen: Abos ohne Vertrag, Betragsänderungen, ausgebliebene Abbuchungen."""
+        data = recurring.findings(session, today())
+        contracts = sorted(session.scalars(select(Contract)), key=lambda c: (c.name or c.provider or "").lower())
+        return render(request, "recurring.html", msg=msg, data=data, contracts=contracts,
+                      contract_by_id={c.id: c for c in contracts}, firefly_enabled=settings.firefly_enabled)
+
+    @app.post("/recurring/run")
+    def recurring_run(session: Session = Depends(get_session)):
+        client = make_firefly(settings)
+        if client is None:
+            return RedirectResponse(f"/recurring?msg={quote('Firefly III ist nicht eingerichtet')}", status_code=303)
+        try:
+            count = recurring.run(session, list(client.withdrawals(today() - timedelta(days=400), today())))
+            msg = f"{count} regelmäßige Zahlungen erkannt"
+        except FireflyError as exc:
+            msg = f"Firefly nicht erreichbar: {exc}"
+        finally:
+            client.close()
+        return RedirectResponse(f"/recurring?msg={quote(msg)}", status_code=303)
+
+    @app.post("/recurring/action")
+    def recurring_action(action: str = Form(...), key: str = Form(""), token: str = Form(""), contract_id: str = Form(""),
+                         doc_id: str = Form(""), monthly: str = Form(""), session: Session = Depends(get_session)):
+        series = next((s for s in recurring.stored(session) if s.key == key), None)
+        if action == "dismiss":
+            recurring.dismiss(session, token)
+            msg = "Ausgeblendet"
+        elif action == "link" and series is not None:
+            contract = session.get(Contract, int(contract_id)) if contract_id.isdigit() else None
+            if doc_id.strip().lstrip("#").isdigit():  # Paperless-ID des Vertragsdokuments
+                wanted = int(doc_id.strip().lstrip("#"))
+                if problem := ensure_indexed(session, wanted):
+                    return RedirectResponse(f"/recurring?msg={quote(problem)}", status_code=303)
+                contract = session.get(Document, wanted).contract
+                if contract is None:
+                    msg = f"#{wanted} ist im Companion (noch) kein Vertrag – bitte öffnen, bei „Art“ Vertrag wählen und bestätigen"
+                    return RedirectResponse(f"/recurring?msg={quote(msg)}", status_code=303)
+            if contract is None:
+                return RedirectResponse(f"/recurring?msg={quote('Bitte einen Vertrag wählen oder seine Paperless-ID eingeben')}",
+                                        status_code=303)
+            recurring.link_contract(session, series.key, contract.id)
+            if contract.monthly_cost is None:
+                contract.monthly_cost = series.monthly
+                pipeline.set_source(contract.document, "monthly_cost", "firefly", confirmed=True)
+            msg = f"„{series.payee}“ gehört zu „{contract.name or contract.provider}“"
+        elif action == "cost" and contract_id.isdigit():
+            contract = session.get(Contract, int(contract_id))
+            value = pipeline.coerce("float", monthly or None)
+            if contract is not None and value:
+                old = contract.monthly_cost
+                contract.monthly_cost = value
+                pipeline.set_source(contract.document, "monthly_cost", "firefly", confirmed=True)
+                msg = (f"Monatsbeitrag „{contract.name or contract.provider}“: {value:.2f} € (vorher "
+                       f"{old:.2f} €)" if old else f"Monatsbeitrag „{contract.name or contract.provider}“: {value:.2f} €").replace(".", ",")
+            else:
+                msg = "Betrag ungültig"
+        else:
+            raise HTTPException(400)
+        return RedirectResponse(f"/recurring?msg={quote(msg)}", status_code=303)
 
     @app.post("/reminders/{doc_id}")
     def reminder_action(doc_id: int, action: str = Form("apply"), invoice_doc: str = Form(""), invoice_id: str = Form(""),

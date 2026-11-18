@@ -183,6 +183,24 @@ def start_demo(data: Path, port: int) -> None:
     with session_scope() as s:
         series.refresh(s)  # Serien wiederkehrender Dokumente (Abschläge, Lohnabrechnungen)
 
+    with session_scope() as s:  # Regelmäßige Zahlungen: erfundene Abbuchungen eines Jahres
+        from dateutil.relativedelta import relativedelta
+
+        from app import recurring
+        from app.firefly import Transaction
+
+        def rec_tx(i, day, amount, payee):
+            return Transaction(journal_id=f"rec{payee[:4]}{i}", group_id=f"rg{i}", date=day, amount=amount, counterparty=payee,
+                               iban=None, description="", text="")
+
+        start = date.today().replace(day=3) - relativedelta(months=11)
+        demo = [rec_tx(i, start + relativedelta(months=i), 19.99 if i < 8 else 24.99, s.get(Document, 2).correspondent or "Mobilfunk")
+                for i in range(12)]
+        demo += [rec_tx(i, start + relativedelta(months=i), 12.99, "Streamingdienst Muster") for i in range(12)]
+        demo += [rec_tx(i, start + relativedelta(months=3 * i, days=10), 89.0, "Tierversicherung Muster") for i in range(4)]
+        demo += [rec_tx(i, start + relativedelta(months=i, days=5), 39.0, "Zeitschriftenverlag Muster") for i in range(7)]
+        recurring.run(s, demo)
+
     with session_scope() as s:  # Verlauf: ein paar erfundene Aktionen
         from datetime import datetime, timedelta, timezone
 
@@ -255,7 +273,7 @@ def shoot(base: str) -> None:
         for name, path, width, height in [
                 ("dashboard", "/", 1280, 960), ("inbox", "/inbox", 1280, 720), ("dokument", "/documents/1", 1280, 960),
                 ("rechnungen", "/invoices", 1280, 760), ("erstattungen", "/reimbursements", 1280, 900),
-                ("serien", "/series", 1280, 620), ("belege", "/receipts", 1280, 900), ("sammelaufgaben", "/bulk", 1280, 1000), ("verlauf", "/history", 1280, 640),
+                ("serien", "/series", 1280, 620), ("belege", "/receipts", 1280, 900), ("sammelaufgaben", "/bulk", 1280, 1000), ("verlauf", "/history", 1280, 640), ("regelmaessig", "/recurring", 1280, 1000),
                 ("erstattung", "/documents/600", 1280, 1100), ("handy-dashboard", "/", 390, 844)]:
             p = page(width, height)
             p.goto(base + path)

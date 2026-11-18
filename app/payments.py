@@ -308,6 +308,13 @@ def run(session: Session, client: FireflyClient, settings: Settings, today: date
     except Exception as exc:  # noqa: BLE001 – Rückerstattungen sind ein Zusatz, der Abgleich bleibt gültig
         log.warning("Rückerstattungen suchen fehlgeschlagen: %s", exc)
         result["invoice_refunds"] = 0
+    # Regelmäßige Zahlungen (Abos, Verträge) aus gut einem Jahr Abbuchungen
+    try:
+        from app import recurring
+
+        result["recurring"] = recurring.run(session, list(client.withdrawals(today - timedelta(days=400), today)))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Regelmäßige Zahlungen erkennen fehlgeschlagen: %s", exc)
     _remember(session, result)
     return result
 
