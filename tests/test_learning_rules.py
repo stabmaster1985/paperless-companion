@@ -720,3 +720,28 @@ def test_installments_fixed_by_amount(db, settings):
         assert rows["3"].state != "linked"  # normaler PayPal-Einkauf bleibt offen
         receipts.set_fixed(s, "PayPal Europe S.a.r.l.", None, amount=49.9)  # eine Rate aufheben, die andere bleibt
         assert len(receipts.fixed_documents(s)["paypal europe"]) == 1
+
+
+def test_receipts_follow_payments_on_invoice_immediately(client):
+    """Zahlung/Teilzahlung an der Rechnung übernommen: die Buchung gilt auf der Belegseite sofort als belegt
+    (ohne neuen Firefly-Lauf) – und wird wieder offen, wenn die Zahlung gelöst wird."""
+    from app import payments
+    from tests.test_payments import tx as make_tx
+
+    with session_scope() as s:
+        doc = s.get(Document, 1)
+        doc.review_state, doc.invoice.amount, doc.invoice.status = "confirmed", 200.0, "open"
+        s.add(ReceiptCheck(tx_id="p1", tx_group_id="g1", tx_date=date(2026, 9, 5), amount=120.0, counterparty="Stadtwerke",
+                           state="candidate", candidates=[{"id": 1, "title": "x", "reason": "gleicher Absender", "score": 60}]))
+    with session_scope() as s:
+        payments.add_partial(s, s.get(Document, 1), make_tx("p1", date(2026, 9, 5), 120.0, "Stadtwerke"))
+    page = client.get("/receipts").text
+    assert "Vorschlag prüfen" not in page
+    with session_scope() as s:
+        row = s.query(ReceiptCheck).filter_by(tx_id="p1").one()
+        assert row.state == "linked" and row.document_id == 1 and row.note == "über den Zahlungsabgleich"
+    with session_scope() as s:
+        payments.remove_partial(s, s.get(Document, 1), "p1")
+    client.get("/receipts")
+    with session_scope() as s:
+        assert s.query(ReceiptCheck).filter_by(tx_id="p1").one().state == "candidate"

@@ -232,6 +232,9 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             ),
         }
         # „Heute zu tun“: was auf dich wartet, je Bereich
+        if settings.firefly_enabled:
+            receipts.sync_payments(session)
+            session.flush()
         meta_open, meta_accepted = metadata.open_counts(session)
         rule_counts = Counter(session.scalars(select(RuleProposal.state)))
         todo = {
@@ -317,6 +320,8 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     @app.get("/bulk", response_class=HTMLResponse)
     def bulk_page(request: Request, msg: str = "", session: Session = Depends(get_session)):
         """Sammelaufgaben: sichere Zuordnungen aus allen Bereichen, gesammelt übernehmen."""
+        receipts.sync_payments(session)
+        session.flush()
         sections = {
             "pay": bulk.payment_items(session),
             "rc": bulk.receipt_items(session),
@@ -1596,6 +1601,8 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     @app.get("/receipts", response_class=HTMLResponse)
     def receipts_page(request: Request, state: str = "open", msg: str = "", sort: str = "date",
                       session: Session = Depends(get_session)):
+        receipts.sync_payments(session)  # an Rechnungen übernommene Zahlungen sofort berücksichtigen
+        session.flush()
         order = ReceiptCheck.amount.desc() if sort == "amount" else ReceiptCheck.tx_date.desc()
         query = select(ReceiptCheck).order_by(order, ReceiptCheck.tx_date.desc())
         if state == "open":

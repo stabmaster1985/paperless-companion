@@ -311,7 +311,7 @@ def check(session: Session, transactions: list[Transaction], settings: Settings,
             continue
         if tx.journal_id in linked:
             row.state, row.document_id, row.candidates = "linked", linked[tx.journal_id], None
-            row.note = "über den Zahlungsabgleich"
+            row.note = PAYMENT_NOTE
         elif _is_ignored(tx.counterparty, ignored):
             row.state, row.candidates, row.note = "ignored", None, "Empfänger ausgeblendet"
         elif (target := fixed_target(session, fixed.get(party_key(tx.counterparty)), tx.date, tx.amount))[0]:
@@ -393,6 +393,26 @@ def linked_totals(session: Session) -> dict[int, tuple[int, float]]:
 
 def ignore(row: ReceiptCheck, note: str = "kein Beleg nötig") -> None:
     row.state, row.decided, row.note = "ignored", True, note
+
+
+PAYMENT_NOTE = "über den Zahlungsabgleich"
+
+
+def sync_payments(session: Session) -> int:
+    """Belegseite mit den Zahlungen an Rechnungen abgleichen, ohne auf den nächsten Firefly-Lauf zu warten:
+    Eine Buchung, die du an einer Rechnung als Zahlung bzw. Teilzahlung übernommen hast, gilt sofort als belegt –
+    und wird wieder offen, wenn du die Zahlung dort löst. Deine eigenen Entscheidungen bleiben unangetastet."""
+    linked = _linked_transactions(session)
+    changed = 0
+    for row in session.scalars(select(ReceiptCheck).where(ReceiptCheck.decided.is_(False))):
+        doc_id = linked.get(row.tx_id)
+        if doc_id is not None and (row.state != "linked" or row.document_id != doc_id):
+            row.state, row.document_id, row.candidates, row.note = "linked", doc_id, row.candidates, PAYMENT_NOTE
+            changed += 1
+        elif doc_id is None and row.state == "linked" and row.note == PAYMENT_NOTE:
+            reopen(row)
+            changed += 1
+    return changed
 
 
 def reopen(row: ReceiptCheck) -> None:
