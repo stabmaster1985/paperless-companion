@@ -112,3 +112,21 @@ def test_search_document_and_make_it_the_contract(client):
     with session_scope() as s:
         doc = s.get(Document, 950)
         assert doc.kind == "contract" and doc.contract.monthly_cost == 29.9 and doc.contract.payee == "Fitnessstudio Muster"
+
+
+def test_contract_page_shows_bookings(client):
+    with session_scope() as s:
+        doc = Document(id=960, title="Handyvertrag Muster", correspondent="Mobilfunk AG", kind="contract", tags=[],
+                       review_state="confirmed")
+        doc.contract = Contract(name="Handy", provider="Mobilfunk AG", monthly_cost=19.99)
+        s.add(doc)
+        s.flush()
+        recurring.run(s, monthly("Mobilfunk AG", 19.99, 12))
+        key = recurring.stored(s)[0].key
+        tx_id = recurring.stored(s)[0].tx_ids[-1]
+    page = client.get("/documents/960").text
+    assert "Abbuchungen" in page and "12 Abbuchungen ansehen" in page and 'name="back" value="/documents/960"' in page
+    r = client.post("/recurring/action", data={"action": "exclude", "key": key, "tx": tx_id, "back": "/documents/960"},
+                    follow_redirects=False)
+    assert r.headers["location"].startswith("/documents/960?msg=")
+    assert "11 Abbuchungen ansehen · 1 ausgenommen" in client.get("/documents/960").text

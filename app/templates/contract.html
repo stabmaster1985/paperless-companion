@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_rec_bookings.html" import bookings %}
 {% block content %}
 <div class="head">
   <h1>{{ c.label }} <span class="tag">Abo ohne Dokument</span></h1>
@@ -51,9 +52,12 @@
   <h2>Abbuchungen</h2>
   {% for s in series %}
   <p><strong>{{ s.payee }}</strong> · {{ s.rhythm }} · zuletzt {{ s.last_date|d }} über {{ s.last_amount|eur }} · nächste um den {{ s.next_date|d }}</p>
-  <ul class="plain">{% for i in range(s.dates|length)|reverse %}{% set d = s.dates[i] %}<li><small>{{ d[8:10] }}.{{ d[5:7] }}.{{ d[:4] }} · {{ s.amounts[i]|eur }}</small></li>{% endfor %}</ul>
+  {{ bookings(s, back='/contracts/' ~ c.id, open=true) }}
   {% endfor %}
 </section>
+{% else %}
+<p class="muted">Noch keine Abbuchungen erkannt. Unter <a href="/recurring">Regelmäßige Zahlungen</a> „Jetzt aus Firefly erkennen“ – der
+  „Empfänger in Firefly“ oben muss zum Namen in Firefly passen.</p>
 {% endif %}
 
 <section class="card">

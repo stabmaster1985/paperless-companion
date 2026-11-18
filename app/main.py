@@ -127,6 +127,20 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
 
     templates.env.globals["activity_of"] = activity_of
 
+    def contract_series(contract_id: int | None) -> list:
+        """Regelmäßige Zahlungen, die zu diesem Vertrag gehören."""
+        if not contract_id:
+            return []
+        with session_scope() as s:
+            return [x for x in recurring.stored(s) if x.contract_id == contract_id]
+
+    def excluded_for(series) -> list:
+        with session_scope() as s:
+            return recurring.excluded_for(s, series)
+
+    templates.env.globals["contract_series"] = contract_series
+    templates.env.globals["excluded_for"] = excluded_for
+
     def reminder_of(doc: Document) -> dict | None:
         """Zu welcher Rechnung gehört dieses Dokument als Mahnung?"""
         with session_scope() as s:
@@ -1191,7 +1205,6 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         data = recurring.findings(session, today())
         contracts = sorted(session.scalars(select(Contract)), key=lambda c: (c.name or c.provider or "").lower())
         return render(request, "recurring.html", msg=msg, data=data, contracts=contracts,
-                      excluded_for=lambda x: recurring.excluded_for(session, x),
                       contract_by_id={c.id: c for c in contracts}, firefly_enabled=settings.firefly_enabled)
 
     @app.get("/recurring/doc-search", response_class=HTMLResponse)
@@ -1222,21 +1235,22 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
 
     @app.post("/recurring/action")
     def recurring_action(action: str = Form(...), key: str = Form(""), token: str = Form(""), contract_id: str = Form(""),
-                         doc_id: str = Form(""), monthly: str = Form(""), tx: str = Form(""),
+                         doc_id: str = Form(""), monthly: str = Form(""), tx: str = Form(""), back: str = Form(""),
                          session: Session = Depends(get_session)):
         series = next((s for s in recurring.stored(session) if s.key == key), None)
+        target = back if back.startswith("/") and not back.startswith("//") else "/recurring"
         if action == "exclude":
             info = recurring.exclude(session, key, tx)
             receipts.sync_payments(session)  # auf der Belegseite sofort wieder frei
             amount = f"{info['amount']:.2f}".replace(".", ",") if info else ""
             msg = (f"Buchung vom {info['date'][8:10]}.{info['date'][5:7]}.{info['date'][:4]} ({amount} €) gehört nicht "
                    "mehr dazu – auf der Belegseite wieder frei") if info else "Buchung nicht gefunden"
-            return RedirectResponse(f"/recurring?msg={quote(msg)}#s-{quote(key)}", status_code=303)
+            return RedirectResponse(f"{target}?msg={quote(msg)}#s-{quote(key)}", status_code=303)
         if action == "include":
             info = recurring.include(session, tx)
             receipts.sync_payments(session)
             msg = "Buchung wieder aufgenommen" if info else "Buchung nicht gefunden"
-            return RedirectResponse(f"/recurring?msg={quote(msg)}", status_code=303)
+            return RedirectResponse(f"{target}?msg={quote(msg)}", status_code=303)
         if action == "dismiss":
             recurring.dismiss(session, token)
             msg = "Ausgeblendet"

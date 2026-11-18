@@ -2,6 +2,7 @@
 {% from "macros.html" import input, select, doclink, txlinks, help, docviewer, party %}
 {% block title %}{{ doc.title }} – Paperless Companion{% endblock %}
 {% block main_class %}wide{% endblock %}
+{% from "_rec_bookings.html" import bookings %}
 {% block content %}
 <div class="head">
   <div>
@@ -516,6 +517,22 @@ document.querySelectorAll('.rf-form').forEach((form) => form.addEventListener('s
     <small class="muted kbd-hint"><kbd>Strg</kbd>+<kbd>Enter</kbd> {{ 'bestätigen & nächstes' if doc.review_state == 'pending' and pending_left else ('bestätigen' if doc.review_state == 'pending' else 'speichern') }}{% if doc.review_state == 'pending' %} · <kbd>Esc</kbd> zur Inbox{% endif %}</small>
   </div>
 </form>
+{% if doc.kind == 'contract' and doc.contract %}
+<section class="card contract-bookings" id="abbuchungen">
+  {% set cser = contract_series(doc.contract.id if doc.contract else none) %}
+  {% if cser %}
+  <h2>Abbuchungen</h2>
+    {% for s in cser %}
+    <p><small>{{ s.payee }} · {{ s.rhythm }} · zuletzt {{ s.last_date|d }} über {{ s.last_amount|eur }} ({{ s.monthly|eur }} pro Monat) · nächste um den {{ s.next_date|d }}</small></p>
+    {{ bookings(s, back='/documents/' ~ doc.id) }}
+    {% endfor %}
+  {% elif doc.contract %}
+  <p class="muted"><small>Keine Abbuchungen zugeordnet. Unter <a href="/recurring">Regelmäßige Zahlungen</a> kannst du erkannte Zahlungen
+    diesem Vertrag zuordnen.</small></p>
+  {% endif %}
+
+</section>
+{% endif %}
 <script>
 // Tastenkürzel: Strg/Cmd+Enter = bestätigen (& nächstes), Esc = zurück zur Inbox
 document.addEventListener('keydown', (e) => {
