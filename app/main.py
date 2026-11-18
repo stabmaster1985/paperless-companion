@@ -731,7 +731,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         doc.kind, doc.kind_source = kind, "manual"
         doc.review_state = "none"
         if kind != "other":
-            doc.extraction_state = "queued"  # mit der neuen Art neu auswerten
+            pipeline.queue_now(doc)  # mit der neuen Art neu auswerten – vor der übrigen Warteschlange
             request_worker(app)
             return RedirectResponse(f"/documents/{doc_id}", status_code=303)
         # Sonstiges: nicht mehr auswerten, angelegte Rechnung/Vertrag/Garantie entfernen (Paperless bleibt unverändert)
@@ -749,7 +749,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         doc = session.get(Document, doc_id)
         if doc is None:
             raise HTTPException(404)
-        doc.extraction_state = "queued"
+        pipeline.queue_now(doc)
         request_worker(app)
         return RedirectResponse(f"/documents/{doc_id}", status_code=303)
 

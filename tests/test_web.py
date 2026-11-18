@@ -432,3 +432,17 @@ def test_inbox_quick_confirm(client):
         assert doc.review_state == "confirmed" and doc.invoice.amount == 45.0 and doc.invoice.due_date == date(2026, 10, 15)
         assert doc.field_sources["amount"]["confirmed"] and doc.writeback_pending
         assert s.get(Document, 911).review_state == "pending"
+
+
+def test_kind_change_jumps_the_queue(client):
+    """Art geändert: das Dokument wird vor der übrigen (langen) Warteschlange analysiert."""
+    from app import pipeline
+
+    with session_scope() as s:
+        for i in range(5):
+            s.add(Document(id=920 + i, title=f"Wartet {i}", tags=[], extraction_state="queued"))
+    client.post("/documents/2/kind", data={"kind": "warranty"})
+    with session_scope() as s:
+        assert pipeline.next_queued(s).id == 2
+        assert pipeline.next_queued(s, priority_only=True).id == 2
+    assert "als Nächstes dran" in client.get("/documents/2").text

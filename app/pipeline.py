@@ -544,6 +544,7 @@ def process_document(
                         info["ai_fields"].append(name)
 
     doc.kind, doc.kind_source = kind, source
+    doc.queue_priority = False
     doc.suggestions = sugg
     doc.extraction_state = "done"
     doc.extraction_error = None
@@ -930,10 +931,18 @@ def requeue_llm_errors(session: Session, include_exhausted: bool = False) -> int
     return len(docs)
 
 
-def next_queued(session: Session) -> Document | None:
-    return session.scalars(
-        select(Document).where(Document.extraction_state == "queued").order_by(Document.updated_at).limit(1)
-    ).first()
+def next_queued(session: Session, priority_only: bool = False) -> Document | None:
+    """Nächstes Dokument der Analyse-Warteschlange: von dir ausgelöste zuerst, dann die ältesten."""
+    query = select(Document).where(Document.extraction_state == "queued")
+    if priority_only:
+        query = query.where(Document.queue_priority.is_(True))
+    return session.scalars(query.order_by(Document.queue_priority.desc(), Document.updated_at).limit(1)).first()
+
+
+def queue_now(doc: Document) -> None:
+    """Analyse auf deinen Wunsch: vorn einreihen (läuft auch bei angehaltener Warteschlange)."""
+    doc.extraction_state = "queued"
+    doc.queue_priority = True
 
 
 def meta_overview(session: Session) -> dict:

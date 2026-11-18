@@ -379,13 +379,16 @@ class Worker:
             return pipeline.kv_get(session, "queue_paused") == "1"
 
     def _process_next(self, paperless: PaperlessClient, ollama: OllamaClient | None) -> bool:
-        if self.paused():
+        paused = self.paused()
+        if paused:
             with session_scope() as session:
+                urgent = pipeline.next_queued(session, priority_only=True) is not None
                 waiting = session.scalar(select(func.count()).select_from(Document).where(Document.extraction_state == "queued"))
-            self._idle(f"Warteschlange angehalten – {waiting} Analysen warten" if waiting else None)
-            return False
+            if not urgent:  # von dir ausgelöste Analysen laufen trotzdem
+                self._idle(f"Warteschlange angehalten – {waiting} Analysen warten" if waiting else None)
+                return False
         with session_scope() as session:
-            doc = pipeline.next_queued(session)
+            doc = pipeline.next_queued(session, priority_only=paused)
             if doc is None:
                 self._idle(None)
                 return False
@@ -411,6 +414,7 @@ class Worker:
                 doc = session.get(Document, doc_id)
                 doc.extraction_state = "error"
                 doc.extraction_error = str(exc)[:1000]
+                doc.queue_priority = False
         finally:
             self.current_document = self.current_task = self.current_since = None
         return True

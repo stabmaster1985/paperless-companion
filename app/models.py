@@ -67,6 +67,8 @@ class Document(Base):
     analyzed_at: Mapped[datetime | None] = mapped_column(DateTime)
     # Stand der Erkennung bei der letzten Analyse (siehe pipeline.ANALYSIS_VERSION)
     analysis_version: Mapped[int | None] = mapped_column(Integer)
+    # von dir ausgelöste Analyse (Art geändert, neu analysieren): vor der übrigen Warteschlange
+    queue_priority: Mapped[bool] = mapped_column(default=False, server_default="0")
     # none | pending | confirmed
     review_state: Mapped[str] = mapped_column(String, default="none")
     auto_confirmed: Mapped[bool] = mapped_column(default=False)
