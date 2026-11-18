@@ -691,3 +691,32 @@ def test_receipt_pay_invoice_from_receipts_page(client):
     with session_scope() as s:
         inv = s.get(Document, 1).invoice
         assert inv.status == "paid" and inv.paid_on == date(2026, 10, 5)
+
+
+def test_installments_fixed_by_amount(db, settings):
+    """PayPal-Ratenzahlung: nur Buchungen über den Ratenbetrag gehören zum Kreditvertrag, andere PayPal-Zahlungen nicht."""
+    settings.receipts_min_amount = 20
+    with db() as s:
+        s.add(Document(id=601, title="PayPal Ratenzahlung Kreditvertrag", correspondent="PayPal", created=date(2026, 6, 1), tags=[]))
+        s.add(Document(id=602, title="Zweiter Ratenkredit", correspondent="PayPal", created=date(2026, 7, 1), tags=[]))
+    txs = [tx("1", date(2026, 7, 1), 49.9, "PayPal Europe S.a.r.l.", "Rate 1"),
+           tx("2", date(2026, 8, 1), 49.9, "PayPal Europe S.a.r.l.", "Rate 2"),
+           tx("3", date(2026, 8, 3), 129.0, "PayPal Europe S.a.r.l.", "Einkauf Online-Shop"),
+           tx("4", date(2026, 8, 5), 30.0, "PayPal Europe S.a.r.l.", "Rate Kredit 2")]
+    with db() as s:
+        receipts.check(s, txs, settings)
+        rows = {r.tx_id: r for r in s.query(ReceiptCheck)}
+        receipts.link(s, rows["1"], 601)
+        receipts.set_fixed(s, rows["1"].counterparty, 601, amount=49.9)
+        receipts.link(s, rows["4"], 602)
+        receipts.set_fixed(s, rows["4"].counterparty, 602, amount=30.0)  # zweiter Kredit beim selben Empfänger
+        fixed = receipts.fixed_documents(s)
+        assert receipts.has_fixed(fixed, "PayPal Europe S.a.r.l.", 49.9) and not receipts.has_fixed(fixed, "PayPal Europe", 129.0)
+    with db() as s:
+        receipts.check(s, [*txs, tx("5", date(2026, 9, 5), 30.0, "PayPal Europe S.a.r.l.", "Rate Kredit 2")], settings)
+        rows = {r.tx_id: r for r in s.query(ReceiptCheck)}
+        assert rows["2"].document_id == 601 and "Rate 49,90 €" in rows["2"].note
+        assert rows["5"].document_id == 602
+        assert rows["3"].state != "linked"  # normaler PayPal-Einkauf bleibt offen
+        receipts.set_fixed(s, "PayPal Europe S.a.r.l.", None, amount=49.9)  # eine Rate aufheben, die andere bleibt
+        assert len(receipts.fixed_documents(s)["paypal europe"]) == 1

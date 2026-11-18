@@ -72,12 +72,15 @@
     {% endif %}
     {% else %}
     {% if r.state == 'linked' and r.counterparty and r.document_id %}
-      {% if party_key(r.counterparty) in fixed %}
+      {% if has_fixed(r) %}
       <form method="post" action="/receipts/{{ r.id }}/always-off" class="inline"><input type="hidden" name="state" value="{{ state }}">
         <button class="small link" title="Künftige Buchungen an diesen Empfänger wieder einzeln prüfen">feste Zuordnung aufheben</button></form>
       {% else %}
       <form method="post" action="/receipts/{{ r.id }}/always" class="inline"><input type="hidden" name="state" value="{{ state }}">
         <button class="small link" title="Miete, Abo: Buchungen an „{{ r.counterparty[:40] }}“ künftig immer diesem Dokument zuordnen">immer dieses Dokument</button></form>
+      <form method="post" action="/receipts/{{ r.id }}/always" class="inline"><input type="hidden" name="state" value="{{ state }}">
+        <input type="hidden" name="same_amount" value="1">
+        <button class="small link" title="Ratenzahlung (z.B. PayPal, Kredit): nur Buchungen an „{{ r.counterparty[:40] }}“ über genau {{ r.amount|eur }} künftig diesem Dokument zuordnen – andere Buchungen an denselben Empfänger bleiben einzeln">nur Raten über {{ r.amount|eur }}</button></form>
       {% if correspondents.get(r.document_id) %}
       <form method="post" action="/receipts/{{ r.id }}/always" class="inline"><input type="hidden" name="state" value="{{ state }}">
         <input type="hidden" name="mode" value="latest">
@@ -153,7 +156,7 @@
 <section class="card">
   <h2>Feste Zuordnungen ({{ fixed|length }}) {{ help("Miete, Abos: immer dasselbe Dokument. Laufende Zahlungen (Strom, Gas, Versicherung): jeweils das neueste Dokument des Korrespondenten bis zum Buchungstag – Vertrag, Abschlagsplan oder Jahresabrechnung. Kommt eine neue Abrechnung, gehören spätere Abbuchungen automatisch zu ihr. Aufheben über „feste Zuordnung aufheben“ an einer zugeordneten Buchung.") }}</h2>
   {% if fixed %}
-  <ul class="plain">{% for key, entry in fixed.items() %}<li>„{{ key }}“ → {% if entry is mapping %}{{ fixed_titles[key] }}{% else %}<a href="/documents/{{ entry }}">{{ fixed_titles[key] }}</a>{% endif %}</li>{% endfor %}</ul>
+  <ul class="plain">{% for key, entry in fixed.items() %}<li>„{{ key }}“ → {% if entry is number %}<a href="/documents/{{ entry }}">{{ fixed_titles[key] }}</a>{% else %}{{ fixed_titles[key] }}{% endif %}</li>{% endfor %}</ul>
   {% else %}<p class="muted">Noch keine. Ordne eine Buchung zu und wähle „immer dieses Dokument“ (z.B. Miete → Mietvertrag) oder „laufende Zahlung“ (z.B. Stromabschlag → jeweils neuester Vertrag/Abrechnung der Stadtwerke).</p>{% endif %}
 </section>
 

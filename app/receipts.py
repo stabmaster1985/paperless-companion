@@ -53,35 +53,83 @@ def fixed_documents(session: Session) -> dict[str, int | dict]:
     return _kv(session, FIXED_KEY)
 
 
-def set_fixed(session: Session, counterparty: str, doc_id: int | None, mode: str = "doc") -> None:
+def _amount_entries(value) -> list[dict]:
+    """Betragsgebundene Einträge eines Empfängers (Raten): Liste von {"doc", "amount", …}."""
+    if isinstance(value, list):
+        return [e for e in value if isinstance(e, dict)]
+    if isinstance(value, dict) and value.get("amount") is not None:
+        return [value]
+    return []
+
+
+def set_fixed(session: Session, counterparty: str, doc_id: int | None, mode: str = "doc",
+              amount: float | None = None) -> None:
     """Dauerauftrag/Abo: Buchungen an diesen Empfänger künftig fest zuordnen (None = aufheben).
 
     mode "doc": immer dieses Dokument. mode "latest": laufende Zahlung (Strom, Gas, Versicherung) – jeweils das
     neueste Dokument desselben Korrespondenten bis zum Buchungstag (Vertrag, Abschlagsplan, Jahresabrechnung).
+    Mit `amount`: nur Buchungen genau dieses Betrags (Raten bei PayPal o.ä. – derselbe Empfänger hat sonst viele
+    andere Buchungen). Mehrere Raten (z.B. zwei Kredite) beim selben Empfänger sind möglich.
     """
     fixed = fixed_documents(session)
     key = party_key(counterparty)
+    if not key:
+        return
     if doc_id is None:
-        fixed.pop(key, None)
-    elif key:
+        if amount is not None and (entries := _amount_entries(fixed.get(key))):
+            rest = [e for e in entries if abs(e["amount"] - amount) > 0.005]
+            if rest:
+                fixed[key] = rest
+            else:
+                fixed.pop(key, None)
+        else:
+            fixed.pop(key, None)
+    else:
         doc = session.get(Document, doc_id)
         if mode == "latest" and doc is not None and doc.correspondent:
-            fixed[key] = {"mode": "latest", "correspondent": doc.correspondent, "doc": doc_id}
+            entry = {"mode": "latest", "correspondent": doc.correspondent, "doc": doc_id}
         else:
-            fixed[key] = doc_id
+            entry = {"mode": "doc", "doc": doc_id} if amount is not None else doc_id
+        if amount is not None:
+            entry["amount"] = round(amount, 2)
+            others = [e for e in _amount_entries(fixed.get(key)) if abs(e["amount"] - amount) > 0.005]
+            fixed[key] = [*others, entry]
+        else:
+            fixed[key] = entry
     _kv_set(session, FIXED_KEY, fixed)
+
+
+def has_fixed(fixed: dict, counterparty: str, amount: float) -> bool:
+    """Gilt für diese Buchung eine feste Zuordnung (bei Raten: nur mit passendem Betrag)?"""
+    value = fixed.get(party_key(counterparty))
+    if value is None:
+        return False
+    entries = _amount_entries(value)
+    return not entries or any(abs(e["amount"] - amount) <= 0.005 for e in entries)
 
 
 def fixed_label(session: Session, entry) -> str:
     """Kurzbeschreibung einer festen Zuordnung für die Liste."""
+    if isinstance(entry, list):
+        return "; ".join(fixed_label(session, e) for e in entry)
     if isinstance(entry, dict):
-        return f"laufende Zahlung – jeweils neuestes Dokument von {entry.get('correspondent')}"
+        rate = f" (nur Buchungen über {entry['amount']:.2f} €)".replace(".", ",") if entry.get("amount") is not None else ""
+        if entry.get("mode") == "latest":
+            return f"laufende Zahlung – jeweils neuestes Dokument von {entry.get('correspondent')}{rate}"
+        return fixed_label(session, entry.get("doc")) + rate
     doc = session.get(Document, entry) if isinstance(entry, int) else None
     return doc.title if doc and doc.title else f"#{entry}"
 
 
-def fixed_target(session: Session, entry, day: date) -> tuple[int | None, str]:
-    """Zu welchem Dokument gehört eine Buchung vom Tag `day` laut fester Zuordnung? Gibt (ID, Hinweis) zurück."""
+def fixed_target(session: Session, entry, day: date, amount: float | None = None) -> tuple[int | None, str]:
+    """Zu welchem Dokument gehört eine Buchung vom Tag `day` (über `amount`) laut fester Zuordnung?
+    Gibt (ID, Hinweis) zurück."""
+    if isinstance(entry, list):
+        match = next((e for e in entry if amount is not None and abs(e.get("amount", -1) - amount) <= 0.005), None)
+        return fixed_target(session, match, day, amount) if match else (None, "")
+    if isinstance(entry, dict) and entry.get("amount") is not None and \
+            (amount is None or abs(entry["amount"] - amount) > 0.005):
+        return None, ""
     if isinstance(entry, dict) and entry.get("mode") == "latest":
         # Leistungsabrechnungen derselben Krankenversicherung sind kein Beleg für den Beitrag
         docs = [d for d in session.scalars(select(Document).where(Document.correspondent == entry["correspondent"],
@@ -92,9 +140,11 @@ def fixed_target(session: Session, entry, day: date) -> tuple[int | None, str]:
         if doc is None:
             return None, ""
         return doc.id, f"laufende Zahlung: neuestes Dokument von {entry['correspondent']}"
-    doc_id = entry if isinstance(entry, int) else None
+    doc_id = entry.get("doc") if isinstance(entry, dict) else entry if isinstance(entry, int) else None
     if doc_id is None or session.get(Document, doc_id) is None:
         return None, ""
+    if isinstance(entry, dict) and entry.get("amount") is not None:
+        return doc_id, f"Rate {entry['amount']:.2f} €: immer dieses Dokument".replace(".", ",")
     return doc_id, "Dauerauftrag: immer dieses Dokument"
 
 
@@ -264,7 +314,7 @@ def check(session: Session, transactions: list[Transaction], settings: Settings,
             row.note = "über den Zahlungsabgleich"
         elif _is_ignored(tx.counterparty, ignored):
             row.state, row.candidates, row.note = "ignored", None, "Empfänger ausgeblendet"
-        elif (target := fixed_target(session, fixed.get(party_key(tx.counterparty)), tx.date))[0]:
+        elif (target := fixed_target(session, fixed.get(party_key(tx.counterparty)), tx.date, tx.amount))[0]:
             row.state, row.document_id, row.candidates = "linked", target[0], None
             row.note = target[1]
         elif cands := candidates_for(session, tx, invoices, docs, learned, paid_elsewhere - {linked.get(tx.journal_id)}):

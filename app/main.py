@@ -1485,6 +1485,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                       totals=receipts.linked_totals(session),
                       overview=receipts.overview(session), ignored=receipts.ignored_counterparties(session),
                       titles=titles, settings=settings, fixed=fixed, party_key=receipts.party_key,
+                      has_fixed=lambda r: receipts.has_fixed(fixed, r.counterparty, r.amount),
                       fixed_titles={k: receipts.fixed_label(session, v) for k, v in fixed.items()},
                       correspondents={d.id: d.correspondent for d in session.scalars(select(Document).where(
                           Document.id.in_([r.document_id for r in rows if r.document_id] or [-1])))})
@@ -1581,6 +1582,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
 
     @app.post("/receipts/{row_id}/{action}")
     def receipts_action(row_id: int, action: str, doc_id: str = Form(""), state: str = Form("open"), mode: str = Form("doc"),
+                        same_amount: str = Form(""),
                         session: Session = Depends(get_session)):
         row = session.get(ReceiptCheck, row_id)
         if row is None:
@@ -1610,18 +1612,22 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                     other.state, other.note = "ignored", "Empfänger ausgeblendet"
             msg = f"„{row.counterparty}“ wird künftig ausgeblendet"
         elif action == "always" and row.document_id:
-            receipts.set_fixed(session, row.counterparty, row.document_id, mode)
+            receipts.set_fixed(session, row.counterparty, row.document_id, mode, row.amount if same_amount else None)
             entry = receipts.fixed_documents(session).get(receipts.party_key(row.counterparty))
             for other in session.scalars(select(ReceiptCheck).where(ReceiptCheck.decided.is_(False))):
                 if receipts.party_key(other.counterparty) == receipts.party_key(row.counterparty):
-                    target, note = receipts.fixed_target(session, entry, other.tx_date)
+                    target, note = receipts.fixed_target(session, entry, other.tx_date, other.amount)
                     if target:
                         other.state, other.document_id, other.candidates, other.note = "linked", target, None, note
-            msg = (f"Buchungen an „{row.counterparty}“ gehören künftig zum jeweils neuesten Dokument des Korrespondenten"
-                   if isinstance(entry, dict) else
-                   f"Buchungen an „{row.counterparty}“ werden künftig immer diesem Dokument zugeordnet")
+            if same_amount:
+                msg = (f"Buchungen an „{row.counterparty}“ über {row.amount:.2f} € werden künftig immer diesem Dokument "
+                       "zugeordnet – andere Beträge bleiben einzeln").replace(".", ",", 1)
+            elif isinstance(entry, dict):
+                msg = f"Buchungen an „{row.counterparty}“ gehören künftig zum jeweils neuesten Dokument des Korrespondenten"
+            else:
+                msg = f"Buchungen an „{row.counterparty}“ werden künftig immer diesem Dokument zugeordnet"
         elif action == "always-off":
-            receipts.set_fixed(session, row.counterparty, None)
+            receipts.set_fixed(session, row.counterparty, None, amount=row.amount)
             msg = f"Feste Zuordnung für „{row.counterparty}“ aufgehoben"
         elif action == "reopen":
             receipts.reopen(row)
