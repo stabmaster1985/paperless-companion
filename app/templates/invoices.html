@@ -30,6 +30,37 @@
   </table></div>
 </section>
 {% endif %}
+{% if reminders %}
+<section class="card remind-card" id="mahnungen">
+  <h2>Mahnungen ({{ reminders|length }})</h2>
+  <p class="muted">Diese Dokumente sehen nach einer Mahnung oder Zahlungserinnerung aus – keine neue Rechnung, sondern ein Hinweis zu
+    einer bestehenden. Rechnung prüfen und zuordnen; die neue Frist wird auf Wunsch als Fälligkeit übernommen. Nach Paperless geht nichts automatisch.</p>
+  {% for item in reminders %}{% set doc = item.doc %}
+  <form method="post" action="/reminders/{{ doc.id }}" class="cancel-item">
+    <div class="cancel-doc"><a href="/documents/{{ doc.id }}">{{ doc.title or ('#' ~ doc.id) }}</a> {{ doclink(doc.id) }}
+      <small class="muted">{{ doc.correspondent or 'ohne Korrespondent' }} · {{ doc.created|d }}{% if item.by_title %} · nach dem Titel erkannt{% endif %}</small></div>
+    {% set cur = item.invoice_doc.invoice if item.invoice_doc else none %}
+    {% if cur and cur.status == 'paid' %}<div class="notice warn"><small>Die gefundene Rechnung ist laut Companion schon bezahlt{% if cur.paid_on %} am {{ cur.paid_on|d }}{% endif %} – vielleicht hat sich die Zahlung mit der Mahnung überschnitten.</small></div>{% endif %}
+    <div class="grid">
+      <label class="field"><span>Rechnung</span>
+        <select name="invoice_doc"><option value="">– bitte wählen –</option>
+          {% if cur and cur.status == 'paid' %}<option value="{{ item.invoice_doc.id }}" selected>{{ cur.issuer or item.invoice_doc.title }} · {{ cur.amount|eur }} (bezahlt)</option>{% endif %}
+          {% for i in invoice_choices %}<option value="{{ i.document_id }}" {{ 'selected' if item.invoice_doc and item.invoice_doc.id == i.document_id }}>{{ i.issuer or i.document.title }} · {{ i.amount|eur }}{% if i.invoice_number %} · Nr. {{ i.invoice_number }}{% endif %}{% if i.due_date %} · fällig {{ i.due_date|d }}{% endif %}</option>{% endfor %}
+        </select></label>
+      <label class="field"><span>Mahnung vom</span><input type="date" name="day" value="{{ item.date.isoformat() if item.date }}"></label>
+      <label class="field"><span>Neue Frist</span><input type="date" name="due" value="{{ item.due.isoformat() if item.due }}"></label>
+      <label class="field"><span>Mahngebühr (€)</span><input name="fee" inputmode="decimal" value="{{ '%.2f'|format(item.fee) if item.fee }}"></label>
+    </div>
+    <label class="check"><input type="checkbox" name="take_due" value="1" checked> neue Frist als Fälligkeit der Rechnung übernehmen</label>
+    <label class="check"><input type="checkbox" name="link" value="1" checked> „gehört zu“ vormerken (Mahnung → Rechnung, übertragen unter „Für Paperless“)</label>
+    <div class="actions">
+      <button class="small primary" name="action" value="apply">Der Rechnung zuordnen</button>
+      <button class="small link" name="action" value="dismiss" title="Keine Mahnung bzw. nicht mehr anzeigen">ausblenden</button>
+    </div>
+  </form>
+  {% endfor %}
+</section>
+{% endif %}
 <nav class="tabs">
   <a href="/invoices?status=open" class="{{ 'active' if status == 'open' }}">Offen</a>
   <a href="/invoices?status=paid" class="{{ 'active' if status == 'paid' }}">Bezahlt</a>
@@ -43,7 +74,8 @@
   {% for i in invoices %}
     {% set overdue = i.status == 'open' and i.payment_method != 'debit' and i.due_date and i.due_date < today %}
     <tr class="{{ 'overdue' if overdue }}">
-      <td><a href="/documents/{{ i.document_id }}">{{ i.issuer or i.document.title }}</a> {{ doclink(i.document_id) }}</td>
+      <td><a href="/documents/{{ i.document_id }}">{{ i.issuer or i.document.title }}</a> {{ doclink(i.document_id) }}
+        {%- if i.reminders %} <span class="tag tag-overdue" title="{% for r in i.reminders %}Mahnung vom {{ r.date[8:10] }}.{{ r.date[5:7] }}.{{ r.date[:4] }}{% if r.fee %}, Gebühr {{ r.fee|eur }}{% endif %}{{ '; ' if not loop.last }}{% endfor %}">{{ i.reminders|length }}× gemahnt</span>{% endif %}</td>
       <td class="nowrap">{{ i.amount|eur }}{% if i.paid_amount and i.status == 'open' %}<br><small class="muted" title="Teilzahlungen: {{ i.paid_amount|eur }} bezahlt">noch {{ i.open_amount|eur }} offen</small>{% endif %}
         {%- if i.id in with_parts %}{% set ps_ = parts.get(i.id, []) %}
         <details class="inv-parts"><summary>{{ ps_|length }} Zahlung{{ 'en' if ps_|length != 1 }} · {{ ps_|sum(attribute='amount')|eur }}</summary>

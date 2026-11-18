@@ -140,6 +140,8 @@ class Invoice(Base):
     refund_tx_id: Mapped[str | None] = mapped_column(String)
     refund_tx_group_id: Mapped[str | None] = mapped_column(String)
     refund_doc_id: Mapped[int | None] = mapped_column(Integer)  # Gutschrift-/Storno-Dokument in Paperless
+    # Mahnungen zu dieser Rechnung: [{"doc", "date", "due", "fee"}]
+    reminders: Mapped[list | None] = mapped_column(JSON)
 
     document: Mapped[Document] = relationship(back_populates="invoice")
 

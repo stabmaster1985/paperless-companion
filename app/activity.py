@@ -28,7 +28,7 @@ def document_for(session: Session, path: str) -> int | None:
     """Betroffenes Dokument zu einer Aktions-Adresse."""
     patterns = [
         (r"^/documents/(\d+)", lambda i: i),
-        (r"^/(?:cancellations|reimbursements)/(\d+)", lambda i: i),
+        (r"^/(?:cancellations|reimbursements|reminders)/(\d+)", lambda i: i),
         (r"^/receipts/(\d+)/", lambda i: (row := session.get(ReceiptCheck, i)) and row.document_id),
         (r"^/invoices/(\d+)/", lambda i: (inv := session.get(Invoice, i)) and inv.document_id),
         (r"^/contracts/(\d+)/", lambda i: (c := session.get(Contract, i)) and c.document_id),

@@ -71,6 +71,15 @@ document.querySelectorAll('#viewer .tab[data-tab]').forEach((tab) => tab.addEven
 }));
 </script>
 <div class="review-main">
+{% set rem = sugg.get('_reminder') if sugg else none %}
+{% set remof = reminder_of(doc) %}
+{% if remof %}<div class="notice">Mahnung zur Rechnung <a href="/documents/{{ remof.id }}">{{ remof.title }}</a>.</div>
+{% elif rem and not rem.dismissed %}<div class="notice warn">Das sieht nach einer <strong>Mahnung</strong> aus. <a href="/invoices#mahnungen">Unter Rechnungen der Rechnung zuordnen →</a></div>{% endif %}
+{% if doc.invoice and doc.invoice.reminders %}
+<div class="notice {{ 'warn' if doc.invoice.status == 'open' else '' }}"><strong>{{ doc.invoice.reminders|length }}× gemahnt:</strong>
+  {% for r in doc.invoice.reminders %}<a href="/documents/{{ r.doc }}">Mahnung vom {{ r.date[8:10] }}.{{ r.date[5:7] }}.{{ r.date[:4] }}</a>{% if r.due %} (Frist {{ r.due[8:10] }}.{{ r.due[5:7] }}.{{ r.due[:4] }}){% endif %}{% if r.fee %}, Gebühr {{ r.fee|eur }}{% endif %}{{ '; ' if not loop.last }}{% endfor %}
+  {% if doc.invoice.status == 'paid' %}<br><small>Rechnung ist bezahlt{% if doc.invoice.paid_on %} am {{ doc.invoice.paid_on|d }}{% endif %} – hat sich die Zahlung mit der Mahnung überschnitten? Sonst beim Absender nachfragen.</small>{% endif %}</div>
+{% endif %}
 {% set rof = refund_of(doc) %}
 {% if rof %}<div class="notice">Gutschrift-Beleg zur Rechnung <a href="/documents/{{ rof.id }}#refund">{{ rof.title or ('#' ~ rof.id) }}</a>{% if rof.amount %} · {{ rof.amount|eur }} zurück{% endif %}.</div>{% endif %}
 {% set canc = sugg.get('_cancellation') if sugg else none %}

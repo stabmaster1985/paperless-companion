@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import activity, appsettings, bulk, cancellations, cases, mqtt, reimbursements, series, help as helptexts, identifiers, learning, paperless_rules, receipts, rules as rule_proposals, deadlines, events, fields, highlight, ics, metadata, notify, payments, pipeline, reminders, retention, selection, tax
+from app import activity, appsettings, bulk, cancellations, dunning, cases, mqtt, reimbursements, series, help as helptexts, identifiers, learning, paperless_rules, receipts, rules as rule_proposals, deadlines, events, fields, highlight, ics, metadata, notify, payments, pipeline, reminders, retention, selection, tax
 from app.config import Settings, get_settings
 from app.db import get_session, init_db, session_scope
 from app.models import Case, CaseDocument, CaseEntry, Contract, Document, Invoice, KeyValue, PaymentMatch, ReceiptCheck, RuleProposal, RetentionLog, RetentionRule, Warranty
@@ -126,6 +126,15 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                     for e in activity.recent(s, document_id=doc_id, limit=10)]
 
     templates.env.globals["activity_of"] = activity_of
+
+    def reminder_of(doc: Document) -> dict | None:
+        """Zu welcher Rechnung gehört dieses Dokument als Mahnung?"""
+        with session_scope() as s:
+            inv_doc_id = dunning.attached(s).get(doc.id)
+            target = s.get(Document, inv_doc_id) if inv_doc_id else None
+            return {"id": target.id, "title": target.invoice.issuer or target.title} if target else None
+
+    templates.env.globals["reminder_of"] = reminder_of
     templates.env.globals["refund_docs_of"] = refund_docs_of
     templates.env.globals["refund_of"] = refund_of
     templates.env.globals["doc_title"] = doc_title
@@ -1066,13 +1075,40 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         with_parts = {inv_id for inv_id, ms in parts.items() if len(ms) > 1} | set(session.scalars(
             select(Invoice.id).where(Invoice.paid_amount.is_not(None))))
         rows = session.scalars(query).all()
+        reminders = dunning.pending(session)
         if status == "partial":
             rows = [i for i in rows if i.id in with_parts]
         return render(
-            request, "invoices.html", invoices=rows, status=status, parts=parts, with_parts=with_parts,
+            request, "invoices.html", invoices=rows, status=status, parts=parts, with_parts=with_parts, reminders=reminders,
+            invoice_choices=sorted(session.scalars(select(Invoice).where(Invoice.status == "open")),
+                                   key=lambda i: ((i.issuer or "").lower(), i.due_date or date.max)),
             matches=payments.suggestions(session), msg=msg, SOURCE_LABELS=pipeline.SOURCE_LABELS,
             firefly_enabled=settings.firefly_enabled,
         )
+
+    @app.post("/reminders/{doc_id}")
+    def reminder_action(doc_id: int, action: str = Form("apply"), invoice_doc: str = Form(""), day: str = Form(""),
+                        due: str = Form(""), fee: str = Form(""), take_due: str = Form(""), link: str = Form(""),
+                        session: Session = Depends(get_session)):
+        """Mahnung der Rechnung zuordnen (nur im Companion) oder ausblenden."""
+        doc = session.get(Document, doc_id)
+        if doc is None:
+            raise HTTPException(404)
+        if action == "dismiss":
+            dunning.dismiss(doc)
+            return RedirectResponse(f"/invoices?msg={quote('Ausgeblendet')}#mahnungen", status_code=303)
+        target = session.get(Document, int(invoice_doc)) if invoice_doc.isdigit() else None
+        if target is None or target.invoice is None:
+            return RedirectResponse(f"/invoices?msg={quote('Bitte die Rechnung auswählen')}#mahnungen", status_code=303)
+        try:
+            day_d, due_d = pipeline.coerce("date", day or None), pipeline.coerce("date", due or None)
+            fee_v = pipeline.coerce("float", fee or None)
+        except ValueError:
+            return RedirectResponse(f"/invoices?msg={quote('Datum oder Gebühr ungültig')}#mahnungen", status_code=303)
+        notes = dunning.apply(session, doc, target, day_d, due_d, fee_v, take_due=bool(take_due), link=bool(link),
+                              settings=settings, today=today())
+        msg = f"Mahnung der Rechnung „{target.invoice.issuer or target.title}“ zugeordnet" + (f" – {notes}" if notes else "")
+        return RedirectResponse(f"/invoices?msg={quote(msg)}", status_code=303)
 
     @app.post("/payments/run")
     def payments_run(session: Session = Depends(get_session)):
