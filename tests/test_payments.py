@@ -468,3 +468,28 @@ def test_suggest_further_installments(db, settings):
         assert inv.status == "open" and inv.open_amount == 100.0  # als Teilzahlung, nicht „bezahlt“
         payments.accept(s, sugg["r3"].id)
         assert s.get(Document, 1).invoice.status == "paid"
+
+
+def test_collective_payment_for_several_invoices(db, settings):
+    """Eine Überweisung über die Summe mehrerer Rechnungen desselben Ausstellers wird für jede vorgeschlagen."""
+    settings.firefly_auto_accept = True
+    with db() as s:
+        for i, amount in enumerate([120.0, 80.5, 99.0]):
+            add_invoice(s, 10 + i, amount, issuer="Praxis Dr. Muster", invoice_number=f"PR-{i + 1}")
+        add_invoice(s, 20, 80.5, issuer="Anderer Handwerker")
+    with db() as s:
+        counts = payments.match(s, [tx("s1", date(2026, 9, 20), 200.5, "Praxis Dr. Muster", "PR-1 PR-2")], settings)
+        sugg = s.query(PaymentMatch).filter_by(tx_id="s1").all()
+        assert sorted(m.invoice.document_id for m in sugg) == [10, 11] and counts["accepted"] == 0
+        assert sugg[0].reasons.startswith("Sammelzahlung (2 Rechnungen, zusammen 200,50 €)")
+        assert {m.amount for m in sugg} == {120.0, 80.5}  # je Rechnung ihr Anteil
+        for m in sugg:
+            payments.accept(s, m.id)
+        assert s.get(Document, 10).invoice.status == "paid" and s.get(Document, 11).invoice.status == "paid"
+    with db() as s:  # nicht eindeutig (zwei gleich große Kombinationen) -> kein Vorschlag
+        add_invoice(s, 30, 50.0, issuer="Schreiner Holz")
+        add_invoice(s, 31, 50.0, issuer="Schreiner Holz")
+        add_invoice(s, 32, 50.0, issuer="Schreiner Holz")
+    with db() as s:
+        payments.match(s, [tx("s2", date(2026, 9, 21), 100.0, "Schreiner Holz", "")], settings)
+        assert s.query(PaymentMatch).filter_by(tx_id="s2").count() == 0

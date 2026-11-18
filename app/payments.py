@@ -94,6 +94,9 @@ def match(session: Session, transactions: list[Transaction], settings: Settings)
 
     counts = {"suggested": 0, "accepted": 0}
     counts["suggested"] += partial_suggestions(session, invoices, transactions, used_tx, known_pairs, owner)
+    taken = {tx.journal_id for _, _, tx, _ in candidates}
+    counts["suggested"] += collective_suggestions(session, invoices, transactions, used_tx | taken, known_pairs, owner,
+                                                  has_suggestion | {inv.id for _, inv, _, _ in candidates})
     for points, inv, tx, reasons in sorted(candidates, key=lambda c: -c[0]):
         if tx.journal_id in used_tx:
             continue
@@ -628,6 +631,61 @@ def choose(session: Session, doc: Document, tx: Transaction, take=TAKE) -> tuple
 
         pipeline.set_source(doc, list(values), "firefly", 0.9, True)
     return "als bezahlt übernommen", form
+
+
+COLLECTIVE_REASON = "Sammelzahlung"
+
+
+def collective_suggestions(session: Session, invoices: list[Invoice], transactions: list[Transaction], used_tx: set[str],
+                           known_pairs: set, owner: dict[str, int], busy: set[int]) -> int:
+    """Eine Überweisung bezahlt mehrere Rechnungen desselben Ausstellers (Handwerker, Arzt): Buchungen, deren Betrag
+    genau der Summe von 2–4 offenen Rechnungen entspricht, werden für jede dieser Rechnungen vorgeschlagen.
+    Nur wenn die Kombination eindeutig ist; nie automatisch übernommen."""
+    from itertools import combinations
+
+    found = 0
+    free = [inv for inv in invoices if inv.id not in busy and not inv.paid_amount and inv.amount]
+    for tx in sorted(transactions, key=lambda t: t.date):
+        if tx.journal_id in used_tx or tx.journal_id in owner:
+            continue
+        payee = _words(f"{tx.counterparty} {tx.description}")
+        cands = []
+        for inv in free:
+            if inv.id in busy or (inv.id, tx.journal_id) in known_pairs or inv.amount >= tx.amount - 0.005:
+                continue
+            issuer = inv.issuer or (inv.document.correspondent if inv.document else "") or ""
+            base = inv.invoice_date or (inv.document.created if inv.document else None) or inv.due_date
+            if not (_words(issuer) & payee) or base is None:
+                continue
+            if not base - timedelta(days=7) <= tx.date <= max(inv.due_date or base, base) + timedelta(days=90):
+                continue
+            cands.append(inv)
+        if len(cands) < 2:
+            continue
+        cands = sorted(cands, key=lambda i: i.invoice_date or i.due_date or date.min)[:12]
+        solution = None
+        for size in range(2, min(4, len(cands)) + 1):
+            hits = [combo for combo in combinations(cands, size) if abs(sum(i.amount for i in combo) - tx.amount) <= 0.01]
+            if len(hits) == 1:
+                solution = hits[0]
+            if hits:
+                break  # mehrere gleich große Kombinationen: nicht eindeutig -> nichts vorschlagen
+        if not solution:
+            continue
+        numbers = [i.invoice_number for i in solution if i.invoice_number and len(i.invoice_number) >= 3]
+        all_numbers = bool(numbers) and len(numbers) == len(solution) and all(_compact(n) in _compact(tx.text) for n in numbers)
+        points = 80 + (40 if all_numbers else 0)
+        label = f"{COLLECTIVE_REASON} ({len(solution)} Rechnungen, zusammen {tx.amount:.2f} €)".replace(".", ",")
+        reasons = [label, "Empfänger", *(["Rechnungsnr."] if all_numbers else [])]
+        for inv in solution:
+            session.add(PaymentMatch(
+                invoice_id=inv.id, tx_id=tx.journal_id, tx_group_id=tx.group_id, tx_date=tx.date, amount=inv.amount,
+                counterparty=tx.counterparty[:200], description=tx.description[:300], score=points,
+                reasons=", ".join(reasons), state="suggested"))
+            busy.add(inv.id)
+            found += 1
+        used_tx.add(tx.journal_id)
+    return found
 
 
 PARTIAL_REASON = "Teilzahlung"
