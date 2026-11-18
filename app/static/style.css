@@ -838,3 +838,5 @@ button:disabled, button:disabled:hover { opacity: .5; cursor: not-allowed; }
 .inv-parts { font-size: .85rem; margin-top: .2rem; }
 .inv-parts > summary { cursor: pointer; color: var(--accent); }
 .inv-parts ul { margin: .2rem 0 0; }
+.link-search { margin-top: .5rem; }
+.links-planned { margin: .5rem 0; }

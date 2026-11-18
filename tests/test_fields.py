@@ -247,3 +247,34 @@ def test_field_names_match_despite_spelling():
     decomposed = unicodedata.normalize("NFD", "Gehört\u00a0 zu")
     assert fields.norm_name(decomposed) == fields.norm_name("gehört zu") == "gehört zu"
     assert fields.norm_name("„gehört zu“") == "gehört zu"
+
+
+def test_link_documents_in_companion(client, mock_api, my_settings):
+    """„gehört zu“ im Companion vormerken: hinzufügen, entfernen, zurücknehmen – übertragen erst über „Für Paperless“."""
+    from app import pipeline
+
+    with session_scope() as s:
+        s.get(Document, 3).paperless_fields = {"related": [1]}
+    mock_api.get(f"{PAPERLESS}/api/documents/3/").respond(json={"id": 3, "content": "", "custom_fields": [
+        {"field": 43, "value": [1]}]})
+    page = client.get("/documents/3").text
+    assert "Dokument verknüpfen" in page and "entfernen" in page
+    assert "Gutachten" in client.get("/documents/3/link-search?q=gutachten").text
+    client.post("/documents/3/links", data={"action": "add", "target": "2"})
+    with session_scope() as s:
+        doc = s.get(Document, 3)
+        assert doc.proposed_fields["related"] == [1, 2] and doc.writeback_pending
+        assert doc.paperless_fields == {"related": [1]}  # Paperless unverändert
+        assert any(role == "related" for role, _, _ in pipeline.pending_changes(doc, my_settings, date.today()))
+    page = client.get("/documents/3").text
+    assert "Vorgemerkt, noch nicht in Paperless" in page and "+ <a href='/documents/2'>Gutachten".replace("'", '"') in page
+    assert "Gutachten" in client.get("/paperless-changes").text
+    client.post("/documents/3/links", data={"action": "remove", "target": "2"})  # wieder wie in Paperless
+    with session_scope() as s:
+        assert "related" not in (s.get(Document, 3).proposed_fields or {})
+    client.post("/documents/3/links", data={"action": "remove", "target": "1"})
+    with session_scope() as s:
+        assert s.get(Document, 3).proposed_fields["related"] == []
+    client.post("/documents/3/links", data={"action": "reset"})
+    with session_scope() as s:
+        assert "related" not in (s.get(Document, 3).proposed_fields or {})

@@ -617,16 +617,52 @@ document.addEventListener('keydown', (e) => {
           <em>Berechtigungen</em> → Zeile „Benutzerdefiniertes Feld“ (Custom Field) → „Anzeigen“ anhaken. Das Recht hängt am Benutzer,
           nicht am einzelnen Feld.{% endif %}</small></p>
       {% endif %}
+      {% set direct = (pf.get('related') or []) %}
+      {% set planned = (doc.proposed_fields or {}).get('related') %}
+      {% set target_links = planned if planned is not none else direct %}
       {% if related %}
-      <ul class="plain">
+      <ul class="plain" id="links">
         {% for rid, rdoc in related %}
         <li>{% if rdoc %}<a href="/documents/{{ rid }}">{{ rdoc.title }}</a> <small>{{ rdoc.correspondent or '' }} {{ rdoc.created|d }}</small>
-          {%- else %}Dokument #{{ rid }} <small class="muted" title="Nicht im Archiv-Index – evtl. darf der Paperless-Benutzer des Companion es nicht sehen">(nicht im Index)</small>{% endif %} {{ doclink(rid) }}</li>
+          {%- else %}Dokument #{{ rid }} <small class="muted" title="Nicht im Archiv-Index – evtl. darf der Paperless-Benutzer des Companion es nicht sehen">(nicht im Index)</small>{% endif %} {{ doclink(rid) }}
+          {% if planned is not none and rid in direct and rid not in planned %}<small class="soon">(Entfernen vorgemerkt)</small>
+          {% elif rid in direct %}
+          <form method="post" action="/documents/{{ doc.id }}/links" class="inline"><input type="hidden" name="action" value="remove">
+            <input type="hidden" name="target" value="{{ rid }}"><button class="small link" title="Verknüpfung entfernen (vormerken)">entfernen</button></form>
+          {% else %}<small class="muted" title="Verknüpft über ein anderes Dokument bzw. vom anderen Dokument aus – dort entfernen">(über anderes Dokument)</small>{% endif %}</li>
         {% endfor %}
       </ul>
       <form method="post" action="/documents/{{ doc.id }}/case-from-links" class="inline"><button class="small">Als Vorgang übernehmen</button></form>
       {% else %}
-      <p class="muted">Keine verknüpften Dokumente.</p>
+      <p class="muted" id="links">{{ 'In Paperless noch keine verknüpften Dokumente.' if planned else 'Keine verknüpften Dokumente.' }}</p>
+      {% endif %}
+      {% if planned is not none %}
+      {% set added = planned|reject('in', direct)|list %}
+      <div class="notice links-planned"><small>Vorgemerkt, noch nicht in Paperless:
+        {% for i in added %}<span class="soon">+ <a href="/documents/{{ i }}">{{ doc_title(i) }}</a></span>{{ ', ' if not loop.last }}{% endfor %}
+        {% set removed = direct|reject('in', planned)|list %}{% if added and removed %} · {% endif %}
+        {% for i in removed %}<span class="soon">− {{ doc_title(i) }}</span>{{ ', ' if not loop.last }}{% endfor %}
+        – übertragen unter <a href="/paperless-changes">Für Paperless</a>.</small>
+        <form method="post" action="/documents/{{ doc.id }}/links" class="inline"><input type="hidden" name="action" value="reset">
+          <button class="small link">zurücknehmen</button></form></div>
+      {% endif %}
+      {% if related_field != 'forbidden' and related_field != 'missing' %}
+      <div class="receipt-search link-search" data-url="/documents/{{ doc.id }}/link-search?">
+        <input type="search" placeholder="Dokument verknüpfen: Titel, Absender oder Paperless-ID" aria-label="Dokument verknüpfen"
+          oninput="linkSearch(this)" autocomplete="off">
+        <div class="receipt-hits" aria-live="polite"></div>
+      </div>
+      <script>
+      function linkSearch(input) {
+        const box = input.closest('.link-search'), out = box.querySelector('.receipt-hits');
+        clearTimeout(box._timer);
+        if (input.value.trim().length < 2 && !/^#?\d+$/.test(input.value.trim())) { out.innerHTML = ''; return; }
+        box._timer = setTimeout(async () => {
+          try { out.innerHTML = await (await fetch(box.dataset.url + 'q=' + encodeURIComponent(input.value))).text(); }
+          catch (e) { out.innerHTML = '<small class="bad">Suche fehlgeschlagen.</small>'; }
+        }, 300);
+      }
+      </script>
       {% endif %}
     </div>
     {% endif %}

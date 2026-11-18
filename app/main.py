@@ -579,6 +579,51 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         return render(request, "_firefly_search.html", doc=doc, found=found, start=start_d, end=end_d, amount=value,
                       refund=is_refund)
 
+    @app.get("/documents/{doc_id}/link-search", response_class=HTMLResponse)
+    def document_link_search(request: Request, doc_id: int, q: str = "", session: Session = Depends(get_session)):
+        """Dokument zum Verknüpfen („gehört zu“) suchen: Titel, Absender, Dateiname oder Paperless-ID."""
+        from types import SimpleNamespace
+
+        doc = session.get(Document, doc_id)
+        if doc is None:
+            raise HTTPException(404)
+        current = set(pipeline.link_target(doc))
+        near = SimpleNamespace(tx_date=doc.created or today())
+        docs = [d for d in receipts.search_documents(session, near, q) if d.id != doc_id and d.id not in current]
+        return render(request, "_link_search.html", doc=doc, docs=docs, q=q)
+
+    @app.post("/documents/{doc_id}/links")
+    def document_links(doc_id: int, action: str = Form(...), target: str = Form(""), session: Session = Depends(get_session)):
+        """Verknüpfung „gehört zu“ vormerken (hinzufügen/entfernen) oder die Vormerkung zurücknehmen.
+        Nach Paperless geht das erst über „Für Paperless“."""
+        doc = session.get(Document, doc_id)
+        if doc is None:
+            raise HTTPException(404)
+        if action == "reset":
+            pipeline.dismiss_changes(doc, settings, ["related"], today())
+            return RedirectResponse(f"/documents/{doc_id}?msg={quote('Vorgemerkte Verknüpfungen zurückgenommen')}#links",
+                                    status_code=303)
+        ids = selection.parse_ids(target)
+        if not ids or ids[0] == doc_id:
+            return RedirectResponse(f"/documents/{doc_id}?msg={quote('Bitte ein anderes Dokument wählen')}#links", status_code=303)
+        other_id = ids[0]
+        if action == "add" and (problem := ensure_indexed(session, other_id)):
+            return RedirectResponse(f"/documents/{doc_id}?msg={quote(problem)}#links", status_code=303)
+        wanted = set(pipeline.link_target(doc))
+        wanted = wanted | {other_id} if action == "add" else wanted - {other_id}
+        if sorted(wanted) == sorted((doc.paperless_fields or {}).get("related") or []):
+            proposed = dict(doc.proposed_fields or {})  # wieder wie in Paperless: Vormerkung entfällt
+            proposed.pop("related", None)
+            doc.proposed_fields = proposed or None
+            doc.writeback_pending = bool(pipeline.pending_changes(doc, settings, today()))
+        else:
+            pipeline.propose(doc, "related", sorted(wanted))
+        other = session.get(Document, other_id)
+        name = f"„{other.title}“" if other is not None and other.title else f"#{other_id}"
+        verb = "Verknüpfung mit" if action == "add" else "Entfernen der Verknüpfung mit"
+        msg = f"{verb} {name} vorgemerkt – übertragen unter „Für Paperless“"
+        return RedirectResponse(f"/documents/{doc_id}?msg={quote(msg)}#links", status_code=303)
+
     @app.get("/documents/{doc_id}/refund-docs", response_class=HTMLResponse)
     def document_refund_docs(request: Request, doc_id: int, q: str = "", session: Session = Depends(get_session)):
         """Gutschrift-Dokument suchen (Titel, Absender, Dateiname oder Paperless-ID)."""

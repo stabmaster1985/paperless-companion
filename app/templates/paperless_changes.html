@@ -2,7 +2,7 @@
 {% from "macros.html" import doclink, txlinks, help %}
 {% macro show(role, value) -%}
   {%- if value is none -%}<span class="muted">leer</span>
-  {%- elif role == 'related' -%}{% for i in value %}<a href="/documents/{{ i }}">#{{ i }}</a>{{ ', ' if not loop.last }}{% endfor %}
+  {%- elif role == 'related' -%}{% for i in value %}<a href="/documents/{{ i }}" title="#{{ i }}">{{ doc_title(i) }}</a>{{ ', ' if not loop.last }}{% endfor %}
   {%- elif role == 'amount' -%}{{ value|eur }}
   {%- elif role in ('due_date', 'paid_on', 'cancel_by', 'term_end', 'warranty_end') -%}{{ value[8:10] }}.{{ value[5:7] }}.{{ value[:4] }}
   {%- else -%}{{ value }}

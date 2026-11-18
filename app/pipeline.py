@@ -718,6 +718,14 @@ def mark_changed(doc: Document) -> None:
     doc.writeback_pending = True
 
 
+def link_target(doc: Document) -> list[int]:
+    """Direkte Verknüpfungen („gehört zu“) dieses Dokuments – mit deiner Vormerkung, sonst wie in Paperless."""
+    proposed = doc.proposed_fields or {}
+    if "related" in proposed:
+        return list(proposed["related"] or [])
+    return list((doc.paperless_fields or {}).get("related") or [])
+
+
 def propose(doc: Document, role: str, value, source: str = "manual") -> None:
     """Eigene Eingabe für ein Paperless-Feld vormerken (wird erst nach Zustimmung geschrieben)."""
     proposed = dict(doc.proposed_fields or {})
