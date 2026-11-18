@@ -33,7 +33,8 @@
 <nav class="tabs">
   <a href="/invoices?status=open" class="{{ 'active' if status == 'open' }}">Offen</a>
   <a href="/invoices?status=paid" class="{{ 'active' if status == 'paid' }}">Bezahlt</a>
-  <a href="/invoices?status=all" class="{{ 'active' if status not in ('open', 'paid') }}">Alle</a>
+  {% if with_parts %}<a href="/invoices?status=partial" class="{{ 'active' if status == 'partial' }}" title="Rechnungen mit mehreren Zahlungen (Raten, Anzahlung)">Teilzahlungen ({{ with_parts|length }})</a>{% endif %}
+  <a href="/invoices?status=all" class="{{ 'active' if status not in ('open', 'paid', 'partial') }}">Alle</a>
 </nav>
 {% if invoices %}
 <div class="table-wrap"><table class="list">
@@ -44,6 +45,10 @@
     <tr class="{{ 'overdue' if overdue }}">
       <td><a href="/documents/{{ i.document_id }}">{{ i.issuer or i.document.title }}</a> {{ doclink(i.document_id) }}</td>
       <td class="nowrap">{{ i.amount|eur }}{% if i.paid_amount and i.status == 'open' %}<br><small class="muted" title="Teilzahlungen: {{ i.paid_amount|eur }} bezahlt">noch {{ i.open_amount|eur }} offen</small>{% endif %}
+        {%- if i.id in with_parts %}{% set ps_ = parts.get(i.id, []) %}
+        <details class="inv-parts"><summary>{{ ps_|length }} Zahlung{{ 'en' if ps_|length != 1 }} · {{ ps_|sum(attribute='amount')|eur }}</summary>
+          <ul class="plain">{% for m in ps_ %}<li>{{ m.tx_date|d }} · {{ m.amount|eur }}{{ txlinks(m.tx_group_id, m.tx_date) }}</li>{% endfor %}</ul>
+        </details>{% endif %}
         {%- if i.refund_amount %}<br><small class="muted" title="Rückerstattung am {{ i.refunded_on|d }}">{{ i.refund_amount|eur }} zurück{% if i.amount and i.refund_amount < i.amount %} · netto {{ i.net_amount|eur }}{% endif %}</small>{% endif %}</td>
       <td class="nowrap">
         {% if i.payment_method == 'debit' %}<span class="tag">Lastschrift</span>

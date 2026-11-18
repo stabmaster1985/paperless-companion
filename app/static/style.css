@@ -835,3 +835,6 @@ button:disabled, button:disabled:hover { opacity: .5; cursor: not-allowed; }
 .ff-sort button.active { color: var(--text); font-weight: 600; text-decoration: underline; }
 .rc-invoice { display: flex; flex-wrap: wrap; gap: .3rem .6rem; align-items: center; margin-top: .3rem; }
 .rc-invoice .ok { color: var(--ok, #17845f); }
+.inv-parts { font-size: .85rem; margin-top: .2rem; }
+.inv-parts > summary { cursor: pointer; color: var(--accent); }
+.inv-parts ul { margin: .2rem 0 0; }

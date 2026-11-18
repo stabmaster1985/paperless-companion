@@ -336,6 +336,8 @@ def test_partial_payment_in_ui(client):
     assert r.json()["reload"] and "noch offen" in r.json()["msg"]
     page = client.get("/documents/1").text
     assert "Teilweise bezahlt" in page and "noch offen <strong>78,00" in page
+    page = client.get("/invoices?status=partial").text
+    assert "Teilzahlungen (1)" in page and "1 Zahlung · 78,00 €" in page and "10.10.2026 · 78,00 €" in page
     client.post("/documents/1/payment/remove", data={"tx_id": "950"})
     assert "Teilweise bezahlt" not in client.get("/documents/1").text
 

@@ -25,7 +25,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from app import appsettings, cancellations, cases, mqtt, reimbursements, series, help as helptexts, identifiers, learning, paperless_rules, receipts, rules as rule_proposals, deadlines, events, fields, highlight, ics, metadata, notify, payments, pipeline, reminders, retention, selection, tax
 from app.config import Settings, get_settings
 from app.db import get_session, init_db, session_scope
-from app.models import Case, CaseDocument, CaseEntry, Contract, Document, Invoice, KeyValue, ReceiptCheck, RuleProposal, RetentionLog, RetentionRule, Warranty
+from app.models import Case, CaseDocument, CaseEntry, Contract, Document, Invoice, KeyValue, PaymentMatch, ReceiptCheck, RuleProposal, RetentionLog, RetentionRule, Warranty
 from app.firefly import FireflyError
 from app.paperless import PaperlessError
 from app.version import Version
@@ -890,8 +890,17 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         query = select(Invoice).order_by(Invoice.due_date.asc().nulls_last())
         if status in ("open", "paid"):
             query = query.where(Invoice.status == status)
+        # zugeordnete Zahlungen je Rechnung (mehrere = Teilzahlungen)
+        parts: dict[int, list] = {}
+        for m in session.scalars(select(PaymentMatch).where(PaymentMatch.state == "accepted").order_by(PaymentMatch.tx_date)):
+            parts.setdefault(m.invoice_id, []).append(m)
+        with_parts = {inv_id for inv_id, ms in parts.items() if len(ms) > 1} | set(session.scalars(
+            select(Invoice.id).where(Invoice.paid_amount.is_not(None))))
+        rows = session.scalars(query).all()
+        if status == "partial":
+            rows = [i for i in rows if i.id in with_parts]
         return render(
-            request, "invoices.html", invoices=session.scalars(query).all(), status=status,
+            request, "invoices.html", invoices=rows, status=status, parts=parts, with_parts=with_parts,
             matches=payments.suggestions(session), msg=msg, SOURCE_LABELS=pipeline.SOURCE_LABELS,
             firefly_enabled=settings.firefly_enabled,
         )
