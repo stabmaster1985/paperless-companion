@@ -604,10 +604,18 @@ document.addEventListener('keydown', (e) => {
     {% if settings.field_related %}
     <div>
       <strong>{{ settings.field_related }}</strong>
-      {% if related_field == 'missing' %}
-      <p class="bad"><small>Paperless liefert kein Feld „{{ settings.field_related }}“. Entweder heißt es dort anders
-        (Name unter <a href="/settings#app-settings">Einstellungen → Paperless-Felder</a> anpassen) oder der Paperless-Benutzer
-        des Companion darf Custom Fields nicht sehen (Recht „Custom Field anzeigen“).</small></p>
+      {% if related_field == 'forbidden' %}
+      <p class="bad"><small>Paperless verweigert dem Companion die Zusatzfelder (403). In Paperless: <em>Einstellungen → Benutzer &amp; Gruppen</em> →
+        den Companion-Benutzer (oder seine Gruppe) bearbeiten → <em>Berechtigungen</em> → Zeile „Benutzerdefiniertes Feld“ (Custom Field) →
+        „Anzeigen“ anhaken. Das Recht hängt am Benutzer, nicht am einzelnen Feld.</small></p>
+      {% elif related_field == 'missing' %}
+      <p class="bad"><small>Paperless liefert kein Feld „{{ settings.field_related }}“.
+        {% if paperless_field_names %}Der Companion sieht diese Zusatzfelder: {% for n in paperless_field_names %}„{{ n }}“{{ ', ' if not loop.last }}{% endfor %}.
+          Heißt deines dort anders, den Namen unter <a href="/settings#app-settings">Einstellungen → Paperless-Felder</a> anpassen.
+        {% else %}Der Companion sieht <strong>gar keine</strong> Zusatzfelder – dem Paperless-Benutzer des Companion fehlt das Recht, sie zu sehen.
+          In Paperless: <em>Einstellungen → Benutzer &amp; Gruppen</em> → den Companion-Benutzer (oder seine Gruppe) bearbeiten →
+          <em>Berechtigungen</em> → Zeile „Benutzerdefiniertes Feld“ (Custom Field) → „Anzeigen“ anhaken. Das Recht hängt am Benutzer,
+          nicht am einzelnen Feld.{% endif %}</small></p>
       {% endif %}
       {% if related %}
       <ul class="plain">

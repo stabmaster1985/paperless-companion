@@ -234,4 +234,16 @@ def test_document_page_refreshes_links_and_reports_missing_field(client, mock_ap
     my_settings.field_related = "Gibt es nicht"
     app = create_app(my_settings, start_worker=False)
     with TestClient(app) as c:
-        assert "Paperless liefert kein Feld „Gibt es nicht“" in c.get("/documents/2").text
+        page = c.get("/documents/2").text
+        assert "Paperless liefert kein Feld „Gibt es nicht“" in page and "Der Companion sieht diese Zusatzfelder" in page
+
+
+def test_field_names_match_despite_spelling():
+    """„gehört zu“ mit zerlegtem ö (macOS), geschütztem Leerzeichen oder anderer Groß-/Kleinschreibung."""
+    import unicodedata
+
+    from app import fields
+
+    decomposed = unicodedata.normalize("NFD", "Gehört\u00a0 zu")
+    assert fields.norm_name(decomposed) == fields.norm_name("gehört zu") == "gehört zu"
+    assert fields.norm_name("„gehört zu“") == "gehört zu"

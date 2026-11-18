@@ -47,11 +47,21 @@ def role_names(settings) -> dict[str, str]:
     return names
 
 
+def norm_name(name: str) -> str:
+    """Feldnamen vergleichbar machen: Groß/klein, Umlaut-Schreibweise (ö als ein oder zwei Zeichen),
+    geschützte und doppelte Leerzeichen, Anführungszeichen."""
+    import unicodedata
+
+    text = unicodedata.normalize("NFKC", name or "").casefold()
+    text = text.replace("\u00a0", " ").strip().strip("\"'„“”‚‘’«»")
+    return " ".join(text.split())
+
+
 def resolve(definitions: list[dict], settings) -> dict[str, FieldDef]:
-    by_name = {d["name"].strip().lower(): d for d in definitions}
+    by_name = {norm_name(d["name"]): d for d in definitions}
     result = {}
     for role, name in role_names(settings).items():
-        if d := by_name.get(name.lower()):
+        if d := by_name.get(norm_name(name)):
             result[role] = FieldDef(d["id"], d["name"], d.get("data_type", "string"), d.get("extra_data") or {})
     return result
 

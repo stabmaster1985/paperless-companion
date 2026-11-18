@@ -460,16 +460,21 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         query = urlencode([(k, v) for k, v in parse_qsl(ref.query) if k != "msg"])  # alte Meldung nicht wiederholen
         return ref.path + (f"?{query}" if query else "")
 
-    field_cache: dict = {"at": 0.0, "defs": None}
+    field_cache: dict = {"at": 0.0, "defs": None, "names": None, "key": None}
 
     def field_definitions(paperless) -> dict | None:
         """Custom-Field-Definitionen (5 Minuten zwischengespeichert); None, wenn Paperless sie nicht liefert."""
-        if time.monotonic() - field_cache["at"] > 300 or field_cache["defs"] is None:
+        key = tuple(sorted(fields.role_names(settings).items()))  # Feldnamen geändert -> neu zuordnen
+        if time.monotonic() - field_cache["at"] > 300 or field_cache["defs"] is None or field_cache["key"] != key:
             try:
-                field_cache["defs"] = fields.resolve(paperless.custom_field_definitions(), settings)
-                field_cache["at"] = time.monotonic()
-            except PaperlessError:
+                raw = paperless.custom_field_definitions()
+                field_cache["defs"] = fields.resolve(raw, settings)
+                field_cache["names"] = sorted((d.get("name") or "" for d in raw), key=str.lower)
+                field_cache["at"], field_cache["key"] = time.monotonic(), key
+            except PaperlessError as exc:
+                field_cache["error"] = "forbidden" if "403" in str(exc) else "error"
                 return None
+        field_cache["error"] = None
         return field_cache["defs"]
 
     @app.get("/documents/{doc_id}", response_class=HTMLResponse)
@@ -494,6 +499,8 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             paperless_names = list(paperless.names("correspondents").values())
             # Feldwerte frisch aus Paperless (z.B. gerade gesetztes „gehört zu“), ohne auf den nächsten Abgleich zu warten
             defs = field_definitions(paperless)
+            if defs is None and field_cache.get("error") == "forbidden":
+                related_field = "forbidden"
             if defs is not None:
                 related_field = "found" if "related" in defs else "missing"
                 if "custom_fields" in data:  # nur auffrischen, wenn Paperless die Feldwerte mitliefert
@@ -515,7 +522,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             meta_items=metadata.pending(doc, everything=True), META_SOURCES=metadata.SOURCES,
             correspondents=metadata.correspondent_names(session, paperless_names),
             refund=reimbursements.summary(session, doc) if doc.kind == "reimbursement" else None,
-            related_field=related_field, back=back_link(request, doc_id),
+            related_field=related_field, back=back_link(request, doc_id), paperless_field_names=field_cache.get("names"),
             doc_correspondent=metadata.effective(doc.tags, doc.correspondent, doc.document_type, doc.meta_accepted)[1],
             pending_left=session.scalar(
                 select(func.count()).select_from(Document).where(Document.review_state == "pending", Document.id != doc_id)
