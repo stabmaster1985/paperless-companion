@@ -105,6 +105,7 @@ class Settings(BaseSettings):
     # Optional: Adresse deines Firefly-Dashboards (firefly-dashboard), für Links zur Kontrolle von Buchungen
     firefly_dashboard_url: str = ""
     firefly_lookback_days: int = 120
+    recurring_lookback_days: int = 1830  # regelmäßige Zahlungen: Abbuchungen der letzten 5 Jahre auswerten
     firefly_auto_accept: bool = False
     # Buchungen ohne Beleg: Abbuchungen ab diesem Betrag der letzten … Tage prüfen
     receipts_min_amount: float = 50.0

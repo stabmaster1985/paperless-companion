@@ -71,6 +71,7 @@ SECTIONS: list[tuple[str, list[tuple[str, str, str]]]] = [
         ("firefly_auto_accept", "Eindeutige Treffer direkt als bezahlt markieren", ""),
         ("receipts_min_amount", "Belege prüfen ab Betrag (€)", "Buchungen ohne Beleg"),
         ("receipts_lookback_days", "Belege prüfen: letzte … Tage", ""),
+        ("recurring_lookback_days", "Regelmäßige Zahlungen: letzte … Tage auswerten", "1830 = 5 Jahre; mehr Zeitraum findet auch seltene (jährliche) Zahlungen"),
         ("reimbursable_tag", "Tag für erstattungsfähige Rechnungen",
          "z.B. „Krankheitskosten“ – solche Rechnungen ohne verknüpfte Erstattung stehen unter „Erstattungen“; leer = aus"),
     ]),

@@ -98,3 +98,16 @@ def test_recurring_page_actions(client):
 def test_price_increase_stays_one_series():
     found = recurring.detect(monthly("Mobilfunk AG", 19.99, 12, change_at=8, new_amount=24.99))
     assert len(found) == 1 and found[0].change()[:2] == (19.99, 24.99) and len(found[0].amounts) == 12
+
+
+def test_long_history_and_ended_subscriptions(db, settings):
+    """5 Jahre: alte, beendete Abos ohne Vertrag stehen unter „früher“, nicht unter „ohne Vertrag“."""
+    assert settings.recurring_lookback_days == 1830
+    old = monthly("Altes Fitnessstudio", 25.0, 24, start=date(2022, 1, 5))   # bis Ende 2023
+    current = monthly("Streamingdienst AG", 12.99, 12)
+    with db() as s:
+        recurring.run(s, [*old, *current])
+    with db() as s:
+        f = recurring.findings(s, TODAY)
+        assert [x.payee for x in f["unknown"]] == ["Streamingdienst AG"]
+        assert [x.payee for x in f["ended"]] == ["Altes Fitnessstudio"]

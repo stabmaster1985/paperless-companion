@@ -312,7 +312,8 @@ def run(session: Session, client: FireflyClient, settings: Settings, today: date
     try:
         from app import recurring
 
-        result["recurring"] = recurring.run(session, list(client.withdrawals(today - timedelta(days=400), today)))
+        result["recurring"] = recurring.run(session, list(client.withdrawals(
+            today - timedelta(days=settings.recurring_lookback_days), today)))
     except Exception as exc:  # noqa: BLE001
         log.warning("Regelmäßige Zahlungen erkennen fehlgeschlagen: %s", exc)
     _remember(session, result)

@@ -1,7 +1,7 @@
 """Regelmäßige Zahlungen aus Firefly: Abos und Verträge erkennen, die (noch) fehlen, Preisänderungen bemerken
 und ausgebliebene Abbuchungen melden.
 
-Grundlage sind die Abbuchungen der letzten gut 13 Monate. Eine „Serie“ sind Buchungen an denselben Empfänger mit
+Grundlage sind die Abbuchungen der letzten Jahre (Einstellung „Regelmäßige Zahlungen: letzte … Tage“, Standard 5 Jahre). Eine „Serie“ sind Buchungen an denselben Empfänger mit
 ähnlichem Betrag (±25 %, damit Preiserhöhungen dazugehören) in festem Rhythmus (monatlich, vierteljährlich,
 halbjährlich, jährlich). Alles bleibt im Companion; Hinweise lassen sich ausblenden.
 """
@@ -208,10 +208,15 @@ def stored(session: Session) -> list[Series]:
 def findings(session: Session, today: date) -> dict:
     """Hinweise: Serien ohne Vertrag, Betragsänderungen an Verträgen, ausgebliebene Abbuchungen."""
     dismissed = set(_kv(session, DISMISSED_KEY))
-    result = {"unknown": [], "changed": [], "missing": [], "all": []}
+    result = {"unknown": [], "changed": [], "missing": [], "all": [], "ended": []}
     for s in stored(session):
         result["all"].append(s)
         contract = session.get(Contract, s.contract_id) if s.contract_id else None
+        tolerance = 10 if s.months == 1 else 25
+        # lange vorbei (mehr als zwei Abstände ohne Abbuchung): früheres Abo, kein offener Hinweis
+        if not s.covered and today > s.next_date + timedelta(days=s.months * 31 + tolerance):
+            result["ended"].append(s)
+            continue
         if not s.covered and f"unknown:{s.key}" not in dismissed:
             result["unknown"].append(s)
         if contract is not None:
@@ -219,7 +224,6 @@ def findings(session: Session, today: date) -> dict:
             cost_differs = contract.monthly_cost is not None and abs(contract.monthly_cost - s.monthly) > max(0.01, s.monthly * 0.01)
             if (cost_differs or (change and contract.monthly_cost is None)) and f"changed:{s.key}:{s.last_amount}" not in dismissed:
                 result["changed"].append({"series": s, "contract": contract, "change": change, "cost_differs": cost_differs})
-        tolerance = 10 if s.months == 1 else 25
         ended = contract is not None and (contract.status == "ended" or (
             contract.status == "cancelled" and contract.cancel_effective and contract.cancel_effective < s.next_date))
         if s.covered and not ended and today > s.next_date + timedelta(days=tolerance) \

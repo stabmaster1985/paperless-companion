@@ -1199,7 +1199,8 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         if client is None:
             return RedirectResponse(f"/recurring?msg={quote('Firefly III ist nicht eingerichtet')}", status_code=303)
         try:
-            count = recurring.run(session, list(client.withdrawals(today() - timedelta(days=400), today())))
+            count = recurring.run(session, list(client.withdrawals(
+                today() - timedelta(days=settings.recurring_lookback_days), today())))
             msg = f"{count} regelmäßige Zahlungen erkannt"
         except FireflyError as exc:
             msg = f"Firefly nicht erreichbar: {exc}"
