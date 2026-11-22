@@ -895,3 +895,4 @@ button:disabled, button:disabled:hover { opacity: .5; cursor: not-allowed; }
 .rec-sum-main { display: flex; flex-wrap: wrap; gap: .3rem .75rem; align-items: baseline; }
 .rec-sum-main .num { font-size: 1.6rem; font-weight: 700; }
 .rec-sum-parts { display: flex; flex-wrap: wrap; gap: .3rem 1.25rem; font-size: .95rem; }
+.rec-book-tools select { width: auto; max-width: 18rem; }

@@ -12,6 +12,14 @@
       <button type="button" class="small link" onclick="recPick(this, 'none')">keine</button>
       <button class="small" name="op" value="exclude">Angehakte herausnehmen (<span class="rec-n">0</span>)</button>
     </div>
+    <div class="rec-book-tools">
+      <span class="muted"><small>Angehakte</small></span>
+      <button class="small" name="op" value="split-abo" title="Die angehakten Buchungen bilden ein eigenes Abo ohne Dokument (z.B. ein zweites Abo beim selben Empfänger)">als neues Abo übernehmen</button>
+      <span class="muted"><small>oder</small></span>
+      <select name="contract_id" aria-label="Vertrag für die angehakten Buchungen"><option value="">Vertrag wählen …</option>
+        {% for c in all_contracts() %}<option value="{{ c.id }}">{{ c.label }}{{ ' (Abo)' if c.virtual }}</option>{% endfor %}</select>
+      <button class="small" name="op" value="split-contract">diesem Vertrag zuordnen</button>
+    </div>
     <table class="list compact"><tbody>
       {% for b in s.bookings %}{% set i = s.amounts|length - loop.index %}
       <tr><td><input type="checkbox" name="tx" value="{{ s.tx_ids[i] }}" data-amount="{{ b.amount }}" onchange="recCount(this)" aria-label="anhaken"></td>

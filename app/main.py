@@ -134,6 +134,13 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         with session_scope() as s:
             return [x for x in recurring.stored(s) if x.contract_id == contract_id]
 
+    def all_contracts() -> list:
+        with session_scope() as s:
+            return sorted(({"id": c.id, "label": c.label, "virtual": c.virtual} for c in s.scalars(select(Contract))),
+                          key=lambda c: c["label"].lower())
+
+    templates.env.globals["all_contracts"] = all_contracts
+
     def excluded_for(series) -> list:
         with session_scope() as s:
             return recurring.excluded_for(s, series)
@@ -1214,6 +1221,34 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         form = await request.form()
         key, back = str(form.get("key") or ""), str(form.get("back") or "")
         target = back if back.startswith("/") and not back.startswith("//") else "/recurring"
+        op = str(form.get("op") or "")
+        if op in ("split-abo", "split-contract"):
+            ids = [str(t) for t in form.getlist("tx")]
+            if not ids:
+                return RedirectResponse(f"{target}?msg={quote('Keine Buchung angehakt')}#s-{quote(key)}", status_code=303)
+            contract = None
+            if op == "split-contract":
+                cid = str(form.get("contract_id") or "")
+                contract = session.get(Contract, int(cid)) if cid.isdigit() else None
+                if contract is None:
+                    return RedirectResponse(f"{target}?msg={quote('Bitte einen Vertrag wählen')}#s-{quote(key)}", status_code=303)
+            new_key = recurring.split(session, key, ids)
+            new = next((x for x in recurring.stored(session) if x.key == new_key), None)
+            if new is None:
+                return RedirectResponse(f"{target}?msg={quote('Buchungen nicht gefunden')}", status_code=303)
+            if contract is None:  # neues Abo aus den angehakten Buchungen
+                from statistics import median
+
+                monthly = round(median(new.amounts) / new.months, 2)
+                contract = new_abo(session, new.payee, new.payee, monthly, date.fromisoformat(new.dates[0]))
+                recurring.link_contract(session, new_key, contract.id)
+                receipts.sync_payments(session)
+                msg = f"{len(ids)} Buchungen als neues Abo übernommen – Name, Laufzeit und Kündigungsfrist prüfen"
+                return RedirectResponse(f"/contracts/{contract.id}?msg={quote(msg)}", status_code=303)
+            recurring.link_contract(session, new_key, contract.id)
+            receipts.sync_payments(session)
+            msg = f"{len(ids)} Buchungen gehören jetzt zu „{contract.label}“"
+            return RedirectResponse(f"{target}?msg={quote(msg)}", status_code=303)
         if one := form.get("include_one"):
             msg = "Buchung wieder aufgenommen" if recurring.include(session, str(one)) else "Buchung nicht gefunden"
         else:

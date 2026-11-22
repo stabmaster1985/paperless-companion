@@ -22,6 +22,7 @@ KEY = "recurring"
 DISMISSED_KEY = "recurring_dismissed"
 LINKS_KEY = "recurring_links"  # Serie -> Vertrag (von dir zugeordnet)
 EXCLUDED_KEY = "recurring_excluded"  # tx_id -> Angaben: von dir aus einer Serie genommene Buchungen
+SPLITS_KEY = "recurring_splits"  # eigene Gruppe -> {"payee", "tx_ids"}: von dir zusammengestellte Serien
 RHYTHMS = [(1, 30, 6), (3, 91, 15), (6, 182, 20), (12, 365, 25)]  # Monate, Tage, Toleranz
 NAMES = {1: "monatlich", 3: "vierteljährlich", 6: "halbjährlich", 12: "jährlich"}
 
@@ -138,25 +139,37 @@ def _rhythm(dates: list[date]) -> int | None:
     return None
 
 
-def detect(transactions: list[Transaction], ignored: list[str] | None = None, excluded: set[str] | None = None) -> list[Series]:
+def _series_of(key: str, txs: list[Transaction], months: int) -> Series:
+    txs = sorted(txs, key=lambda t: t.date)
+    return Series(key=key, payee=txs[-1].counterparty, months=months, amounts=[t.amount for t in txs],
+                  dates=[t.date.isoformat() for t in txs], tx_ids=[t.journal_id for t in txs],
+                  group_ids=[t.group_id for t in txs], descriptions=[(t.description or "")[:120] for t in txs])
+
+
+def detect(transactions: list[Transaction], ignored: list[str] | None = None, excluded: set[str] | None = None,
+           splits: dict | None = None) -> list[Series]:
+    found: list[Series] = []
+    # von dir zusammengestellte Gruppen zuerst – sie bleiben, wie du sie angelegt hast
+    in_split: dict[str, str] = {t: k for k, g in (splits or {}).items() for t in g.get("tx_ids", [])}
+    grouped: dict[str, list[Transaction]] = {}
+    for tx in transactions:
+        if tx.journal_id in in_split:
+            grouped.setdefault(in_split[tx.journal_id], []).append(tx)
+    for key, txs in grouped.items():
+        found.append(_series_of(key, txs, (splits[key].get("months") or _rhythm(sorted(t.date for t in txs)) or 1)))
     by_payee: dict[str, list[Transaction]] = {}
     for tx in transactions:
-        if excluded and tx.journal_id in excluded:
-            continue  # von dir aus der Serie genommen
+        if (excluded and tx.journal_id in excluded) or tx.journal_id in in_split:
+            continue  # von dir aus der Serie genommen bzw. schon in einer eigenen Gruppe
         key = party_key(tx.counterparty)
         if key and not _is_ignored(tx.counterparty, ignored or []):
             by_payee.setdefault(key, []).append(tx)
-    found = []
     for key, txs in by_payee.items():
         for stream in _streams(txs):
             months = _rhythm([t.date for t in stream])
             if months is None:
                 continue
-            found.append(Series(key=f"{key}|{months}|{round(stream[0].amount)}", payee=stream[-1].counterparty,
-                                months=months, amounts=[t.amount for t in stream],
-                                dates=[t.date.isoformat() for t in stream], tx_ids=[t.journal_id for t in stream],
-                                group_ids=[t.group_id for t in stream],
-                                descriptions=[(t.description or "")[:120] for t in stream]))
+            found.append(_series_of(f"{key}|{months}|{round(stream[0].amount)}", stream, months))
     return found
 
 
@@ -201,9 +214,12 @@ def evaluate(session: Session, series: list[Series]) -> list[Series]:
     paid = {m.tx_id for m in session.scalars(select(PaymentMatch).where(PaymentMatch.state == "accepted"))}
     linked = {r.tx_id for r in session.scalars(select(ReceiptCheck).where(ReceiptCheck.state == "linked"))}
     index = _contract_index(session)
+    manual = set(links.values())
     for s in series:
         contract = match_contract(session, s, links, index)
         s.contract_id = contract.id if contract else None
+        if s.contract_id in manual and links.get(s.key) != s.contract_id:
+            s.contract_id = None  # Vertrag hat von dir zugeordnete Buchungen – nichts automatisch dazu
     # Mehrere Serien desselben Empfängers am selben Vertrag (z.B. Abo und Einzelkäufe beim Versandhändler):
     # automatisch nur die passendste behalten – von dir zugeordnete bleiben immer
     by_contract: dict[int, list[Series]] = {}
@@ -246,7 +262,8 @@ def _kv_set(session: Session, key: str, value) -> None:
 
 def run(session: Session, transactions: list[Transaction]) -> int:
     """Serien aus den Abbuchungen erkennen und speichern. Gibt die Anzahl zurück."""
-    series = evaluate(session, detect(transactions, ignored_counterparties(session), set(excluded(session))))
+    series = evaluate(session, detect(transactions, ignored_counterparties(session), set(excluded(session)),
+                                      _kv(session, SPLITS_KEY) or {}))
     _kv_set(session, KEY, [asdict(s) for s in series])
     return len(series)
 
@@ -299,6 +316,33 @@ def exclude_many(session: Session, series_key: str, tx_ids: list[str]) -> int:
         _kv_set(session, KEY, [d for d in data if d.get("tx_ids")])
         _kv_set(session, EXCLUDED_KEY, items)
     return count
+
+
+def split(session: Session, series_key: str, tx_ids: list[str]) -> str | None:
+    """Angehakte Buchungen als eigene Serie abtrennen (z.B. ein zweites Abo beim selben Empfänger). Die Gruppe bleibt
+    auch bei späteren Erkennungsläufen bestehen. Gibt den Schlüssel der neuen Serie zurück."""
+    data = _kv(session, KEY)
+    source = next((d for d in data if d.get("key") == series_key), None) if isinstance(data, list) else None
+    if source is None:
+        return None
+    wanted = [t for t in source.get("tx_ids", []) if t in set(tx_ids)]
+    if not wanted:
+        return None
+    columns = ("tx_ids", "dates", "amounts", "group_ids", "descriptions")
+    rows = [dict(zip(columns, values)) for values in zip(*(source.get(c) or [None] * len(source["tx_ids"]) for c in columns))]
+    keep = [r for r in rows if r["tx_ids"] not in wanted]
+    moved = [r for r in rows if r["tx_ids"] in wanted]
+    splits = _kv(session, SPLITS_KEY) or {}
+    new_key = f"{party_key(source['payee'])}|eigene|{len(splits) + 1}|{round(moved[0]['amounts'] or 0)}"
+    months = _rhythm([date.fromisoformat(r["dates"]) for r in moved]) or source.get("months") or 1
+    splits[new_key] = {"payee": source["payee"], "tx_ids": wanted, "months": months}
+    for name in columns:
+        source[name] = [r[name] for r in keep]
+    data = [d for d in data if d.get("tx_ids")]
+    data.append({"key": new_key, "payee": source["payee"], "months": months, **{c: [r[c] for r in moved] for c in columns}})
+    _kv_set(session, KEY, data)
+    _kv_set(session, SPLITS_KEY, splits)
+    return new_key
 
 
 def include(session: Session, tx_id: str) -> dict | None:

@@ -141,3 +141,30 @@ def test_exclude_several_bookings_at_once(client):
     assert "3 Buchungen herausgenommen" in r.text
     with session_scope() as s:
         assert len(recurring.stored(s)[0].tx_ids) == 9 and set(recurring.excluded(s)) == set(ids)
+
+
+def test_split_checked_bookings_into_new_abo(client):
+    """Angehakte Buchungen einer Serie als neues Abo – die Gruppe bleibt auch nach neuer Erkennung getrennt."""
+    txs = monthly("Medienhaus AG", 9.99, 12)
+    with session_scope() as s:
+        recurring.run(s, txs)
+        series = recurring.stored(s)[0]
+        key, moved = series.key, series.tx_ids[6:]
+    r = client.post("/recurring/bookings", data={"key": key, "tx": moved, "op": "split-abo"}, follow_redirects=False)
+    assert r.headers["location"].startswith("/contracts/")
+    with session_scope() as s:
+        abo = s.query(Contract).filter(Contract.document_id.is_(None)).one()
+        assert abo.monthly_cost == 9.99 and abo.payee == "Medienhaus AG" and abo.start_date == date(2026, 6, 3)
+        own = next(x for x in recurring.stored(s) if x.contract_id == abo.id)
+        assert sorted(own.tx_ids) == sorted(moved)
+        assert not set(moved) & set(next(x for x in recurring.stored(s) if x.key == key).tx_ids)
+    with session_scope() as s:  # neue Erkennung: Gruppe bleibt erhalten
+        recurring.run(s, txs)
+        own = next(x for x in recurring.stored(s) if x.contract_id == abo.id)
+        assert sorted(own.tx_ids) == sorted(moved)
+    with session_scope() as s:
+        cid = s.query(Contract).first().id
+        rest = next(x for x in recurring.stored(s) if x.contract_id != abo.id)
+    r = client.post("/recurring/bookings", data={"key": rest.key, "tx": rest.tx_ids[:2], "op": "split-contract",
+                                                 "contract_id": str(abo.id)})
+    assert "gehören jetzt zu" in r.text
