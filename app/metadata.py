@@ -348,6 +348,9 @@ def suggest(
 
         started = time.monotonic()
         text = paperless.get_document(doc.id).get("content") or ""
+        from app.db import release
+
+        release(session)  # Schreibsperre frei, während die AI rechnet
         result = ask_llm(ollama, doc, text, vocab, hist, rejected, settings.meta_max_input_chars,
                          title_examples(session, corr))
         info.update(ai=True, ai_seconds=time.monotonic() - started)

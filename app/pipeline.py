@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app import deadlines, fields
 from app.config import Settings
+from app.db import release
 from app.extraction import llm
 from app.extraction.rules import EXTRACTORS, classify_by_keywords, field
 from app.models import Contract, Document, Invoice, KeyValue, Reimbursement, Warranty
@@ -369,6 +370,8 @@ def sync(session: Session, paperless: PaperlessClient, settings: Settings) -> in
     for data in paperless.documents_modified_after(since):
         upsert_document(session, data, names)
         count += 1
+        if count % 50 == 0:
+            release(session)  # zwischen den Seiten des Abrufs andere Aktionen schreiben lassen
         if data.get("modified") and _parse_dt(data["modified"]) > newest:
             newest = _parse_dt(data["modified"])
     kv_set(session, "last_modified", newest.isoformat())
@@ -389,6 +392,8 @@ def index_sync(session: Session, paperless: PaperlessClient, settings: Settings 
     for data in documents:
         upsert_document(session, data, names, analyze=False)
         seen.add(data["id"])
+        if len(seen) % 100 == 0:
+            release(session)
     removed = 0
     if len(seen) >= total:
         for doc in session.scalars(select(Document).where(Document.id.not_in(seen))):
@@ -534,6 +539,7 @@ def process_document(
         elif ollama is not None and wanted:
             started = time.monotonic()
             try:
+                release(session)  # Schreibsperre frei, während die AI rechnet
                 found = llm.extract(ollama, kind, text, wanted, settings.llm_max_chars)
             except OllamaError as exc:
                 info["ai"], info["ai_seconds"] = "failed", round(time.monotonic() - started, 1)
@@ -845,6 +851,7 @@ def process_summary(
     defs = fields.resolve(paperless.custom_field_definitions(), settings)
     limit = (defs["summary"].text_limit if "summary" in defs else None) or summary.DEFAULT_LIMIT
     data = paperless.get_document(doc.id)
+    release(session)
     text = summary.generate(
         ollama, doc.title, doc.correspondent, data.get("content") or "", limit, settings.summary_max_input_chars
     )

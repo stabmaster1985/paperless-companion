@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import Settings
+from app.db import release
 from app.firefly import FireflyClient, Transaction
 from app.models import Document, Invoice, PaymentMatch
 
@@ -299,10 +300,12 @@ def run(session: Session, client: FireflyClient, settings: Settings, today: date
         result["pending_found"] = match_pending(session, transactions, pending)
     from app import reimbursements
 
+    release(session)
     result["refunds_found"] = reimbursements.run(session, client, settings, today)
     # Rückerstattungen zu bezahlten Rechnungen (Rücksendung, Gutschrift) unter den Geldeingängen suchen
     paid_since = today - timedelta(days=settings.firefly_lookback_days + 183)
     try:
+        release(session)  # Firefly-Abruf kann dauern
         deposits = list(client.deposits(max(paid_since, today - timedelta(days=400)), today))
         result["invoice_refunds"] = suggest_refunds(session, deposits)
     except Exception as exc:  # noqa: BLE001 – Rückerstattungen sind ein Zusatz, der Abgleich bleibt gültig
@@ -312,8 +315,9 @@ def run(session: Session, client: FireflyClient, settings: Settings, today: date
     try:
         from app import recurring
 
-        result["recurring"] = recurring.run(session, list(client.withdrawals(
-            today - timedelta(days=settings.recurring_lookback_days), today)))
+        release(session)  # mehrere Jahre Buchungen laden dauert
+        history = list(client.withdrawals(today - timedelta(days=settings.recurring_lookback_days), today))
+        result["recurring"] = recurring.run(session, history)
     except Exception as exc:  # noqa: BLE001
         log.warning("Regelmäßige Zahlungen erkennen fehlgeschlagen: %s", exc)
     _remember(session, result)

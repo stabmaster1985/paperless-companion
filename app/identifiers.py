@@ -105,7 +105,10 @@ def pending(session: Session, limit: int) -> list[Document]:
 def scan(session: Session, paperless: PaperlessClient, limit: int = 20) -> int:
     """Einen Schwung Dokumente lesen (nur GET in Paperless). Gibt die Anzahl zurück."""
     count = 0
+    from app.db import release
+
     for doc in pending(session, limit):
+        release(session)  # Paperless-Abruf ohne gehaltene Schreibsperre
         store(doc, paperless.get_document(doc.id).get("content") or "")
         count += 1
     return count

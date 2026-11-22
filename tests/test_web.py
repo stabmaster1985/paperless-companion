@@ -446,3 +446,17 @@ def test_kind_change_jumps_the_queue(client):
         assert pipeline.next_queued(s).id == 2
         assert pipeline.next_queued(s, priority_only=True).id == 2
     assert "als Nächstes dran" in client.get("/documents/2").text
+
+
+def test_release_frees_write_lock(db):
+    """Vor langsamen Schritten (AI, Firefly, Paperless) wird gespeichert – andere Aktionen warten nicht auf die Sperre."""
+    from app.db import release, session_scope as scope
+
+    with db() as s:
+        s.add(Document(id=990, title="vorher", tags=[]))
+        s.flush()  # Schreibsperre gehalten
+        release(s)  # … und wieder frei
+        with scope() as other:  # ein zweiter Schreiber kommt sofort durch
+            other.add(Document(id=991, title="parallel", tags=[]))
+    with db() as s:
+        assert s.get(Document, 990) and s.get(Document, 991)

@@ -69,6 +69,14 @@ def _allow_contracts_without_document(engine: Engine) -> None:
         conn.execute(text("PRAGMA foreign_keys=ON"))
 
 
+def release(session: Session) -> None:
+    """Bisherige Änderungen speichern, bevor etwas Langsames kommt (AI-Antwort, Firefly- oder Paperless-Abruf).
+    SQLite erlaubt nur einen Schreiber: Eine offene Schreib-Transaktion während einer langen Wartezeit sperrt sonst
+    alle anderen Aktionen („database is locked“)."""
+    if session.new or session.dirty or session.deleted or session.in_transaction():
+        session.commit()
+
+
 @contextmanager
 def session_scope() -> Iterator[Session]:
     if _session_factory is None:

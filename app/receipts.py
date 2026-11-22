@@ -329,6 +329,9 @@ def check(session: Session, transactions: list[Transaction], settings: Settings,
                 searches += 1
                 row.text_searched = True
                 try:
+                    from app.db import release
+
+                    release(session)  # Volltextsuche in Paperless dauert
                     cands = text_candidates(session, paperless, row)
                 except Exception:  # noqa: BLE001 - Suche ist nur ein Zusatz
                     cands = []
