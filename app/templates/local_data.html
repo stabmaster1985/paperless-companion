@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Was steht nur im Companion?</h1>
+<p class="muted">Der Companion liest Paperless und Firefly nur. Alles, was du hier erfasst, zuordnest oder entscheidest, steht in seiner
+  eigenen Datenbank – bis du es (soweit möglich) unter „Für Paperless“ überträgst. Diese Seite zeigt, was bei einer
+  Neuinstallation <strong>ohne</strong> den bisherigen Datenordner neu gemacht werden müsste.</p>
+
+<section class="card backup-card">
+  <h2>Sicherung</h2>
+  <p><strong>Neuinstallation mit dem bisherigen Datenordner</strong> (Docker-Volume <code>{{ data_dir }}</code> bleibt): es geht
+    <strong>nichts</strong> verloren – auch ein neues Image oder ein neuer Container liest dieselbe Datenbank.</p>
+  <p><strong>Ohne Datenordner</strong> (neuer Rechner, Volume gelöscht): vorher hier die Sicherung herunterladen und nach der
+    Installation als <code>companion.db</code> in den Datenordner legen (Companion dabei gestoppt) – dann ist alles wieder da.</p>
+  <a class="button primary" href="/local-data/backup" download>Sicherung herunterladen</a>
+  <small class="muted">Datenbank, {% if db_size >= 1048576 %}{{ (db_size / 1048576)|round(1) }} MB{% else %}{{ (db_size / 1024)|round|int }} KB{% endif %} – enthält keine Dokumente (die liegen in Paperless), aber deine
+    Zuordnungen, Notizen und Einstellungen in der App; Tokens aus der .env sind nicht enthalten.</small>
+</section>
+
+{% for sec in sections %}
+<section class="card local-sec local-{{ sec.key }}">
+  <h2>{{ sec.title }} {% if sec.key != 'regen' %}<span class="count">{{ sec.total }}</span>{% endif %}</h2>
+  <p class="muted">{{ sec.hint }}</p>
+  {% if sec.items %}
+  <table class="list compact local-list"><tbody>
+    {% for it in sec.items %}
+    <tr class="{{ 'zero' if not it.count }}"><td class="num-col">{{ it.count }}</td>
+      <td>{% if it.link %}<a href="{{ it.link }}">{{ it.label }}</a>{% else %}{{ it.label }}{% endif %}
+        {% if it.detail %}<br><small class="muted">{{ it.detail }}</small>{% endif %}</td></tr>
+    {% endfor %}
+  </tbody></table>
+  {% else %}<p class="empty">Nichts.</p>{% endif %}
+</section>
+{% endfor %}
+{% endblock %}

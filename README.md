@@ -85,6 +85,11 @@ prüfen und mit einem Klick übernehmen.
 
 ![Sammelaufgaben](docs/screenshots/sammelaufgaben.png)
 
+**Nur im Companion** – was bei einer Neuinstallation ohne Datenordner verloren ginge (noch nicht nach Paperless
+übertragen bzw. nur im Companion gespeichert) und was von selbst wiederkommt; dazu die Sicherung zum Herunterladen.
+
+![Nur im Companion](docs/screenshots/nur-im-companion.png)
+
 **Verträge** – Kündigungsfristen und Fixkosten; Kündigungsbestätigungen werden dem Vertrag zugeordnet. Abos ohne
 Dokument (z.B. Streaming) lassen sich direkt im Companion anlegen – aus den erkannten Abbuchungen mit einem Klick.
 

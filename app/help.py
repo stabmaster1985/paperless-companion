@@ -62,6 +62,12 @@ PAGES: dict[str, tuple[str, list[str]]] = {
         "Mit einem Tag für erstattungsfähige Rechnungen (Einstellungen → Firefly) siehst du hier auch Rechnungen, zu denen noch "
         "keine Erstattung verknüpft ist. In Paperless wird nichts geändert.",
     ]),
+    "/local-data": ("Nur im Companion", [
+        "Der Companion liest Paperless und Firefly nur. Was du hier erfasst, zuordnest und entscheidest, steht in seiner eigenen "
+        "Datenbank im Datenordner – diese Seite zählt auf, was das ist.",
+        "Solange der Datenordner (Docker-Volume) erhalten bleibt, übersteht alles ein Update oder eine Neuinstallation. "
+        "Für einen Umzug oder ein gelöschtes Volume: Sicherung herunterladen und als companion.db zurücklegen.",
+    ]),
     "/bulk": ("Sammelaufgaben", [
         "Hier sammelt der Companion aus allen Bereichen, was er selbst zuordnen kann: Zahlungen zu offenen Rechnungen, Belege zu "
         "Buchungen, vollständig erkannte Dokumente in der Inbox und Kündigungsbestätigungen.",

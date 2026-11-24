@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import activity, appsettings, bulk, cancellations, dunning, recurring, cases, mqtt, reimbursements, series, help as helptexts, identifiers, learning, paperless_rules, receipts, rules as rule_proposals, deadlines, events, fields, highlight, ics, metadata, notify, payments, pipeline, reminders, retention, selection, tax
+from app import activity, appsettings, bulk, cancellations, dunning, localdata, recurring, cases, mqtt, reimbursements, series, help as helptexts, identifiers, learning, paperless_rules, receipts, rules as rule_proposals, deadlines, events, fields, highlight, ics, metadata, notify, payments, pipeline, reminders, retention, selection, tax
 from app.config import Settings, get_settings
 from app.db import get_session, init_db, session_scope
 from app.models import Case, CaseDocument, CaseEntry, Contract, Document, Invoice, KeyValue, PaymentMatch, ReceiptCheck, RuleProposal, RetentionLog, RetentionRule, Warranty
@@ -387,6 +387,23 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         doc.auto_confirmed = False
         payments.record_confirmed_payment(session, doc)
         doc.writeback_pending = True
+
+    @app.get("/local-data", response_class=HTMLResponse)
+    def local_data(request: Request, session: Session = Depends(get_session)):
+        """Was steht nur im Companion – was müsste ich bei einer Neuinstallation neu machen?"""
+        size = sum(f.stat().st_size for f in settings.data_dir.glob("companion.db*") if f.is_file())
+        return render(request, "local_data.html", sections=localdata.inventory(session, settings, today()),
+                      data_dir=settings.data_dir, db_size=size)
+
+    @app.get("/local-data/backup")
+    def local_data_backup():
+        """Sicherung der Companion-Datenbank herunterladen."""
+        import tempfile
+
+        folder = Path(tempfile.mkdtemp(prefix="companion-backup-"))
+        target = localdata.backup(settings, folder / f"companion-sicherung-{today().isoformat()}.db")
+        return FileResponse(target, filename=target.name, media_type="application/octet-stream",
+                            background=BackgroundTask(lambda: (target.unlink(missing_ok=True), folder.rmdir())))
 
     @app.get("/history", response_class=HTMLResponse)
     def history(request: Request, session: Session = Depends(get_session)):

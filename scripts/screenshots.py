@@ -282,7 +282,7 @@ def shoot(base: str) -> None:
         for name, path, width, height in [
                 ("dashboard", "/", 1280, 960), ("inbox", "/inbox", 1280, 720), ("dokument", "/documents/1", 1280, 960),
                 ("rechnungen", "/invoices", 1280, 760), ("erstattungen", "/reimbursements", 1280, 900),
-                ("serien", "/series", 1280, 620), ("belege", "/receipts", 1280, 900), ("sammelaufgaben", "/bulk", 1280, 1000), ("verlauf", "/history", 1280, 640), ("regelmaessig", "/recurring", 1280, 1000), ("vertraege", "/contracts", 1280, 640),
+                ("serien", "/series", 1280, 620), ("belege", "/receipts", 1280, 900), ("sammelaufgaben", "/bulk", 1280, 1000), ("verlauf", "/history", 1280, 640), ("regelmaessig", "/recurring", 1280, 1000), ("vertraege", "/contracts", 1280, 640), ("nur-im-companion", "/local-data", 1280, 1100),
                 ("erstattung", "/documents/600", 1280, 1100), ("handy-dashboard", "/", 390, 844)]:
             p = page(width, height)
             p.goto(base + path)
