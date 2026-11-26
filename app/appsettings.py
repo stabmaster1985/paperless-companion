@@ -63,6 +63,11 @@ SECTIONS: list[tuple[str, list[tuple[str, str, str]]]] = [
         ("fields_open_max_age_days", "Unbezahlte Rechnungen nach … Tagen als erledigt ansehen", ""),
         ("cases_propose_links", "Vorgänge schlagen „gehört zu“ vor", ""),
     ]),
+    ("Sicherung", [
+        ("backup_hour", "Tägliche Sicherung um … Uhr", "0–23; leer = keine automatische Sicherung"),
+        ("backup_keep", "Sicherungen aufheben", "ältere werden gelöscht"),
+        ("backup_dir", "Ordner für Sicherungen", "leer = Unterordner „backups“ im Datenordner; besser ein eigenes Volume, z.B. auf dem NAS"),
+    ]),
     ("Firefly III", [
         ("firefly_url", "Firefly-Adresse", "leer = kein Zahlungsabgleich"),
         ("firefly_token", "Zugangstoken", ""),

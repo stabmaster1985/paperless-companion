@@ -53,6 +53,7 @@ class Worker:
         self._thread = threading.Thread(target=self._run, name="companion-worker", daemon=True)
         self._last_sync = 0.0
         self._last_series = 0.0
+        self._last_backup_check = 0.0
         self.on_change = None  # z.B. MQTT: nach Abgleich neu senden
         self._last_payments = -3600.0
         self._last_tidy = 0.0
@@ -135,6 +136,7 @@ class Worker:
                     self._changed()
                 self._index_sync(paperless)
                 self._series()
+                self._backup()
                 self._payments()
                 self._tidy_changes()
                 self._retry_llm_errors(ollama)
@@ -193,6 +195,26 @@ class Worker:
                 # Nicht in jeder Schleife erneut versuchen – in einer Stunde wieder
                 retry = datetime.now(timezone.utc) - timedelta(hours=23)
                 pipeline.kv_set(session, "last_index_sync", retry.isoformat())
+
+    def _backup(self) -> None:
+        """Einmal täglich ab der eingestellten Uhrzeit die Datenbank sichern (alte Sicherungen werden aufgeräumt)."""
+        if self.settings.backup_hour is None or time.monotonic() - self._last_backup_check < 300:
+            return
+        self._last_backup_check = time.monotonic()
+        from app import backups
+
+        now = datetime.now(self.tz)
+        if now.hour < self.settings.backup_hour:
+            return
+        last = next((b for b in backups.all_backups(self.settings) if b.reason == "auto"), None)
+        if last is not None and last.created.date() >= now.date():
+            return
+        try:
+            made = backups.create(self.settings, "auto", now.replace(tzinfo=None))
+            self.note(f"Sicherung angelegt: {made.name}", "muted")
+        except Exception as exc:  # noqa: BLE001 – eine fehlgeschlagene Sicherung darf den Worker nicht stoppen
+            log.warning("Sicherung fehlgeschlagen: %s", exc)
+            self.note(f"Sicherung fehlgeschlagen: {exc}", "error")
 
     def _series(self) -> None:
         """Alle 15 Minuten Serien wiederkehrender Dokumente neu berechnen und ihre Vorschläge einarbeiten (ohne AI)."""

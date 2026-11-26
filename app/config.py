@@ -106,6 +106,10 @@ class Settings(BaseSettings):
     firefly_dashboard_url: str = ""
     firefly_lookback_days: int = 120
     recurring_lookback_days: int = 1830  # regelmäßige Zahlungen: Abbuchungen der letzten 5 Jahre auswerten
+    # Sicherungen der Companion-Datenbank: Ordner (leer = <DATA_DIR>/backups), Anzahl, Uhrzeit (0–23, leer = aus)
+    backup_dir: str = ""
+    backup_keep: int = 14
+    backup_hour: int | None = 3
     firefly_auto_accept: bool = False
     # Buchungen ohne Beleg: Abbuchungen ab diesem Betrag der letzten … Tage prüfen
     receipts_min_amount: float = 50.0

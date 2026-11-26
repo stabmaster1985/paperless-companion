@@ -28,10 +28,21 @@ def init_db(url: str) -> Engine:
 
     from app import models  # noqa: F401  (Tabellen registrieren)
 
-    Base.metadata.create_all(_engine)
-    _add_missing_columns(_engine)
-    _allow_contracts_without_document(_engine)
+    migrate(_engine)
     _session_factory = sessionmaker(_engine, expire_on_commit=False)
+    return _engine
+
+
+def migrate(engine: Engine) -> None:
+    """Tabellen und Spalten auf den aktuellen Stand bringen (Start und nach einer Wiederherstellung)."""
+    Base.metadata.create_all(engine)
+    _add_missing_columns(engine)
+    _allow_contracts_without_document(engine)
+
+
+def engine() -> Engine:
+    if _engine is None:
+        raise RuntimeError("Datenbank nicht initialisiert")
     return _engine
 
 

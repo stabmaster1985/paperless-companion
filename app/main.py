@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import activity, appsettings, bulk, cancellations, dunning, localdata, recurring, cases, mqtt, reimbursements, series, help as helptexts, identifiers, learning, paperless_rules, receipts, rules as rule_proposals, deadlines, events, fields, highlight, ics, metadata, notify, payments, pipeline, reminders, retention, selection, tax
+from app import activity, appsettings, backups, bulk, cancellations, dunning, localdata, recurring, cases, mqtt, reimbursements, series, help as helptexts, identifiers, learning, paperless_rules, receipts, rules as rule_proposals, deadlines, events, fields, highlight, ics, metadata, notify, payments, pipeline, reminders, retention, selection, tax
 from app.config import Settings, get_settings
 from app.db import get_session, init_db, session_scope
 from app.models import Case, CaseDocument, CaseEntry, Contract, Document, Invoice, KeyValue, PaymentMatch, ReceiptCheck, RuleProposal, RetentionLog, RetentionRule, Warranty
@@ -315,7 +315,13 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             "rules_proposed": rule_counts.get("proposed", 0), "rules_approved": rule_counts.get("approved", 0),
             "next": upcoming[0] if upcoming else None,
         }
-        return render(request, "dashboard.html", events=upcoming, stats=stats, todo=todo)
+        last_backup = backups.latest(settings)
+        backup_warning = None
+        if last_backup is None:
+            backup_warning = "Es gibt noch keine Sicherung deiner Arbeit im Companion."
+        elif (datetime.now() - last_backup.created).days >= 3:
+            backup_warning = f"Die letzte Sicherung ist vom {last_backup.created:%d.%m.%Y} – seitdem ist nichts gesichert."
+        return render(request, "dashboard.html", events=upcoming, stats=stats, todo=todo, backup_warning=backup_warning)
 
     INBOX_COOKIE = "inbox_filter"
     INBOX_KEYS = ("kind", "q", "corr", "sort")
@@ -389,11 +395,59 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         doc.writeback_pending = True
 
     @app.get("/local-data", response_class=HTMLResponse)
-    def local_data(request: Request, session: Session = Depends(get_session)):
+    def local_data(request: Request, msg: str = "", session: Session = Depends(get_session)):
         """Was steht nur im Companion – was müsste ich bei einer Neuinstallation neu machen?"""
         size = sum(f.stat().st_size for f in settings.data_dir.glob("companion.db*") if f.is_file())
         return render(request, "local_data.html", sections=localdata.inventory(session, settings, today()),
-                      data_dir=settings.data_dir, db_size=size)
+                      data_dir=settings.data_dir, db_size=size, msg=msg, backups=backups.all_backups(settings),
+                      backup_folder=backups.folder(settings), backup_settings=settings)
+
+    @app.post("/local-data/backup-now")
+    def local_data_backup_now():
+        made = backups.create(settings, "manuell")
+        return RedirectResponse(f"/local-data?msg={quote(f'Sicherung angelegt: {made.name}')}#sicherungen", status_code=303)
+
+    def backup_by_name(name: str):
+        found = next((b for b in backups.all_backups(settings) if b.name == name), None)
+        if found is None:
+            raise HTTPException(404, "Sicherung nicht gefunden")
+        return found
+
+    @app.get("/local-data/backups/{name}")
+    def local_data_backup_file(name: str):
+        found = backup_by_name(name)
+        return FileResponse(found.path, filename=found.name, media_type="application/octet-stream")
+
+    @app.post("/local-data/restore/{name}")
+    def local_data_restore(name: str):
+        found = backup_by_name(name)
+        try:
+            before = backups.restore(settings, found.path)
+        except backups.BackupError as exc:
+            return RedirectResponse(f"/local-data?msg={quote(str(exc))}#sicherungen", status_code=303)
+        msg = f"Stand vom {found.created:%d.%m.%Y %H:%M} wiederhergestellt – der vorherige Stand ist gesichert als {before.name}"
+        return RedirectResponse(f"/local-data?msg={quote(msg)}#sicherungen", status_code=303)
+
+    @app.post("/local-data/restore-upload")
+    async def local_data_restore_upload(request: Request):
+        import tempfile
+
+        form = await request.form()
+        upload = form.get("file")
+        if upload is None or not hasattr(upload, "read"):
+            return RedirectResponse(f"/local-data?msg={quote('Bitte eine Sicherungsdatei auswählen')}#sicherungen", status_code=303)
+        folder = Path(tempfile.mkdtemp(prefix="companion-restore-"))
+        target = folder / "upload.db"
+        target.write_bytes(await upload.read())
+        try:
+            before = backups.restore(settings, target)
+            msg = f"Sicherung „{upload.filename}“ wiederhergestellt – der vorherige Stand ist gesichert als {before.name}"
+        except backups.BackupError as exc:
+            msg = f"Nicht wiederhergestellt: {exc}"
+        finally:
+            target.unlink(missing_ok=True)
+            folder.rmdir()
+        return RedirectResponse(f"/local-data?msg={quote(msg)}#sicherungen", status_code=303)
 
     @app.get("/local-data/backup")
     def local_data_backup():

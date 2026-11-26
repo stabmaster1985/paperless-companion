@@ -5,15 +5,49 @@
   eigenen Datenbank – bis du es (soweit möglich) unter „Für Paperless“ überträgst. Diese Seite zeigt, was bei einer
   Neuinstallation <strong>ohne</strong> den bisherigen Datenordner neu gemacht werden müsste.</p>
 
-<section class="card backup-card">
+{% if msg %}<div class="notice ok">{{ msg }}</div>{% endif %}
+<section class="card backup-card" id="sicherungen">
   <h2>Sicherung</h2>
   <p><strong>Neuinstallation mit dem bisherigen Datenordner</strong> (Docker-Volume <code>{{ data_dir }}</code> bleibt): es geht
-    <strong>nichts</strong> verloren – auch ein neues Image oder ein neuer Container liest dieselbe Datenbank.</p>
-  <p><strong>Ohne Datenordner</strong> (neuer Rechner, Volume gelöscht): vorher hier die Sicherung herunterladen und nach der
-    Installation als <code>companion.db</code> in den Datenordner legen (Companion dabei gestoppt) – dann ist alles wieder da.</p>
-  <a class="button primary" href="/local-data/backup" download>Sicherung herunterladen</a>
-  <small class="muted">Datenbank, {% if db_size >= 1048576 %}{{ (db_size / 1048576)|round(1) }} MB{% else %}{{ (db_size / 1024)|round|int }} KB{% endif %} – enthält keine Dokumente (die liegen in Paperless), aber deine
-    Zuordnungen, Notizen und Einstellungen in der App; Tokens aus der .env sind nicht enthalten.</small>
+    <strong>nichts</strong> verloren – auch ein neues Image oder ein neuer Container liest dieselbe Datenbank.
+    <strong>Ohne Datenordner</strong> (neuer Rechner, Volume gelöscht): eine Sicherung hier wiederherstellen.</p>
+  <p class="muted"><small>
+    {% if backup_settings.backup_hour is not none %}Automatisch jeden Tag ab {{ backup_settings.backup_hour }} Uhr, die letzten {{ backup_settings.backup_keep }} werden aufgehoben.
+    {% else %}Automatische Sicherung ist aus.{% endif %}
+    Ordner: <code>{{ backup_folder }}</code>{% if not backup_settings.backup_dir %} (im Datenordner – für den Ernstfall besser ein eigenes Volume, z.B. auf dem NAS){% endif %}.
+    Einstellen unter <a href="/settings#app-settings">Einstellungen → Sicherung</a>.
+    Enthält deine Arbeit im Companion ({% if db_size >= 1048576 %}{{ (db_size / 1048576)|round(1) }} MB{% else %}{{ (db_size / 1024)|round|int }} KB{% endif %}),
+    keine Dokumente (die liegen in Paperless) und keine Zugangsdaten aus der .env.</small></p>
+  <div class="actions">
+    <form method="post" action="/local-data/backup-now" class="inline"><button class="primary">Jetzt sichern</button></form>
+    <a class="button" href="/local-data/backup" download>Aktuellen Stand herunterladen</a>
+  </div>
+  {% if backups %}
+  <table class="list compact backups">
+    <thead><tr><th>Sicherung</th><th>Art</th><th class="hide-sm">Größe</th><th></th></tr></thead>
+    <tbody>
+    {% for b in backups %}
+      <tr><td class="nowrap">{{ b.created.strftime('%d.%m.%Y %H:%M') }}</td>
+        <td>{{ {'auto': 'automatisch', 'manuell': 'von Hand', 'vor-wiederherstellung': 'vor einer Wiederherstellung'}.get(b.reason, b.reason) }}</td>
+        <td class="hide-sm nowrap">{% if b.size >= 1048576 %}{{ (b.size / 1048576)|round(1) }} MB{% else %}{{ (b.size / 1024)|round|int }} KB{% endif %}</td>
+        <td class="nowrap"><a class="small" href="/local-data/backups/{{ b.name }}" download>herunterladen</a>
+          <form method="post" action="/local-data/restore/{{ b.name }}" class="inline"
+            onsubmit="return confirm('Stand vom {{ b.created.strftime('%d.%m.%Y %H:%M') }} wiederherstellen? Alles, was du seitdem im Companion gemacht hast, ist danach weg (der jetzige Stand wird vorher gesichert).')">
+            <button class="small link">wiederherstellen</button></form></td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted">Noch keine Sicherung vorhanden.</p>{% endif %}
+  <details class="restore-upload">
+    <summary>Sicherung von einem anderen Rechner wiederherstellen …</summary>
+    <form method="post" action="/local-data/restore-upload" enctype="multipart/form-data" class="inline"
+      onsubmit="return confirm('Diese Sicherung wiederherstellen? Der jetzige Stand wird vorher gesichert.')">
+      <input type="file" name="file" accept=".db" required>
+      <button class="small">Hochladen und wiederherstellen</button>
+    </form>
+    <p class="muted"><small>Die Datei wird geprüft; ist sie keine Companion-Sicherung, ändert sich nichts. Ältere Sicherungen werden
+      automatisch auf den aktuellen Stand gebracht.</small></p>
+  </details>
 </section>
 
 {% for sec in sections %}

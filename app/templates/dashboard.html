@@ -2,6 +2,7 @@
 {% from "macros.html" import doclink %}
 {% block content %}
 <h1>Übersicht</h1>
+{% if backup_warning %}<div class="notice warn">{{ backup_warning }} <a href="/local-data#sicherungen">Sicherungen →</a></div>{% endif %}
 <h2 class="sr-only">Heute zu tun</h2>
 <section class="tiles" aria-label="Heute zu tun">
   <a class="tile t-inbox {{ 'has' if inbox_count }}" href="/inbox">

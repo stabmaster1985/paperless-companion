@@ -906,3 +906,6 @@ button:disabled, button:disabled:hover { opacity: .5; cursor: not-allowed; }
 .local-list .num-col { width: 4rem; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
 .local-list tr.zero { opacity: .55; }
 .backup-card .button { margin-right: .75rem; }
+.backups { margin-top: .75rem; }
+.restore-upload { margin-top: .75rem; }
+.restore-upload > summary { cursor: pointer; color: var(--accent); }
