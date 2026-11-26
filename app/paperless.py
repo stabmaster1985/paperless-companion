@@ -10,6 +10,27 @@ class PaperlessError(RuntimeError):
     pass
 
 
+def explain(exc: Exception) -> str:
+    """Fehlertext mit Hinweis auf die üblichen Ursachen (statt nur „400 Bad Request“)."""
+    text = str(exc)
+    response = getattr(exc, "response", None)
+    if response is None:
+        return text
+    status = response.status_code
+    body = re.sub(r"<[^>]+>", " ", response.text or "")
+    body = " ".join(body.split())[:160]
+    if status == 400 and (not body or "Bad Request (400)" in body):
+        return (f"{text} – Paperless lehnt die Adresse ab, unter der der Companion es aufruft. Meist steht diese Adresse "
+                "nicht in PAPERLESS_ALLOWED_HOSTS bzw. passt nicht zu PAPERLESS_URL in der Paperless-Konfiguration "
+                "(z.B. nach einem Umzug auf eine andere IP oder nach dem Einrichten einer Domain). Abhilfe: die Adresse aus "
+                "den Companion-Einstellungen dort eintragen oder im Companion die Adresse verwenden, die in PAPERLESS_URL steht.")
+    if status == 401:
+        return f"{text} – der API-Token ist ungültig oder abgelaufen (Einstellungen → Paperless)."
+    if status == 403:
+        return f"{text} – dem Paperless-Benutzer des Companion fehlt dafür eine Berechtigung."
+    return f"{text}{f' – Antwort: {body}' if body else ''}"
+
+
 class PaperlessClient:
     def __init__(self, base_url: str, token: str, timeout: float = 30.0, transport: httpx.BaseTransport | None = None):
         self.base_url = base_url.rstrip("/")
@@ -32,7 +53,7 @@ class PaperlessClient:
             response = self._client.get(path, params=params)
             response.raise_for_status()
         except httpx.HTTPError as exc:
-            raise PaperlessError(f"GET {path}: {exc}") from exc
+            raise PaperlessError(f"GET {path}: {explain(exc)}") from exc
         # Paperless meldet bei authentifizierten Anfragen Server- und API-Version
         self.server_version = response.headers.get("x-version", self.server_version)
         self.api_version = response.headers.get("x-api-version", self.api_version)
@@ -104,7 +125,7 @@ class PaperlessClient:
             response = self._client.get(f"/api/documents/{doc_id}/{kind}/", timeout=60)
             response.raise_for_status()
         except httpx.HTTPError as exc:
-            raise PaperlessError(f"Vorschau {doc_id}: {exc}") from exc
+            raise PaperlessError(f"Vorschau {doc_id}: {explain(exc)}") from exc
         return response.content, response.headers.get("content-type", "application/octet-stream")
 
     def download(self, doc_id: int, original: bool = False) -> tuple[bytes, str]:
@@ -115,7 +136,7 @@ class PaperlessClient:
             )
             response.raise_for_status()
         except httpx.HTTPError as exc:
-            raise PaperlessError(f"Download {doc_id}: {exc}") from exc
+            raise PaperlessError(f"Download {doc_id}: {explain(exc)}") from exc
         disposition = response.headers.get("content-disposition", "")
         match = re.search(r"filename\*=utf-8''([^;]+)", disposition, re.IGNORECASE) or re.search(
             r'filename="?([^";]+)"?', disposition
@@ -131,7 +152,7 @@ class PaperlessClient:
             response = self._client.post("/api/tags/", json={"name": name, "matching_algorithm": 0})
             response.raise_for_status()
         except httpx.HTTPError as exc:
-            raise PaperlessError(f"Tag {name!r} anlegen: {exc}") from exc
+            raise PaperlessError(f"Tag {name!r} anlegen: {explain(exc)}") from exc
         return response.json()["id"]
 
     def add_tag(self, doc_ids: list[int], tag_name: str) -> None:
@@ -140,21 +161,21 @@ class PaperlessClient:
         try:
             self._client.post("/api/documents/bulk_edit/", json=payload).raise_for_status()
         except httpx.HTTPError as exc:
-            raise PaperlessError(f"Tag setzen: {exc}") from exc
+            raise PaperlessError(f"Tag setzen: {explain(exc)}") from exc
 
     def update_document(self, doc_id: int, data: dict) -> None:
         """Einzelne Metadaten setzen (title, correspondent, document_type, tags als IDs)."""
         try:
             self._client.patch(f"/api/documents/{doc_id}/", json=data).raise_for_status()
         except httpx.HTTPError as exc:
-            raise PaperlessError(f"Dokument {doc_id} aktualisieren: {exc}") from exc
+            raise PaperlessError(f"Dokument {doc_id} aktualisieren: {explain(exc)}") from exc
 
     def delete_document(self, doc_id: int) -> None:
         """Löscht ein Dokument (landet in Paperless im Papierkorb)."""
         try:
             self._client.delete(f"/api/documents/{doc_id}/").raise_for_status()
         except httpx.HTTPError as exc:
-            raise PaperlessError(f"Löschen {doc_id}: {exc}") from exc
+            raise PaperlessError(f"Löschen {doc_id}: {explain(exc)}") from exc
 
     # ------------------------------------------------------------------ Custom Fields
 
@@ -166,7 +187,7 @@ class PaperlessClient:
             response = self._client.post("/api/custom_fields/", json={"name": name, "data_type": data_type})
             response.raise_for_status()
         except httpx.HTTPError as exc:
-            raise PaperlessError(f"Custom Field {name!r} anlegen: {exc}") from exc
+            raise PaperlessError(f"Custom Field {name!r} anlegen: {explain(exc)}") from exc
         return response.json()
 
     def set_custom_fields(self, doc_id: int, values: dict[int, object]) -> None:
@@ -181,4 +202,4 @@ class PaperlessClient:
             response = self._client.patch(f"/api/documents/{doc_id}/", json={"custom_fields": merged})
             response.raise_for_status()
         except httpx.HTTPError as exc:
-            raise PaperlessError(f"Dokument {doc_id} aktualisieren: {exc}") from exc
+            raise PaperlessError(f"Dokument {doc_id} aktualisieren: {explain(exc)}") from exc

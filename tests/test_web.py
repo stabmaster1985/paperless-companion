@@ -460,3 +460,21 @@ def test_release_frees_write_lock(db):
             other.add(Document(id=991, title="parallel", tags=[]))
     with db() as s:
         assert s.get(Document, 990) and s.get(Document, 991)
+
+
+def test_paperless_400_is_explained():
+    """Django antwortet mit „Bad Request (400)“, wenn die Adresse nicht in PAPERLESS_ALLOWED_HOSTS steht."""
+    import respx
+
+    from app.paperless import PaperlessClient, PaperlessError
+
+    with respx.mock() as router:
+        router.get("http://192.168.0.115:8000/api/correspondents/").respond(400, html="<h1>Bad Request (400)</h1>")
+        client = PaperlessClient("http://192.168.0.115:8000", "t")
+        with pytest.raises(PaperlessError) as err:
+            client.names("correspondents")
+        assert "PAPERLESS_ALLOWED_HOSTS" in str(err.value) and "400 Bad Request" in str(err.value)
+        router.get("http://192.168.0.115:8000/api/tags/").respond(401, json={"detail": "Invalid token."})
+        with pytest.raises(PaperlessError) as err:
+            client.names("tags")
+        assert "API-Token ist ungültig" in str(err.value)
