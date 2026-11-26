@@ -90,7 +90,8 @@ prüfen und mit einem Klick übernehmen.
 
 ![Nur im Companion](docs/screenshots/nur-im-companion.png)
 
-**Verträge** – Kündigungsfristen und Fixkosten; Kündigungsbestätigungen werden dem Vertrag zugeordnet. Abos ohne
+**Verträge** – Kündigungsfristen und Fixkosten (Zahlung mit Intervall, z.B. 480 € jährlich = 40 €/Monat; zuschaltbare
+Rücklagen-Ansicht: was monatlich zurückzulegen ist und heute angespart sein sollte); Kündigungsbestätigungen werden dem Vertrag zugeordnet. Abos ohne
 Dokument (z.B. Streaming) lassen sich direkt im Companion anlegen – aus den erkannten Abbuchungen mit einem Klick.
 
 ![Verträge](docs/screenshots/vertraege.png)

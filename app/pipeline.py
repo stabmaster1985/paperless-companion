@@ -40,7 +40,7 @@ FIELD_TYPES: dict[str, dict[str, str]] = {
         "name": "str", "provider": "str", "contract_number": "str", "start_date": "date",
         "initial_term_months": "int", "renewal_mode": "str", "renewal_months": "int", "notice_value": "int",
         "notice_unit": "str", "notice_to": "str", "end_date": "date", "monthly_cost": "float", "status": "str",
-        "cancelled_on": "date", "notes": "str",
+        "cancelled_on": "date", "notes": "str", "payment_amount": "float", "payment_interval": "int",
     },
     "warranty": {"product": "str", "purchase_date": "date", "months": "int", "warranty_type": "str"},
     "reimbursement": {"payer": "str", "statement_date": "date", "amount": "float", "status": "str", "received_on": "date"},
@@ -635,6 +635,7 @@ def apply_values(session: Session, doc: Document, kind: str, values: dict) -> No
         record.notice_unit = values.get("notice_unit") or "months"
         record.notice_to = values.get("notice_to") or "term_end"
         record.status = values.get("status") or "active"
+        _normalize_payment(record, values)
         doc.contract = record
     elif kind == "reimbursement":
         record = doc.reimbursement or Reimbursement(document_id=doc.id)
@@ -754,6 +755,18 @@ def pending_changes(doc: Document, settings: Settings, today: date) -> list[tupl
 
 def mark_changed(doc: Document) -> None:
     doc.writeback_pending = True
+
+
+def _normalize_payment(record, values: dict) -> None:
+    """Zahlung (Betrag + Intervall) und Monatsbetrag zueinander passend halten. Ohne Zahlungsangabe (z.B. aus der
+    Erkennung nur ein Monatsbetrag) gilt der Monatsbetrag als monatliche Zahlung."""
+    amount, interval = values.get("payment_amount"), values.get("payment_interval")
+    if amount is not None:
+        record.set_payment(amount, interval or 1)
+    elif values.get("monthly_cost") is not None:
+        record.set_payment(values["monthly_cost"], 1)
+    else:
+        record.payment_amount, record.payment_interval = None, interval or 1
 
 
 def touch_contract(contract, names, source: str = "manual") -> None:

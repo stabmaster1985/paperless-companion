@@ -440,7 +440,9 @@ document.querySelectorAll('.rf-form').forEach((form) => form.addEventListener('s
     {{ input('name', 'Bezeichnung', values, src) }}
     {{ party('provider', 'Anbieter', values, src, correspondents, doc_correspondent) }}
     {{ input('contract_number', 'Vertragsnummer', values, src) }}
-    {{ input('monthly_cost', 'Kosten pro Monat (€)', values, src, type='number', step='0.01') }}
+    {% set pay_values = dict(values) %}{% if pay_values.get('payment_amount') is none %}{% set _ = pay_values.update({'payment_amount': values.get('monthly_cost')}) %}{% endif %}
+    {{ input('payment_amount', 'Zahlung (€)', pay_values, src, type='number', step='0.01', hint=('= ' ~ (values.get('monthly_cost')|eur) ~ ' pro Monat') if values.get('monthly_cost') and (values.get('payment_interval') or 1)|int > 1 else none) }}
+    {{ select('payment_interval', 'Zahlungsintervall', values, src, [('1', 'monatlich'), ('3', 'vierteljährlich'), ('6', 'halbjährlich'), ('12', 'jährlich')]) }}
     {{ input('start_date', 'Vertragsbeginn', values, src, type='date') }}
     {{ input('initial_term_months', 'Mindestlaufzeit (Monate)', values, src, type='number') }}
     {{ input('end_date', 'Festes Laufzeitende', values, src, type='date', hint='Nur ausfüllen, wenn kein Beginn/Mindestlaufzeit bekannt ist') }}

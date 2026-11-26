@@ -31,7 +31,7 @@
   <label class="field">
     <span>{{ label }} {{ badge(name, src) }}</span>
     <select name="{{ name }}">
-      {% for key, text in options %}<option value="{{ key }}" {{ 'selected' if v == key }}>{{ text }}</option>{% endfor %}
+      {% for key, text in options %}<option value="{{ key }}" {{ 'selected' if v|string == key|string }}>{{ text }}</option>{% endfor %}
     </select>
   </label>
 {%- endmacro %}

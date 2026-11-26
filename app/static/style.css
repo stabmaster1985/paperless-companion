@@ -910,3 +910,11 @@ button:disabled, button:disabled:hover { opacity: .5; cursor: not-allowed; }
 .restore-upload { margin-top: .75rem; }
 .restore-upload > summary { cursor: pointer; color: var(--accent); }
 .pending-bar { display: flex; flex-wrap: wrap; gap: .4rem .9rem; align-items: center; margin: .25rem 0 .6rem; }
+
+/* Rücklagen-Ansicht (Verträge) */
+.reserve-toggle { margin: .25rem 0 .75rem; }
+.reserve-card { border-top: 4px solid #0e7490; }
+.reserve-sums { display: flex; flex-wrap: wrap; gap: .75rem 2rem; margin-bottom: .75rem; }
+.reserve-sums > div { display: flex; gap: .6rem; align-items: center; }
+.reserve-sums .num { font-size: 1.5rem; font-weight: 700; }
+tr.muted-row td { opacity: .65; }

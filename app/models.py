@@ -109,6 +109,10 @@ class Contract(Base):
     notice_to: Mapped[str] = mapped_column(String, default="term_end")
     end_date: Mapped[date | None] = mapped_column(Date)
     monthly_cost: Mapped[float | None] = mapped_column(Float)
+    # Zahlung laut Vertrag: Betrag je Intervall (1 = monatlich, 3 = vierteljährlich, 6 = halbjährlich, 12 = jährlich);
+    # monthly_cost ist daraus umgerechnet
+    payment_amount: Mapped[float | None] = mapped_column(Float)
+    payment_interval: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     # active | cancelled | ended
     status: Mapped[str] = mapped_column(String, default="active")
     cancelled_on: Mapped[date | None] = mapped_column(Date)
@@ -122,6 +126,23 @@ class Contract(Base):
     @property
     def virtual(self) -> bool:
         return self.document_id is None
+
+    @property
+    def interval(self) -> int:
+        return self.payment_interval or 1
+
+    @property
+    def payment(self) -> float | None:
+        """Betrag je Zahlung (bei älteren Einträgen aus dem Monatsbetrag)."""
+        if self.payment_amount is not None:
+            return self.payment_amount
+        return round(self.monthly_cost * self.interval, 2) if self.monthly_cost is not None else None
+
+    def set_payment(self, amount: float | None, interval: int | None = None) -> None:
+        """Zahlung setzen und den Monatsbetrag daraus umrechnen."""
+        self.payment_interval = interval if interval in (1, 3, 6, 12) else (self.payment_interval or 1)
+        self.payment_amount = round(amount, 2) if amount is not None else None
+        self.monthly_cost = round(amount / self.payment_interval, 2) if amount is not None else None
 
     @property
     def url(self) -> str:

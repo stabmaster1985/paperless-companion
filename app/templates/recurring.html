@@ -47,7 +47,8 @@
       {% if item.cost_differs or not c.monthly_cost %}
       <form method="post" action="/recurring/action" class="inline"><input type="hidden" name="action" value="cost">
         <input type="hidden" name="contract_id" value="{{ c.id }}"><input type="hidden" name="monthly" value="{{ s.monthly }}">
-        <button class="small primary">Monatsbeitrag auf {{ s.monthly|eur }} setzen</button></form>
+        <input type="hidden" name="amount" value="{{ s.last_amount }}"><input type="hidden" name="interval" value="{{ s.months }}">
+        <button class="small primary">Beitrag auf {{ s.last_amount|eur }} {{ s.rhythm }} setzen{% if s.months > 1 %} (= {{ s.monthly|eur }}/Monat){% endif %}</button></form>
       {% endif %}
       {{ dismiss('changed:' ~ s.key ~ ':' ~ s.last_amount) }}
     </div>

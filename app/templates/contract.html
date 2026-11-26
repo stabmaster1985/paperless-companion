@@ -26,7 +26,10 @@
     <label class="field"><span>Empfänger in Firefly</span><input name="payee" value="{{ c.payee or '' }}"
       title="Name, unter dem die Abbuchungen in Firefly erscheinen – darüber erkennt der Companion sie"></label>
     <label class="field"><span>Kundennummer</span><input name="contract_number" value="{{ c.contract_number or '' }}"></label>
-    <label class="field"><span>Kosten pro Monat (€)</span><input name="monthly_cost" inputmode="decimal" value="{{ '%.2f'|format(c.monthly_cost) if c.monthly_cost is not none }}"></label>
+    <label class="field"><span>Zahlung (€)</span><input name="payment_amount" inputmode="decimal" value="{{ '%.2f'|format(c.payment) if c.payment is not none }}">
+      {% if c.interval > 1 and c.monthly_cost %}<small>= {{ c.monthly_cost|eur }} pro Monat</small>{% endif %}</label>
+    <label class="field"><span>Zahlungsintervall</span><select name="payment_interval">
+      {% for k, l in [(1, 'monatlich'), (3, 'vierteljährlich'), (6, 'halbjährlich'), (12, 'jährlich')] %}<option value="{{ k }}" {{ 'selected' if c.interval == k }}>{{ l }}</option>{% endfor %}</select></label>
     <label class="field"><span>Beginn</span><input type="date" name="start_date" value="{{ c.start_date.isoformat() if c.start_date }}"></label>
     <label class="field"><span>Mindestlaufzeit (Monate)</span><input name="initial_term_months" inputmode="numeric" value="{{ c.initial_term_months or '' }}"></label>
     <label class="field"><span>Danach</span><select name="renewal_mode">

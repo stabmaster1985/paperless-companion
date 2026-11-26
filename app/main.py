@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import activity, appsettings, backups, bulk, cancellations, dunning, localdata, recurring, cases, mqtt, reimbursements, series, help as helptexts, identifiers, learning, paperless_rules, receipts, rules as rule_proposals, deadlines, events, fields, highlight, ics, metadata, notify, payments, pipeline, reminders, retention, selection, tax
+from app import activity, appsettings, backups, bulk, reserves, cancellations, dunning, localdata, recurring, cases, mqtt, reimbursements, series, help as helptexts, identifiers, learning, paperless_rules, receipts, rules as rule_proposals, deadlines, events, fields, highlight, ics, metadata, notify, payments, pipeline, reminders, retention, selection, tax
 from app.config import Settings, get_settings
 from app.db import get_session, init_db, session_scope
 from app.models import Case, CaseDocument, CaseEntry, Contract, Document, Invoice, KeyValue, PaymentMatch, ReceiptCheck, RuleProposal, RetentionLog, RetentionRule, Warranty
@@ -1175,6 +1175,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         rec = recurring.findings(session, t)
         return render(request, "contracts.html", rows=rows, fixed_costs=events.monthly_fixed_costs(session), msg=msg,
                       recurring_counts={k: len(rec[k]) for k in ("unknown", "changed", "missing")},
+                      reserve=reserves.collect(session, t),
                       recurring_sums=rec.get("sums"),
                       cancels=cancellations.pending(session),
                       all_contracts=sorted(session.scalars(select(Contract)), key=lambda c: (c.name or "").lower()))
@@ -1209,9 +1210,11 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         msg = f"„{contract.name or contract.provider}“ ist als gekündigt markiert" + (f" (endet {end:%d.%m.%Y})" if end else "")
         return RedirectResponse(f"/contracts?msg={quote(msg)}", status_code=303)
 
-    def new_abo(session: Session, name: str, payee: str | None, monthly: float | None, start: date | None) -> Contract:
-        contract = Contract(document_id=None, name=name, provider=name, payee=payee, monthly_cost=monthly, start_date=start,
+    def new_abo(session: Session, name: str, payee: str | None, monthly: float | None, start: date | None,
+                interval: int = 1) -> Contract:
+        contract = Contract(document_id=None, name=name, provider=name, payee=payee, start_date=start,
                             renewal_mode="indefinite", notice_value=1, notice_unit="months", notice_to="any", status="active")
+        contract.set_payment(monthly * interval if monthly is not None else None, interval)
         session.add(contract)
         session.flush()
         return contract
@@ -1264,8 +1267,10 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         for name in pipeline.FIELD_TYPES["contract"]:
             if name in ("name", "renewal_mode", "notice_unit", "notice_to", "status"):
                 setattr(c, name, values.get(name) or getattr(c, name))
-            else:
+            elif name not in ("monthly_cost", "payment_amount", "payment_interval"):
                 setattr(c, name, values.get(name))
+        amount = values.get("payment_amount") if values.get("payment_amount") is not None else values.get("monthly_cost")
+        c.set_payment(amount, values.get("payment_interval") or 1)
         c.payee = (form.get("payee") or "").strip() or None
         return RedirectResponse(f"/contracts/{c.id}?msg={quote('Gespeichert')}", status_code=303)
 
@@ -1338,7 +1343,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                 from statistics import median
 
                 monthly = round(median(new.amounts) / new.months, 2)
-                contract = new_abo(session, new.payee, new.payee, monthly, date.fromisoformat(new.dates[0]))
+                contract = new_abo(session, new.payee, new.payee, monthly, date.fromisoformat(new.dates[0]), new.months)
                 recurring.link_contract(session, new_key, contract.id)
                 receipts.sync_payments(session)
                 msg = f"{len(ids)} Buchungen als neues Abo übernommen – Name, Laufzeit und Kündigungsfrist prüfen"
@@ -1388,6 +1393,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     @app.post("/recurring/action")
     def recurring_action(action: str = Form(...), key: str = Form(""), token: str = Form(""), contract_id: str = Form(""),
                          doc_id: str = Form(""), monthly: str = Form(""), tx: str = Form(""), back: str = Form(""),
+                         amount: str = Form(""), interval: str = Form(""),
                          session: Session = Depends(get_session)):
         series = next((s for s in recurring.stored(session) if s.key == key), None)
         target = back if back.startswith("/") and not back.startswith("//") else "/recurring"
@@ -1407,7 +1413,8 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             recurring.dismiss(session, token)
             msg = "Ausgeblendet"
         elif action == "abo" and series is not None:
-            contract = new_abo(session, series.payee, series.payee, series.monthly, date.fromisoformat(series.dates[0]))
+            contract = new_abo(session, series.payee, series.payee, series.monthly, date.fromisoformat(series.dates[0]),
+                               series.months)
             recurring.link_contract(session, series.key, contract.id)
             return RedirectResponse(f"/contracts/{contract.id}?msg={quote('Abo angelegt – Kündigungsfrist und Laufzeit prüfen')}",
                                     status_code=303)
@@ -1422,8 +1429,9 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                 if contract is None:  # Dokument wird hiermit zum Vertrag – Angaben aus den Abbuchungen
                     contract = Contract(document_id=doc.id, name=doc.title or series.payee,
                                         provider=doc.correspondent or series.payee, payee=series.payee,
-                                        monthly_cost=series.monthly, start_date=date.fromisoformat(series.dates[0]),
+                                        start_date=date.fromisoformat(series.dates[0]),
                                         renewal_mode="indefinite", notice_value=1, notice_unit="months", notice_to="any")
+                    contract.set_payment(series.last_amount, series.months)
                     session.add(contract)
                     doc.kind, doc.kind_source, doc.review_state = "contract", "manual", "confirmed"
                     session.flush()
@@ -1432,7 +1440,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                                         status_code=303)
             recurring.link_contract(session, series.key, contract.id)
             if contract.monthly_cost is None:
-                contract.monthly_cost = series.monthly
+                contract.set_payment(series.last_amount, series.months)
                 pipeline.touch_contract(contract, "monthly_cost", "firefly")
             msg = f"„{series.payee}“ gehört zu „{contract.name or contract.provider}“"
         elif action == "cost" and contract_id.isdigit():
@@ -1440,7 +1448,11 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             value = pipeline.coerce("float", monthly or None)
             if contract is not None and value:
                 old = contract.monthly_cost
-                contract.monthly_cost = value
+                pay = pipeline.coerce("float", amount or None)
+                if pay:  # Betrag und Rhythmus der Abbuchungen übernehmen (z.B. 89 € vierteljährlich)
+                    contract.set_payment(pay, int(interval) if interval.isdigit() else 1)
+                else:
+                    contract.set_payment(value, 1)
                 pipeline.touch_contract(contract, "monthly_cost", "firefly")
                 msg = (f"Monatsbeitrag „{contract.name or contract.provider}“: {value:.2f} € (vorher "
                        f"{old:.2f} €)" if old else f"Monatsbeitrag „{contract.name or contract.provider}“: {value:.2f} €").replace(".", ",")

@@ -42,6 +42,54 @@
   {% endfor %}
 </section>
 {% endif %}
+<label class="check reserve-toggle"><input type="checkbox" id="reserve-toggle" onchange="reserveToggle(this.checked)">
+  Rücklagen-Ansicht: Zahlungen auf den Monat umrechnen und zeigen, was für kommende Zahlungen angespart sein sollte</label>
+
+{% set rv = reserve %}
+<section class="card reserve-card" id="reserves" hidden>
+  <h2>Rücklagen</h2>
+  {% if rv.rare %}
+  <div class="reserve-sums">
+    <div><span class="num">{{ rv.monthly_reserve|eur }}</span><span>pro Monat zurücklegen<br><small class="muted">für {{ rv.rare|length }} nicht monatliche Zahlungen</small></span></div>
+    <div><span class="num">{{ rv.should_have|eur }}</span><span>sollten heute angespart sein<br><small class="muted">anteilig seit der letzten Zahlung</small></span></div>
+    <div><span class="num">{{ rv.due_30_sum|eur }}</span><span>in den nächsten 31 Tagen fällig<br><small class="muted">{{ rv.due_30|length }} Zahlungen, auch monatliche</small></span></div>
+  </div>
+  {% else %}
+  <p class="muted">Keine Verträge mit vierteljährlicher, halbjährlicher oder jährlicher Zahlung. Das Zahlungsintervall stellst du am Vertrag ein
+    (Zahlung + Zahlungsintervall).</p>
+  {% endif %}
+  {% if rv.rows %}
+  <div class="table-wrap"><table class="list compact">
+    <thead><tr><th>Vertrag</th><th>Zahlung</th><th>Rücklage/Monat</th><th>nächste Zahlung</th><th>sollte angespart sein</th></tr></thead>
+    <tbody>
+    {% for r in rv.rows %}{% set c = r.contract %}
+      <tr class="{{ 'muted-row' if r.interval == 1 }}">
+        <td><a href="{{ c.url }}">{{ c.label }}</a></td>
+        <td class="nowrap">{{ r.amount|eur }} <small class="muted">{{ r.rhythm }}</small></td>
+        <td class="nowrap">{{ r.monthly|eur }}</td>
+        <td class="nowrap">{% if r.next %}{{ r.next|d }}{% set days = (r.next - today).days %}<br><small class="{{ 'soon' if days <= 31 }}">in {{ days }} T. · laut {{ r.source }}</small>{% else %}<small class="muted">unbekannt – Beginn eintragen</small>{% endif %}</td>
+        <td class="nowrap">{% if r.interval > 1 and r.saved is not none %}{{ r.saved|eur }} <small class="muted">von {{ r.amount|eur }}</small>{% else %}–{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <p class="muted"><small>Zahltermine aus den erkannten Abbuchungen in Firefly, sonst aus dem Vertragsbeginn. Monatliche Zahlungen stehen
+    nur zur Übersicht dabei – für sie braucht es keine Rücklage.</small></p>
+  {% endif %}
+</section>
+<script>
+function reserveToggle(on) {
+  document.getElementById('reserves').hidden = !on;
+  try { localStorage.setItem('reserve-view', on ? '1' : '0'); } catch (e) {}
+}
+(() => {
+  let on = false;
+  try { on = localStorage.getItem('reserve-view') === '1'; } catch (e) {}
+  document.getElementById('reserve-toggle').checked = on;
+  reserveToggle(on);
+})();
+</script>
+
 <form method="post" action="/contracts/new" class="inline new-abo">
   <input name="name" placeholder="z.B. Netflix" aria-label="Name des Abos" required>
   <button class="small" title="Abo ohne Dokument anlegen – nur im Companion, z.B. für Streaming oder App-Abos">Abo ohne Dokument anlegen</button>
@@ -65,7 +113,7 @@
       </td>
       <td class="hide-sm">{% if c.status == 'cancelled' and c.cancel_effective %}{{ c.cancel_effective|d }}<br><small class="muted">laut Bestätigung</small>{% else %}{{ d.term_end|d }}{% endif %}</td>
       <td class="hide-sm">{% if c.notice_value %}{{ c.notice_value }} {{ {'months': 'Mon.', 'weeks': 'Wo.', 'days': 'Tage'}[c.notice_unit] }}{% else %}–{% endif %}</td>
-      <td class="nowrap">{{ c.monthly_cost|eur }}</td>
+      <td class="nowrap">{{ c.monthly_cost|eur }}{% if c.interval > 1 and c.payment %}<br><small class="muted">{{ c.payment|eur }} {{ {3: 'vierteljährlich', 6: 'halbjährlich', 12: 'jährlich'}.get(c.interval) }}</small>{% endif %}</td>
       <td>
         {% if c.status == 'active' %}
         <details class="cancel-pop">
