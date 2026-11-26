@@ -230,14 +230,33 @@ def _iso_date(value) -> date | None:
         return None
 
 
-def apply_paperless_fields(doc: Document, open_max_age_days: int = 90, today: date | None = None) -> None:
-    """Übernimmt in Paperless gepflegte Werte (Fälligkeit, bezahlt am, Betrag).
+def _contract_from_fields(doc: Document, pf: dict) -> None:
+    """Vertrag aus den (optionalen) Vertragsfeldern in Paperless wieder aufbauen – z.B. nach einer Neuinstallation."""
+    from app import contractfields
 
-    Dokumente mit Fälligkeits- oder Bezahlt-Datum gelten als Rechnung – auch ohne Analyse.
+    if doc.contract is not None or doc.invoice is not None or doc.kind_source == "manual" or \
+            not (pf.get("contract_terms") or pf.get("monthly_cost") or pf.get("contract_start")):
+        return
+    terms = contractfields.from_text(pf.get("contract_terms"))
+    doc.contract = Contract(document_id=doc.id, name=doc.title or "", provider=doc.correspondent,
+                            monthly_cost=pf.get("monthly_cost"), start_date=_iso_date(pf.get("contract_start")),
+                            renewal_mode=terms.get("renewal_mode", "renews"), notice_unit=terms.get("notice_unit", "months"),
+                            notice_to=terms.get("notice_to", "term_end"),
+                            **{k: v for k, v in terms.items() if k not in ("renewal_mode", "notice_unit", "notice_to")})
+    doc.kind, doc.kind_source, doc.review_state = "contract", "fields", "confirmed"
+    set_source(doc, [n for n in ("monthly_cost", "start_date", *terms) if n], "paperless")
+
+
+def apply_paperless_fields(doc: Document, open_max_age_days: int = 90, today: date | None = None) -> None:
+    """Übernimmt in Paperless gepflegte Werte (Fälligkeit, bezahlt am, Betrag; optional Vertragsangaben).
+
+    Dokumente mit Fälligkeits- oder Bezahlt-Datum gelten als Rechnung – auch ohne Analyse; Dokumente mit
+    Vertragsfeldern als Vertrag.
     """
     if doc.writeback_pending:
         return  # eigene, noch nicht zurückgeschriebene Änderungen haben Vorrang
     pf = doc.paperless_fields or {}
+    _contract_from_fields(doc, pf)
     due, paid, amount = _iso_date(pf.get("due_date")), _iso_date(pf.get("paid_on")), pf.get("amount")
     if doc.invoice is not None:
         inv = doc.invoice
@@ -704,6 +723,11 @@ def companion_values(doc: Document, today: date) -> dict[str, object]:
             result = deadlines.compute(deadlines.terms_from_contract(doc.contract), today)
             values["cancel_by"] = None if result.anytime else result.cancel_by
             values["term_end"] = result.term_end
+            from app import contractfields
+
+            values["monthly_cost"] = doc.contract.monthly_cost
+            values["contract_start"] = doc.contract.start_date
+            values["contract_terms"] = contractfields.to_text(doc.contract)
         if doc.warranty:
             values["warranty_end"] = doc.warranty.expires_on
         # Unbekannte Werte nie vorschlagen (würde Eingaben in Paperless löschen) – außer bewusstem Leeren

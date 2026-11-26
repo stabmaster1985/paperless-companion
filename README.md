@@ -364,6 +364,21 @@ haben Vorrang, gelten sofort (Verbindungen werden neu aufgebaut) und sind mit �
 „zurücksetzen“ nimmt wieder den Wert aus der `.env`. Tokens und Passwörter werden nie angezeigt;
 leer lassen heißt unverändert. Nur `DATA_DIR`, `SECRET_KEY` und `APP_PASSWORD` bleiben in der `.env`.
 
+### Verträge auch in Paperless
+
+Laufzeit, Kündigungsfrist und Monatsbeitrag stehen zunächst nur im Companion. Mit drei optionalen Feldern
+(*Einstellungen → Paperless-Felder*: „Vertrag: Monatsbeitrag“, „Vertrag: Beginn“, „Vertrag: Laufzeit und
+Kündigungsfrist“) werden sie beim Übertragen mitgeschrieben – die Konditionen als lesbarer Text wie
+„Laufzeit 24 Monate · verlängert sich um 12 Monate · Kündigungsfrist 3 Monate zum Laufzeitende“. Nach einer
+Neuinstallation baut der Companion die Verträge daraus wieder auf.
+
+### Sicherung
+
+Alles, was du im Companion erfasst, steht in seiner Datenbank im Datenordner. Täglich (Standard 3 Uhr) wird eine
+Sicherung angelegt, die letzten 14 bleiben (`BACKUP_HOUR`, `BACKUP_KEEP`, `BACKUP_DIR` – am besten ein eigenes Volume).
+Unter *System → Nur im Companion* siehst du, was nur im Companion steht, kannst sichern, herunterladen und
+wiederherstellen.
+
 ### Leserechte für den Companion-Benutzer
 
 Gehören Dokumenttypen, Korrespondenten oder Tags einem anderen Paperless-Benutzer (z.B. admin),

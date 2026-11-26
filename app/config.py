@@ -79,6 +79,10 @@ class Settings(BaseSettings):
     field_comment: str = "Kommentar"
     field_related: str = "gehört zu"
     field_summary: str = "Zusammenfassung KI"
+    # Verträge in Paperless (optional, leer = aus): Monatsbeitrag, Vertragsbeginn, Laufzeit und Kündigungsfrist als Text
+    field_monthly_cost: str = ""
+    field_contract_start: str = ""
+    field_contract_terms: str = ""
     # Rechnungen aus „Fällig am“ ohne „Bezahlt am“, die länger als N Tage fällig sind, gelten als erledigt
     fields_open_max_age_days: int = 90
     # Vorgänge schlagen die Verknüpfung im Feld „gehört zu“ vor

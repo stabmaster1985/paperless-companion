@@ -16,12 +16,17 @@ ROLES: dict[str, tuple[str, str, bool]] = {
     "term_end": ("field_term_end", "date", True),
     "warranty_end": ("field_warranty_end", "date", True),
     "summary": ("field_summary", "string", True),
+    # Verträge (optional): damit Monatsbeitrag, Beginn und Laufzeit/Kündigungsfrist auch in Paperless stehen
+    "monthly_cost": ("field_monthly_cost", "monetary", True),
+    "contract_start": ("field_contract_start", "date", True),
+    "contract_terms": ("field_contract_terms", "string", True),
     # Felder, die der Nutzer selbst pflegt – werden nie automatisch angelegt
     "comment": ("field_comment", "string", False),
     "related": ("field_related", "documentlink", False),
 }
 # Rollen, die beim automatischen Rückschreiben gesetzt werden
-WRITEBACK_ROLES = ("amount", "due_date", "paid_on", "cancel_by", "term_end", "warranty_end")
+WRITEBACK_ROLES = ("amount", "due_date", "paid_on", "cancel_by", "term_end", "warranty_end", "monthly_cost",
+                   "contract_start", "contract_terms")
 STRING_LIMIT = 128  # Paperless begrenzt Felder vom Typ „string“ auf 128 Zeichen
 
 

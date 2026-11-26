@@ -127,9 +127,12 @@ def inventory(session: Session, settings: Settings, today: date) -> list[Section
                            _count(session, PaymentMatch, PaymentMatch.state == "rejected"), "würden wieder vorgeschlagen"))
     only.items.append(Item("Rückerstattungen", _count(session, Invoice, Invoice.refund_amount.is_not(None)), "", "/invoices?status=all"))
     only.items.append(Item("Mahnungen zugeordnet", _count(session, Invoice, Invoice.reminders.is_not(None)), "", "/invoices?status=all"))
-    only.items.append(Item("Verträge (Laufzeit, Kündigungsfrist, Monatsbeitrag)",
-                           _count(session, Contract, Contract.document_id.is_not(None)),
-                           "in Paperless stehen höchstens „Kündigen bis“ und „Laufzeitende“", "/contracts"))
+    contracts = list(session.scalars(select(Contract).where(Contract.document_id.is_not(None))))
+    recoverable = [c for c in contracts if c.document and (c.document.paperless_fields or {}).get("contract_terms")]
+    only.items.append(Item("Verträge (Laufzeit, Kündigungsfrist, Monatsbeitrag)", len(contracts) - len(recoverable),
+                           (f"{len(recoverable)} weitere kommen aus deinen Paperless-Vertragsfeldern zurück" if recoverable else
+                            "Tipp: unter Einstellungen → Paperless-Felder die Vertragsfelder einschalten und übertragen – dann "
+                            "stehen sie auch in Paperless"), "/contracts"))
     only.items.append(Item("Abos ohne Dokument", _count(session, Contract, Contract.document_id.is_(None)), "", "/contracts"))
     only.items.append(Item("Eingetragene Kündigungen", _count(session, Contract, Contract.status == "cancelled"), "", "/contracts"))
     only.items.append(Item("Garantien", _count(session, Warranty), "", "/warranties"))
