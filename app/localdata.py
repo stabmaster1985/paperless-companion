@@ -37,6 +37,7 @@ class Section:
     title: str
     hint: str
     items: list[Item] = field(default_factory=list)
+    oldest: date | None = None  # älteste Vormerkung (nur „wartet auf Übertragung“)
 
     @property
     def total(self) -> int:
@@ -58,6 +59,16 @@ def _kv_len(session: Session, key: str) -> int:
     return len(value) if isinstance(value, (list, dict)) else 1
 
 
+def _oldest(stamps: list[str]) -> date | None:
+    days = []
+    for value in stamps:
+        try:
+            days.append(date.fromisoformat(str(value)[:10]))
+        except ValueError:
+            continue
+    return min(days) if days else None
+
+
 def _invoice_in_paperless(inv: Invoice) -> bool:
     """Wird die Rechnung bei einer Neuinstallation aus deinen Paperless-Feldern wiederhergestellt?
     (Fälligkeit bzw. Bezahlt-Datum und Betrag stehen in Paperless – siehe pipeline.apply_paperless_fields)"""
@@ -76,11 +87,25 @@ def inventory(session: Session, settings: Settings, today: date) -> list[Section
                       "Vorgemerkt, aber noch nicht übertragen. Überträgst du es vorher unter „Für Paperless“, steht es in "
                       "Paperless und ist sicher – sonst ist es bei einer Neuinstallation weg.")
     changes = pipeline.documents_with_changes(session, settings, today)
+    stamps: list[str] = []
+    for doc, items in changes:
+        sources = doc.field_sources or {}
+        for role, _, _ in items:
+            entry = sources.get(f"proposal:{role}") or sources.get(role) or {}
+            if entry.get("at"):
+                stamps.append(entry["at"])
     pending.items.append(Item("Dokumente mit geänderten Feldern", len(changes),
                               "Fälligkeit, Bezahlt am, Betrag, Kündigungsfristen … für Paperless-Felder", "/paperless-changes"))
-    _, accepted = metadata.open_counts(session)
+    accepted = 0
+    for doc in session.scalars(select(Document).where(Document.meta_pending.is_(True))):
+        for item in metadata.pending(doc):
+            if item["state"] == "accepted":
+                accepted += 1
+                if item.get("at"):
+                    stamps.append(item["at"])
     pending.items.append(Item("Vorgemerkte Metadaten", accepted, "Titel, Tags, Korrespondent, Dokumenttyp",
                               "/paperless-changes#metadata"))
+    pending.oldest = _oldest(stamps)
     proposed = [d for d in session.scalars(select(Document).where(Document.proposed_fields.is_not(None))) if d.proposed_fields]
     links = sum(1 for d in proposed if "related" in d.proposed_fields)
     pending.items.append(Item("Vorgemerkte Verknüpfungen „gehört zu“", links, "", "/paperless-changes"))

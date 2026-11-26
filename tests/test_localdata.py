@@ -48,3 +48,20 @@ def test_backup_download_is_a_working_database(client, tmp_path):
     con = sqlite3.connect(copy)
     assert con.execute("SELECT count(*) FROM documents").fetchone()[0] > 0
     con.close()
+
+
+def test_pending_age_and_transfer_all(client, mock_api, settings):
+    from app import pipeline
+
+    with session_scope() as s:
+        doc = s.get(Document, 1)
+        pipeline.propose(doc, "related", [2])
+        sources = dict(doc.field_sources or {})
+        sources["proposal:related"] = {**sources["proposal:related"], "at": "2026-09-01T10:00"}
+        doc.field_sources = sources
+    page = client.get("/local-data").text
+    assert "Älteste Vormerkung vom 01.09.2026" in page and "Jetzt alles übertragen" in page
+    r = client.post("/local-data/transfer-all")
+    assert "Feldänderungen übertragen" in r.text
+    calls = [c for c in mock_api.calls if c.request.method == "PATCH"]
+    assert calls  # nach Paperless geschrieben – nur über diesen Klick

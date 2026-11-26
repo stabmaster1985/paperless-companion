@@ -909,3 +909,4 @@ button:disabled, button:disabled:hover { opacity: .5; cursor: not-allowed; }
 .backups { margin-top: .75rem; }
 .restore-upload { margin-top: .75rem; }
 .restore-upload > summary { cursor: pointer; color: var(--accent); }
+.pending-bar { display: flex; flex-wrap: wrap; gap: .4rem .9rem; align-items: center; margin: .25rem 0 .6rem; }

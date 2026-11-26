@@ -210,6 +210,10 @@ def start_demo(data: Path, port: int) -> None:
         streaming = next(x for x in recurring.stored(s) if x.payee == "Streamingdienst Flimmer")
         recurring.link_contract(s, streaming.key, abo.id)
 
+    from app import backups
+
+    backups.create(settings, "auto")  # Beispiel-Sicherung (sonst zeigt die Übersicht den Hinweis „keine Sicherung“)
+
     with session_scope() as s:  # Verlauf: ein paar erfundene Aktionen
         from datetime import datetime, timedelta, timezone
 

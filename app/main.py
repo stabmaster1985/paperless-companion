@@ -402,6 +402,33 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                       data_dir=settings.data_dir, db_size=size, msg=msg, backups=backups.all_backups(settings),
                       backup_folder=backups.folder(settings), backup_settings=settings)
 
+    @app.post("/local-data/transfer-all")
+    def local_data_transfer_all(session: Session = Depends(get_session)):
+        """Alles Vorgemerkte auf einmal nach Paperless übertragen: geänderte Felder und vorgemerkte Metadaten.
+        Schreibt nach Paperless – nur auf deinen Klick (mit Rückfrage)."""
+        done, errors = 0, []
+        paperless = make_paperless(settings, timeout=30)
+        try:
+            for doc, items in pipeline.documents_with_changes(session, settings, today()):
+                roles = [role for role, _, _ in items]
+                try:
+                    missing = pipeline.approve_changes(paperless, doc, settings, roles, today())
+                    done += len(roles) - len(missing)
+                    errors += [f"#{doc.id}: Feld „{fields.role_names(settings)[r]}“ fehlt in Paperless" for r in missing]
+                except PaperlessError as exc:
+                    errors.append(f"#{doc.id}: {exc}")
+                session.flush()
+        finally:
+            paperless.close()
+        selected = {doc.id: [i["key"] for i in items]
+                    for doc, items in metadata.pending_rows(session, "accepted", year_mode=settings.year_tags)}
+        meta_msg = meta_action(session, "transfer", selected) if any(selected.values()) else ""
+        msg = f"{done} Feldänderungen übertragen" + (f"; {meta_msg}" if meta_msg else "")
+        if errors:
+            msg += f". Probleme: {'; '.join(errors[:5])}" + (" – fehlen dem Companion Schreibrechte in Paperless?"
+                                                            if any("403" in e for e in errors) else "")
+        return RedirectResponse(f"/local-data?msg={quote(msg)}", status_code=303)
+
     @app.post("/local-data/backup-now")
     def local_data_backup_now():
         made = backups.create(settings, "manuell")

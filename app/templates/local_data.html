@@ -54,6 +54,17 @@
 <section class="card local-sec local-{{ sec.key }}">
   <h2>{{ sec.title }} {% if sec.key != 'regen' %}<span class="count">{{ sec.total }}</span>{% endif %}</h2>
   <p class="muted">{{ sec.hint }}</p>
+  {% if sec.key == 'pending' and sec.total %}
+  <div class="pending-bar">
+    {% if sec.oldest %}{% set age = (today - sec.oldest).days %}
+    <span class="{{ 'soon' if age > 30 }}">Älteste Vormerkung vom {{ sec.oldest|d }}{% if age > 1 %} – seit {{ age }} Tagen nicht übertragen{% endif %}.</span>
+    {% endif %}
+    <form method="post" action="/local-data/transfer-all" class="inline"
+      onsubmit="return confirm('Alle vorgemerkten Änderungen jetzt nach Paperless übertragen? Das schreibt in Paperless (Felder, Titel, Tags, Korrespondenten, Dokumenttypen, Verknüpfungen) und braucht Schreibrechte.')">
+      <button class="small primary">Jetzt alles übertragen</button></form>
+    <a class="small" href="/paperless-changes">einzeln ansehen</a>
+  </div>
+  {% endif %}
   {% if sec.items %}
   <table class="list compact local-list"><tbody>
     {% for it in sec.items %}
