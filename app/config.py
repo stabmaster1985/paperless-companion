@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     doctypes_contract: str = "Vertrag,Versicherung,Police"
     doctypes_warranty: str = "Kaufbeleg,Kassenbon,Garantie"
     doctypes_reimbursement: str = "Leistungsabrechnung,Erstattung,Beihilfebescheid"
+    doctypes_notice: str = "Bescheid,Steuerbescheid"
     doctypes_other: str = ""  # nie auswerten (z.B. Gehaltsabrechnung, Kontoauszug)
     # Rechnungen mit diesem Tag gelten als erstattungsfähig (z.B. Arztrechnungen): ohne verknüpfte Erstattung „noch offen“
     reimbursable_tag: str = ""
@@ -176,6 +177,7 @@ class Settings(BaseSettings):
         for kind, raw in (
             ("invoice", self.doctypes_invoice),
             ("contract", self.doctypes_contract),
+            ("notice", self.doctypes_notice),
             ("warranty", self.doctypes_warranty),
             ("reimbursement", self.doctypes_reimbursement),
             ("other", self.doctypes_other),

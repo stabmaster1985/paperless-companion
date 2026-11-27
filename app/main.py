@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import activity, appsettings, backups, bulk, reserves, cancellations, dunning, localdata, recurring, cases, mqtt, reimbursements, series, help as helptexts, identifiers, learning, paperless_rules, receipts, rules as rule_proposals, seriesdocs, deadlines, events, fields, highlight, ics, metadata, notify, payments, pipeline, reminders, retention, selection, tax
+from app import activity, appsettings, backups, bulk, reserves, cancellations, dunning, localdata, recurring, cases, mqtt, reimbursements, series, help as helptexts, identifiers, learning, paperless_rules, receipts, rules as rule_proposals, seriesdocs, notices, deadlines, events, fields, highlight, ics, metadata, notify, payments, pipeline, reminders, retention, selection, tax
 from app.config import Settings, get_settings
 from app.db import get_session, init_db, session_scope
 from app.models import Case, CaseDocument, CaseEntry, Contract, Document, Invoice, KeyValue, PaymentMatch, ReceiptCheck, RuleProposal, RetentionLog, RetentionRule, Warranty
@@ -44,7 +44,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     settings = settings or get_settings()
     # Werte aus der .env, falls die in der App gespeicherte Zuordnung zurückgesetzt wird
     env_doctypes = {k: getattr(settings, k) for k in ("doctypes_invoice", "doctypes_contract", "doctypes_warranty",
-                                                      "doctypes_reimbursement", "doctypes_other", "tax_doctypes")}
+                                                      "doctypes_reimbursement", "doctypes_notice", "doctypes_other", "tax_doctypes")}
     # Werte aus der .env für die übrigen in der App änderbaren Einstellungen
     env_settings = {name: getattr(settings, name) for name in appsettings.FIELDS}
 
@@ -136,8 +136,8 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
 
     def all_contracts() -> list:
         with session_scope() as s:
-            return sorted(({"id": c.id, "label": c.label, "virtual": c.virtual} for c in s.scalars(select(Contract))),
-                          key=lambda c: c["label"].lower())
+            return sorted(({"id": c.id, "label": c.label, "virtual": c.virtual, "notice": c.is_notice}
+                           for c in s.scalars(select(Contract))), key=lambda c: c["label"].lower())
 
     templates.env.globals["all_contracts"] = all_contracts
 
@@ -1027,6 +1027,9 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         if doc is None or doc.kind not in pipeline.FIELD_TYPES:
             raise HTTPException(404)
         form = dict(await request.form(max_fields=MAX_FORM_FIELDS))
+        if doc.kind == "notice" and form.get("contract_id") == "new":  # neue Zahlungspflicht zum Bescheid anlegen
+            name = str(form.get("new_obligation") or "").strip() or str(form.get("authority") or "").strip() or doc.title or "Bescheid"
+            form["contract_id"] = str(notices.new_obligation(session, name, name).id)
         before = form_values(doc)[0] if doc.review_state == "confirmed" else {}
         before_sources = dict(doc.field_sources or {})
         first_confirmation = doc.review_state == "pending"
@@ -1068,15 +1071,18 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         if doc is None or kind not in pipeline.KINDS:
             raise HTTPException(404)
         was_pending = doc.review_state == "pending"
+        kept = notices.release_records(session, doc, kind) if kind != doc.kind else []  # Verknüpfungen erhalten
         doc.kind, doc.kind_source = kind, "manual"
         doc.review_state = "none"
         if kind != "other":
             pipeline.queue_now(doc)  # mit der neuen Art neu auswerten – vor der übrigen Warteschlange
             request_worker(app)
-            return RedirectResponse(f"/documents/{doc_id}", status_code=303)
+            msg = f"Art: {pipeline.KINDS[kind]} – wird neu ausgewertet" + (" · " + " · ".join(kept) if kept else "")
+            return RedirectResponse(f"/documents/{doc_id}?msg={quote(msg)}", status_code=303)
         # Sonstiges: nicht mehr auswerten, angelegte Rechnung/Vertrag/Garantie entfernen (Paperless bleibt unverändert)
-        doc.invoice = doc.contract = doc.warranty = doc.reimbursement = None
-        msg = f"„{doc.title or doc_id}“ ist jetzt „Sonstiges“ und wird nicht mehr ausgewertet"
+        doc.invoice = doc.contract = doc.warranty = doc.reimbursement = doc.notice = None
+        msg = f"„{doc.title or doc_id}“ ist jetzt „Sonstiges“ und wird nicht mehr ausgewertet" + (
+            " · " + " · ".join(kept) if kept else "")
         if not was_pending:
             return RedirectResponse(f"/documents/{doc_id}?msg={quote(msg)}", status_code=303)
         following = next_in_inbox(request, session, doc_id)
@@ -1261,8 +1267,27 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             return RedirectResponse(f"/documents/{c.document_id}", status_code=303)
         deadline = deadlines.compute(deadlines.terms_from_contract(c), today())
         series = [x for x in recurring.stored(session) if x.contract_id == c.id]
+        notice_list = notices.notices_of(session, c.id)
         return render(request, "contract.html", c=c, msg=msg, deadline=deadline, series=series,
-                      doc_suggestions=seriesdocs.contract_doc_suggestions(session, c))
+                      doc_suggestions=seriesdocs.contract_doc_suggestions(session, c), notice_list=notice_list,
+                      next_dates=notices.next_dates(notice_list[0], today()) if notice_list else [])
+
+    @app.post("/contracts/{contract_id}/notice")
+    def contract_attach_notice(contract_id: int, doc_id: str = Form(""), session: Session = Depends(get_session)):
+        """Dokument als Bescheid an eine Zahlungspflicht hängen – Verknüpfungen des Dokuments bleiben erhalten."""
+        c = session.get(Contract, contract_id)
+        wanted = doc_id.strip().lstrip("#")
+        if c is None:
+            raise HTTPException(404)
+        if not wanted.isdigit():
+            return RedirectResponse(f"/contracts/{c.id}?msg={quote('Bitte ein Dokument wählen')}#bescheide", status_code=303)
+        if problem := ensure_indexed(session, int(wanted)):
+            return RedirectResponse(f"/contracts/{c.id}?msg={quote(problem)}#bescheide", status_code=303)
+        doc = session.get(Document, int(wanted))
+        kept = notices.attach(session, c, doc)
+        request_worker(app)
+        msg = f"„{doc.title or doc.id}“ ist jetzt ein Bescheid zu „{c.label}“ – Angaben werden erkannt, dann in der Inbox prüfen"
+        return RedirectResponse(f"/contracts/{c.id}?msg={quote(' · '.join([msg, *kept]))}#bescheide", status_code=303)
 
     @app.get("/contracts/{contract_id}/doc-search", response_class=HTMLResponse)
     def contract_doc_search(request: Request, contract_id: int, q: str = "", session: Session = Depends(get_session)):
@@ -1309,6 +1334,8 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         amount = values.get("payment_amount") if values.get("payment_amount") is not None else values.get("monthly_cost")
         c.set_payment(amount, values.get("payment_interval") or 1)
         c.payee = (form.get("payee") or "").strip() or None
+        if "category" in form:
+            notices.convert_contract(session, c, form.get("category") == "notice")
         return RedirectResponse(f"/contracts/{c.id}?msg={quote('Gespeichert')}", status_code=303)
 
     @app.post("/contracts/{contract_id}/cancelled")
@@ -1434,35 +1461,17 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             return rule.get("q") or "", rule.get("amount"), {k: rule.get(k) or "" for k in recurring.MARKS}
         return c.payee or c.provider or c.name or "", c.payment_amount, {k: "" for k in recurring.MARKS}
 
-    # Abbuchungen und Namenslisten einen Tag lang merken (die Buchungssuche lädt sonst jedes Mal Jahre aus Firefly);
-    # „neu aus Firefly laden“ auf der Seite leert den Speicher
-    firefly_cache: dict = {}
-    CACHE_SECONDS = 24 * 3600
+    # Abbuchungen und Namenslisten einen Tag lang merken (die Buchungssuche lädt sonst jedes Mal Jahre aus Firefly) –
+    # auch über Updates und Neustarts (Datei im Datenordner); „neu aus Firefly laden“ leert ihn
+    from app.fireflycache import FireflyCache
+
+    firefly_cache = FireflyCache(settings.data_dir / "firefly_cache.json")
 
     def cached_withdrawals(client, start: date) -> list:
-        import time as _time
-
-        hit = firefly_cache.get("withdrawals")
-        if hit and hit["start"] <= start and _time.monotonic() - hit["at"] < CACHE_SECONDS:
-            return [t for t in hit["txs"] if t.date >= start]
-        txs = list(client.withdrawals(start, today()))
-        firefly_cache["withdrawals"] = {"start": start, "at": _time.monotonic(), "loaded": datetime.now(), "txs": txs}
-        return txs
+        return firefly_cache.withdrawals(client, start, today())
 
     def cached_names(client) -> dict[str, list[str]]:
-        import time as _time
-
-        hit = firefly_cache.get("names")
-        if hit and _time.monotonic() - hit["at"] < CACHE_SECONDS:
-            return hit["names"]
-        names = {}
-        for mark in recurring.MARKS:
-            try:
-                names[mark] = client.names(mark)
-            except Exception:  # nur Auswahlliste – ohne sie geht die Suche trotzdem
-                names[mark] = []
-        firefly_cache["names"] = {"at": _time.monotonic(), "names": names}
-        return names
+        return firefly_cache.names(client, recurring.MARKS)
 
     @app.get("/contracts/{contract_id}/bookings", response_class=HTMLResponse)
     def contract_bookings(request: Request, contract_id: int, q: str | None = None, amount: str = "", category: str = "",
@@ -1533,7 +1542,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         prefilled = ((preset[0] or "").strip().lower() == (q or "").strip().lower() and preset[1] == value
                      and all((preset[2][k] or "").strip().lower() == (marks[k] or "").strip().lower() for k in marks))
         return render(request, "contract_bookings.html", c=c, q=q, amount=shown, marks=marks, rows=rows, searched=searched,
-                      prefilled=prefilled, loaded=(firefly_cache.get("withdrawals") or {}).get("loaded"),
+                      prefilled=prefilled, loaded=firefly_cache.loaded,
                       error=error, msg=msg, back=contract_back(c) if c else "/recurring", mark_names=recurring.MARKS,
                       choices=choices, all_contract_list=sorted(session.scalars(select(Contract)), key=lambda k: k.label.lower()),
                       years=span, year_options=[y for y in (1, 2, 3, 5, 10) if y < max_years] + [max_years],
@@ -3194,7 +3203,7 @@ def quick_check(doc: Document) -> tuple[dict, list[str]]:
 def form_values(doc: Document) -> tuple[dict, bool]:
     """Formularwerte: gespeicherter Datensatz, sonst Vorschläge."""
     record = {"invoice": doc.invoice, "contract": doc.contract, "warranty": doc.warranty,
-              "reimbursement": doc.reimbursement}.get(doc.kind)
+              "reimbursement": doc.reimbursement, "notice": doc.notice}.get(doc.kind)
     if record is None:
         return pipeline.suggestion_values(doc), False
     values = {name: getattr(record, name, None) for name in pipeline.FIELD_TYPES[doc.kind]}

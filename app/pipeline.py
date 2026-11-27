@@ -15,7 +15,7 @@ from app.config import Settings
 from app.db import release
 from app.extraction import llm
 from app.extraction.rules import EXTRACTORS, classify_by_keywords, field
-from app.models import Contract, Document, Invoice, KeyValue, Reimbursement, Warranty
+from app.models import Contract, Document, Invoice, KeyValue, Notice, Reimbursement, Warranty
 from app.ollama import OllamaClient, OllamaError
 from app.paperless import PaperlessClient, PaperlessError
 
@@ -25,8 +25,8 @@ log = logging.getLogger(__name__)
 ANALYSIS_VERSION = 6  # 3: Gehaltsabrechnungen/Kontoauszüge nicht als Rechnung, 4: Erstattungen, 5: Kündigungsbestätigungen,
 # 6: Mahnungen
 
-KINDS = {"invoice": "Rechnung", "contract": "Vertrag", "warranty": "Garantie", "reimbursement": "Erstattung",
-         "other": "Sonstiges"}
+KINDS = {"invoice": "Rechnung", "contract": "Vertrag", "notice": "Bescheid", "warranty": "Garantie",
+         "reimbursement": "Erstattung", "other": "Sonstiges"}
 AUTO_THRESHOLD = 0.8
 
 # Feldtypen der Datensätze (für Formulare und Übernahme)
@@ -44,6 +44,11 @@ FIELD_TYPES: dict[str, dict[str, str]] = {
     },
     "warranty": {"product": "str", "purchase_date": "date", "months": "int", "warranty_type": "str"},
     "reimbursement": {"payer": "str", "statement_date": "date", "amount": "float", "status": "str", "received_on": "date"},
+    "notice": {
+        "authority": "str", "notice_date": "date", "period": "str", "reference": "str", "balance_kind": "str",
+        "balance_amount": "float", "balance_due": "date", "prepayment_amount": "float", "prepayment_interval": "int",
+        "prepayment_from": "date", "contract_id": "int",
+    },
 }
 
 
@@ -164,7 +169,7 @@ def kv_set(session: Session, key: str, value: str) -> None:
         session.add(KeyValue(key=key, value=value))
 
 
-DOCTYPE_KINDS = ("invoice", "contract", "warranty", "reimbursement", "other")
+DOCTYPE_KINDS = ("invoice", "contract", "notice", "warranty", "reimbursement", "other")
 
 
 def doctype_choices(settings: Settings) -> dict:
@@ -179,8 +184,8 @@ def apply_doctype_settings(session: Session, settings: Settings) -> bool:
         return False
     stored = json.loads(raw)
     kinds: dict = stored.get("kinds", {})
-    (settings.doctypes_invoice, settings.doctypes_contract, settings.doctypes_warranty, settings.doctypes_reimbursement,
-     settings.doctypes_other) = (
+    (settings.doctypes_invoice, settings.doctypes_contract, settings.doctypes_notice, settings.doctypes_warranty,
+     settings.doctypes_reimbursement, settings.doctypes_other) = (
         ",".join(name for name, kind in kinds.items() if kind == k) for k in DOCTYPE_KINDS
     )
     settings.tax_doctypes = ",".join(stored.get("tax", []))
@@ -457,6 +462,13 @@ def _fill_defaults(kind: str, doc: Document, sugg: dict) -> None:
         if doc.correspondent:
             sugg.setdefault("payer", field(doc.correspondent, 0.9, "paperless"))
         sugg.setdefault("status", field("open", 0.5, "default"))
+    elif kind == "notice":
+        if doc.correspondent:
+            sugg.setdefault("authority", field(doc.correspondent, 0.9, "paperless"))
+        if doc.created:
+            sugg.setdefault("notice_date", field(doc.created, 0.7, "paperless"))
+        sugg.setdefault("prepayment_interval", field(3, 0.5, "default"))
+        sugg.setdefault("balance_kind", field("none", 0.5, "default"))
 
 
 def _inject_paperless_fields(doc: Document, sugg: dict) -> None:
@@ -481,8 +493,8 @@ def _conf(sugg: dict, name: str) -> float:
 
 
 def can_auto_accept(kind: str, sugg: dict, settings: Settings) -> bool:
-    if kind == "contract":
-        return False  # Verträge immer bestätigen lassen – zu wichtig
+    if kind in ("contract", "notice"):
+        return False  # Verträge und Bescheide immer bestätigen lassen – zu wichtig
     if kind == "invoice":
         required = ["amount"]
         settled = sugg.get("payment_method", {}).get("value") == "debit" or sugg.get("status", {}).get("value") == "paid"
@@ -653,6 +665,23 @@ def apply_values(session: Session, doc: Document, kind: str, values: dict) -> No
         record.months = values.get("months") or 24
         record.warranty_type = values.get("warranty_type") or "gewaehrleistung"
         doc.warranty = record
+    elif kind == "notice":
+        record = doc.notice or Notice(document_id=doc.id)
+        for name in FIELD_TYPES["notice"]:
+            if name not in ("balance_kind", "prepayment_interval", "contract_id"):
+                setattr(record, name, values.get(name))
+        record.balance_kind = values.get("balance_kind") if values.get("balance_kind") in ("payment", "refund") else "none"
+        record.prepayment_interval = values.get("prepayment_interval") if values.get("prepayment_interval") in (1, 3, 6, 12) else 3
+        record.contract_id = values.get("contract_id") or None
+        if record.balance_kind == "none":
+            record.balance_amount = record.balance_due = None
+        doc.notice = record
+        session.flush()
+        from app import notices  # lokal, um Importzyklen zu vermeiden
+
+        notices.sync_contract(session, record)
+    if kind != "notice" and doc.notice is not None:
+        doc.notice = None
     # Datensätze anderer Arten entfernen, wenn die Art gewechselt wurde
     if kind != "contract":
         doc.contract = None

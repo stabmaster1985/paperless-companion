@@ -83,6 +83,7 @@ class Document(Base):
     invoice: Mapped["Invoice | None"] = relationship(back_populates="document", cascade="all, delete-orphan")
     warranty: Mapped["Warranty | None"] = relationship(back_populates="document", cascade="all, delete-orphan")
     reimbursement: Mapped["Reimbursement | None"] = relationship(back_populates="document", cascade="all, delete-orphan")
+    notice: Mapped["Notice | None"] = relationship(back_populates="document", cascade="all, delete-orphan")
 
 
 class Contract(Base):
@@ -123,8 +124,19 @@ class Contract(Base):
     # gemerkte Suche: neue Firefly-Buchungen mit diesen Merkmalen gehören automatisch zum Vertrag
     # {"q": ..., "amount": ..., "category": ..., "tag": ..., "bill": ..., "budget": ...}
     booking_rule: Mapped[dict | None] = mapped_column(JSON)
+    # "" = Vertrag/Abo, "notice" = Zahlungspflicht aus Bescheiden (Steuer-Vorauszahlung, Grundsteuer, Rundfunkbeitrag …):
+    # keine Kündigung, Betrag und Termine kommen aus dem jeweils neuesten Bescheid
+    category: Mapped[str] = mapped_column(String, default="", server_default="")
 
     document: Mapped[Document | None] = relationship(back_populates="contract")
+
+    @property
+    def is_notice(self) -> bool:
+        return self.category == "notice"
+
+    @property
+    def kind_label(self) -> str:
+        return "Bescheid" if self.is_notice else ("Abo" if self.virtual else "Vertrag")
 
     @property
     def virtual(self) -> bool:
@@ -154,6 +166,30 @@ class Contract(Base):
     @property
     def label(self) -> str:
         return self.name or self.provider or (f"#{self.document_id}" if self.document_id else "Abo")
+
+
+class Notice(Base):
+    """Bescheid (Steuer, Grundsteuer, Gebühren, Beiträge …): Nachzahlung/Erstattung und festgesetzte Vorauszahlungen.
+    Gehört optional zu einer Zahlungspflicht (Contract mit category "notice"), deren Abbuchungen erkannt werden."""
+
+    __tablename__ = "notices"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    document_id: Mapped[int] = mapped_column(ForeignKey("documents.id", ondelete="CASCADE"), unique=True)
+    contract_id: Mapped[int | None] = mapped_column(ForeignKey("contracts.id", ondelete="SET NULL"))
+    authority: Mapped[str | None] = mapped_column(String)  # Behörde / Absender
+    notice_date: Mapped[date | None] = mapped_column(Date)
+    period: Mapped[str | None] = mapped_column(String)  # z.B. „2025“ oder „ab 2026“
+    reference: Mapped[str | None] = mapped_column(String)  # Steuernummer, Aktenzeichen, Kassenzeichen
+    balance_kind: Mapped[str] = mapped_column(String, default="none")  # none | payment (Nachzahlung) | refund (Erstattung)
+    balance_amount: Mapped[float | None] = mapped_column(Float)
+    balance_due: Mapped[date | None] = mapped_column(Date)
+    prepayment_amount: Mapped[float | None] = mapped_column(Float)  # je Termin
+    prepayment_interval: Mapped[int] = mapped_column(Integer, default=3, server_default="3")
+    prepayment_from: Mapped[date | None] = mapped_column(Date)  # erster Termin bzw. gilt ab
+
+    document: Mapped[Document] = relationship(back_populates="notice")
+    contract: Mapped["Contract | None"] = relationship()
 
 
 class Invoice(Base):

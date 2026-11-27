@@ -74,7 +74,7 @@ document.querySelectorAll('#viewer .tab[data-tab]').forEach((tab) => tab.addEven
 <div class="review-main">
 {% set rem = sugg.get('_reminder') if sugg else none %}
 {% for so in series_of_doc(doc.id) %}
-<div class="notice {{ 'ok' if so.state == 'confirmed' }}">Gehört {% if so.kind %}zum {{ so.kind }} <a href="{{ so.href }}"><strong>{{ so.label }}</strong></a>{% else %}zur regelmäßigen Zahlung
+<div class="notice {{ 'ok' if so.state == 'confirmed' }}">Gehört {% if so.kind == 'Bescheid' %}zur Zahlungspflicht <a href="{{ so.href }}"><strong>{{ so.label }}</strong></a> (Bescheid){% elif so.kind %}zum {{ so.kind }} <a href="{{ so.href }}"><strong>{{ so.label }}</strong></a>{% else %}zur regelmäßigen Zahlung
   <a href="{{ so.href }}">{{ so.label }}</a> (ohne Vertrag){% endif %} – Abbuchung vom {{ so.date|d }} über {{ so.amount|eur }}
   {% if so.state == 'suggested' %}<span class="muted">(noch Vorschlag – <a href="/recurring/invoices?key={{ so.key|urlencode }}&amp;back={{ ('/documents/' ~ doc.id)|urlencode }}">bestätigen</a>)</span>
   {% elif so.state == 'inbox' %}<span class="muted">(vorbelegt, wird mit dem Bestätigen übernommen)</span>{% endif %}</div>
@@ -501,6 +501,41 @@ document.querySelectorAll('.rf-form').forEach((form) => form.addEventListener('s
     {% endif %}
   </div>
   {% endif %}
+
+  {% elif doc.kind == 'notice' %}
+  {% set cid = (values.get('contract_id') or '')|string %}
+  <div class="grid">
+    {{ party('authority', 'Behörde / Absender', values, src, correspondents, doc_correspondent) }}
+    {{ input('notice_date', 'Datum des Bescheids', values, src, type='date') }}
+    {{ input('period', 'Zeitraum (z.B. 2025)', values, src) }}
+    {{ input('reference', 'Steuernummer / Aktenzeichen', values, src) }}
+  </div>
+  <fieldset>
+    <legend>Nachzahlung oder Erstattung</legend>
+    <div class="grid">
+      {{ select('balance_kind', 'Ergebnis', values, src, [('none', 'keine'), ('payment', 'Nachzahlung'), ('refund', 'Erstattung')]) }}
+      {{ input('balance_amount', 'Betrag (€)', values, src, type='number', step='0.01') }}
+      {{ input('balance_due', 'Fällig am', values, src, type='date') }}
+    </div>
+  </fieldset>
+  <fieldset>
+    <legend>Vorauszahlungen</legend>
+    <div class="grid">
+      {{ input('prepayment_amount', 'Betrag je Termin (€)', values, src, type='number', step='0.01') }}
+      {{ select('prepayment_interval', 'Rhythmus', values, src, [('1', 'monatlich'), ('3', 'vierteljährlich'), ('6', 'halbjährlich'), ('12', 'jährlich')]) }}
+      {{ input('prepayment_from', 'Erster Termin / gilt ab', values, src, type='date') }}
+    </div>
+    <label class="field wide"><span>Gehört zur Zahlungspflicht</span>
+      <select name="contract_id" onchange="this.form.querySelector('.new-obligation').hidden = this.value !== 'new'">
+        <option value="">– keine –</option>
+        {% for k in all_contracts()|sort(attribute='notice', reverse=true) %}<option value="{{ k.id }}" {{ 'selected' if cid == k.id|string }}>{{ k.label }}{{ ' (Bescheid)' if k.notice else (' (Abo)' if k.virtual else ' (Vertrag)') }}</option>{% endfor %}
+        <option value="new">+ neue Zahlungspflicht anlegen …</option>
+      </select></label>
+    <label class="field new-obligation" hidden><span>Name der neuen Zahlungspflicht</span>
+      <input name="new_obligation" placeholder="z.B. Einkommensteuer-Vorauszahlung" value="{{ (values.get('authority') or doc.correspondent or '') }}"></label>
+    <p class="hint">Die Zahlungspflicht sammelt die Abbuchungen (wie ein Abo) und alle Bescheide dazu; der neueste Bescheid bestimmt
+      Betrag und Rhythmus. Ein Abo wählen stellt es auf „Bescheid“ um – seine Abbuchungen und Zuordnungen bleiben.</p>
+  </fieldset>
 
   {% elif doc.kind == 'warranty' %}
   <div class="grid">

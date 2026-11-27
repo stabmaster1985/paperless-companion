@@ -131,9 +131,10 @@ function reserveToggle(on) {
   {% for c, d in rows %}
     {% set days = (d.cancel_by - today).days if d.cancel_by else none %}
     <tr class="{{ 'inactive' if c.status != 'active' }}">
-      <td><a href="{{ c.url }}">{{ c.label }}</a> {% if c.document_id %}{{ doclink(c.document_id) }}{% else %}<span class="tag" title="Nur im Companion – kein Dokument in Paperless">Abo ohne Dokument</span>{% endif %}<br><small>{{ c.provider or '' }}</small></td>
+      <td><a href="{{ c.url }}">{{ c.label }}</a> {% if c.is_notice %}<span class="tag" title="Zahlungspflicht aus Bescheiden – keine Kündigung, Betrag aus dem neuesten Bescheid">Bescheid</span>{% elif c.document_id %}{{ doclink(c.document_id) }}{% else %}<span class="tag" title="Nur im Companion – kein Dokument in Paperless">Abo ohne Dokument</span>{% endif %}<br><small>{{ c.provider or '' }}</small></td>
       <td class="nowrap">
-        {% if c.status == 'cancelled' %}<span class="tag">gekündigt {{ c.cancelled_on|d }}</span>
+        {% if c.is_notice and c.status == 'active' %}<span class="muted">keine Kündigung</span>
+        {% elif c.status == 'cancelled' %}<span class="tag">gekündigt {{ c.cancelled_on|d }}</span>
           {% if c.cancellation_doc_id %}<br><small><a href="/documents/{{ c.cancellation_doc_id }}">Bestätigung</a> {{ doclink(c.cancellation_doc_id) }}</small>{% endif %}
         {% elif c.status == 'ended' %}<span class="tag">beendet</span>
         {% elif d.missing_info %}<span class="tag tag-warn">Angaben fehlen</span>
@@ -145,7 +146,7 @@ function reserveToggle(on) {
       <td class="hide-sm">{% if c.notice_value %}{{ c.notice_value }} {{ {'months': 'Mon.', 'weeks': 'Wo.', 'days': 'Tage'}[c.notice_unit] }}{% else %}–{% endif %}</td>
       <td class="nowrap">{{ c.monthly_cost|eur }}{% if c.interval > 1 and c.payment %}<br><small class="muted">{{ c.payment|eur }} {{ {3: 'vierteljährlich', 6: 'halbjährlich', 12: 'jährlich'}.get(c.interval) }}</small>{% endif %}</td>
       <td>
-        {% if c.status == 'active' %}
+        {% if c.status == 'active' and not c.is_notice %}
         <details class="cancel-pop">
           <summary class="small" title="Du hast gekündigt? Hier eintragen – nur im Companion">Kündigung eintragen …</summary>
           <form method="post" action="/contracts/{{ c.id }}/cancelled" class="cancel-pop-form">

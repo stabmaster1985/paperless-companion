@@ -19,7 +19,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import Settings
-from app.models import (Activity, Case, CaseEntry, Contract, Document, Invoice, KeyValue, MetaDecision, PaymentMatch,
+from app.models import (Activity, Case, CaseEntry, Contract, Document, Invoice, KeyValue, MetaDecision, Notice, PaymentMatch,
                         ReceiptCheck, Reimbursement, RetentionRule, RuleProposal, Warranty)
 
 
@@ -133,7 +133,10 @@ def inventory(session: Session, settings: Settings, today: date) -> list[Section
                            (f"{len(recoverable)} weitere kommen aus deinen Paperless-Vertragsfeldern zurück" if recoverable else
                             "Tipp: unter Einstellungen → Paperless-Felder die Vertragsfelder einschalten und übertragen – dann "
                             "stehen sie auch in Paperless"), "/contracts"))
-    only.items.append(Item("Abos ohne Dokument", _count(session, Contract, Contract.document_id.is_(None)), "", "/contracts"))
+    only.items.append(Item("Abos ohne Dokument", _count(session, Contract, Contract.document_id.is_(None),
+                                                         Contract.category != "notice"), "", "/contracts"))
+    only.items.append(Item("Bescheide (Nachzahlung, Vorauszahlungen) und Zahlungspflichten",
+                           _count(session, Notice) + _count(session, Contract, Contract.category == "notice"), "", "/contracts"))
     only.items.append(Item("Eingetragene Kündigungen", _count(session, Contract, Contract.status == "cancelled"), "", "/contracts"))
     only.items.append(Item("Garantien", _count(session, Warranty), "", "/warranties"))
     only.items.append(Item("Erstattungen (Leistungsabrechnungen)", _count(session, Reimbursement), "", "/reimbursements"))

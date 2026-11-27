@@ -117,6 +117,8 @@ Für ein Abo mit monatlichen Rechnungen braucht es so keinen Vertrag.
 durchsuchen – auch nach den Firefly-Merkmalen Kategorie, Tag, Firefly-Abo (Bill) und Budget (vorgeschlagen werden
 Buchungen an den Empfänger des Vertrags), anhaken, zuordnen – auch wenn sie über einen anderen Empfänger laufen (z.B. einen
 Bezahldienst). Mit „diese Suche merken“ kommen neue passende Buchungen beim Firefly-Abgleich automatisch zum Vertrag.
+Geladene Buchungen bleiben einen Tag gemerkt – auch über Updates und Neustarts (Datei `firefly_cache.json` im Datenordner);
+„neu aus Firefly laden“ holt sie sofort neu.
 
 ![Buchungen zuordnen](docs/screenshots/buchungen-zuordnen.png)
 
@@ -131,6 +133,17 @@ anhängen; aus dem Abo wird dann ein normaler Vertrag. Einzelne Rechnungen zu de
 „Rechnungen zuordnen“ zu – dort auch je Buchung von Hand gesucht.
 
 ![Abo: Dokument anhängen](docs/screenshots/abo-dokument.png)
+
+**Bescheide** – eigene Art für Steuer-, Grundsteuer-, Gebühren- oder Beitragsbescheide: Nachzahlung bzw. Erstattung
+(mit Fälligkeit) und festgesetzte Vorauszahlungen werden erkannt. Die Vorauszahlungen sind eine **Zahlungspflicht**
+bei den Verträgen – wie ein Abo mit erkannten Abbuchungen, aber ohne Kündigung; alle Bescheide hängen daran, der neueste
+bestimmt Betrag und Rhythmus, die nächsten Termine erscheinen in Übersicht und Kalender. Ein bestehendes Abo lässt sich
+unter „Art“ auf „Bescheid“ umstellen; ein Dokument (bisher Rechnung, Vertrag oder Sonstiges) wird mit „als Bescheid
+zuordnen“ zum Bescheid – zugeordnete Buchungen, Abbuchungen und gemerkte Suchen bleiben dabei erhalten.
+
+![Bescheide einer Zahlungspflicht](docs/screenshots/bescheide.png)
+
+![Bescheid prüfen](docs/screenshots/bescheid-dokument.png)
 
 **Verlauf** – was du zuletzt bearbeitet hast, wo das Dokument jetzt steht (z.B. bezahlt, wartet auf Übertragung)
 und auf welcher Seite du danach gelandet bist; je Dokument auch auf der Dokumentseite.
@@ -172,7 +185,7 @@ Paperless ──Webhook / Abgleich alle 15 min──▶ Companion
 - Das **LLM** wird nur für Felder gefragt, die die Regeln nicht sicher gefunden haben, und
   bekommt nur die relevanten Textstellen. Antworten werden geprüft: Beträge, Daten und
   Nummern, die nicht im Dokument stehen, werden verworfen.
-- **Verträge** müssen immer bestätigt werden. Rechnungen und Garantien mit eindeutigen
+- **Verträge** und **Bescheide** müssen immer bestätigt werden. Rechnungen und Garantien mit eindeutigen
   Angaben werden automatisch übernommen.
 - Jedes Feld zeigt dauerhaft seine **Herkunft**: *Regel* (aus dem Text), *AI*, *Paperless* (deine
   Felder), *Firefly* (Bankbuchung), *Standard* oder *manuell* (von dir eingegeben oder geändert).

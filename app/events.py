@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app import deadlines
-from app.models import Case, Contract, Invoice, Warranty
+from app.models import Case, Contract, Invoice, Notice, Warranty
 
 LABELS = {
     "cancel": "Kündigungsfrist",
@@ -16,6 +16,8 @@ LABELS = {
     "overdue": "Rechnung überfällig",
     "warranty": "Garantie endet",
     "follow_up": "Wiedervorlage",
+    "notice_due": "Nachzahlung fällig",
+    "prepayment": "Vorauszahlung fällig",
 }
 
 
@@ -57,6 +59,8 @@ def collect(session: Session, today: date) -> list[Event]:
 
     contracts = session.scalars(select(Contract).where(Contract.status == "active").options(selectinload(Contract.document)))
     for c in contracts:
+        if c.is_notice:
+            continue  # Zahlungspflicht aus Bescheiden: keine Kündigung, Termine kommen aus dem Bescheid (unten)
         result = deadlines.compute(deadlines.terms_from_contract(c), today)
         if result.cancel_by and not result.anytime:
             events.append(Event(
@@ -83,6 +87,33 @@ def collect(session: Session, today: date) -> list[Event]:
             + (f", Rechnungsnr. {inv.invoice_number}" if inv.invoice_number else ""),
             document_id=inv.document_id, key=f"invoice:{inv.id}", amount=inv.open_amount,
         ))
+
+    from app import notices  # lokal, um Importzyklen zu vermeiden
+
+    latest: dict[int, Notice] = {}
+    for n in session.scalars(select(Notice).options(selectinload(Notice.document))):
+        title = n.authority or (n.document.title if n.document else "Bescheid")
+        if n.balance_kind == "payment" and n.balance_amount and n.balance_due and n.balance_due >= today:
+            events.append(Event(
+                date=n.balance_due, type="notice_due", title=title,
+                detail=f"Nachzahlung {fmt_money(n.balance_amount)}" + (f" ({n.period})" if n.period else ""),
+                document_id=n.document_id, key=f"notice:{n.id}:due", amount=n.balance_amount,
+            ))
+        if n.contract_id and n.prepayment_amount:
+            current = latest.get(n.contract_id)
+            if current is None or (n.prepayment_from or n.notice_date or date.min) > (current.prepayment_from or current.notice_date or date.min):
+                latest[n.contract_id] = n
+    for contract_id, n in latest.items():
+        c = session.get(Contract, contract_id)
+        if c is None or c.status != "active":
+            continue
+        for day in notices.next_dates(n, today, count=1):
+            events.append(Event(
+                date=day, type="prepayment", title=c.label,
+                detail=f"Vorauszahlung {fmt_money(n.prepayment_amount)} laut Bescheid vom {fmt_date(n.notice_date)}",
+                document_id=None, key=f"notice:{n.id}:prepay:{day.isoformat()}", amount=n.prepayment_amount,
+                contract_id=c.id,
+            ))
 
     for w in session.scalars(select(Warranty)):
         expires = w.expires_on

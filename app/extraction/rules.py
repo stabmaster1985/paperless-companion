@@ -422,6 +422,8 @@ def classify_by_keywords(title: str, text: str) -> str:
         return "reimbursement"  # vor „rechnung“ prüfen: „Leistungsabrechnung“ ist keine Rechnung
     if NOT_INVOICE.search(title) or NOT_INVOICE.search(head[:600]):
         return "other"
+    if NOTICE_TITLE_RE.search(title) or NOTICE_HEAD_RE.search(head[:1500]):
+        return "notice"  # vor „rechnung“: ein Gebührenbescheid ist keine Rechnung
     if re.search(r"rechnung|invoice", title):
         return "invoice"
     if re.search(r"vertrag|police|versicherungsschein", title):
@@ -439,9 +441,74 @@ def classify_by_keywords(title: str, text: str) -> str:
     return "other"
 
 
+# --------------------------------------------------------------------------- Bescheide
+
+NOTICE_TITLE_RE = re.compile(
+    r"bescheid|festsetzung|vorauszahlung", re.IGNORECASE)
+NOTICE_HEAD_RE = re.compile(
+    r"(?:einkommen|umsatz|gewerbe|grund|kirchen|kraftfahrzeug|kfz|hunde|zweitwohnungs?)steuer(?:mess)?bescheid"
+    r"|steuerbescheid|abgabenbescheid|gebührenbescheid|beitragsbescheid|festsetzungsbescheid|grundbesitzabgaben"
+    r"|bescheid\s+(?:für|über)\s+\d{4}|festsetzung\s+der\s+vorauszahlungen|vorauszahlungsbescheid"
+    r"|festsetzung\s+(?:des\s+)?rundfunkbeitr", re.IGNORECASE)
+NOTICE_PAY_LABELS = [
+    (r"nachzahlung|noch\s+zu\s+zahlen|zahlen\s+sie\s+bitte|zu\s+entrichten|abschlusszahlung|verbleibende[rn]?\s+betrag", 0.85),
+]
+NOTICE_REFUND_LABELS = [(r"erstattung|wird\s+erstattet|erstatten\s+wir|guthaben|überzahlung", 0.8)]
+PREPAY_LABEL = r"vorauszahlung(?:en)?|vierteljahresbetrag|quartalsbetrag|je\s+fälligkeit|fälligkeitstermin"
+
+
+def extract_assessment(text: str, created: date | None = None) -> dict:
+    """Bescheid: Datum, Nachzahlung bzw. Erstattung (mit Fälligkeit) und festgesetzte Vorauszahlungen."""
+    text = normalize(text)
+    result: dict = {}
+    notice_date = date_after_label(text, r"bescheid\s+vom|datum\s+des\s+bescheids|\bdatum\b")
+    if notice_date:
+        result["notice_date"] = field(notice_date, 0.8)
+    elif created:
+        result["notice_date"] = field(created, 0.7, "paperless")
+    year = re.search(r"(?:für|über)\s+(?:das\s+(?:jahr|kalenderjahr)\s+)?(20\d{2})\b", text, re.IGNORECASE)
+    if year:
+        result["period"] = field(year.group(1), 0.7)
+    ref = re.search(r"(steuernummer|aktenzeichen|kassenzeichen|beitragsnummer)\s*[:.]?\s*([A-Z0-9][A-Z0-9/\- ]{4,24}[A-Z0-9])",
+                    text, re.IGNORECASE)
+    if ref:
+        result["reference"] = field(ref.group(2).strip(), 0.8)
+    pay = extract_amount(text, NOTICE_PAY_LABELS)
+    refund = extract_amount(text, NOTICE_REFUND_LABELS)
+    if pay and pay["confidence"] >= 0.8:
+        result["balance_kind"] = field("payment", 0.8)
+        result["balance_amount"] = pay
+        due = date_after_label(text, r"fällig\s+(?:am|bis)|zahlbar\s+bis|bis\s+zum|spätestens\s+(?:am|bis)")
+        if due:
+            result["balance_due"] = field(due, 0.75)
+    elif refund and refund["confidence"] >= 0.8:
+        result["balance_kind"] = field("refund", 0.8)
+        result["balance_amount"] = refund
+    lines = text.splitlines()
+    for i, line in enumerate(lines):  # Vorauszahlungen: Betrag und erster Termin aus der Zeile (oder der nächsten)
+        if not re.search(PREPAY_LABEL, line, re.IGNORECASE):
+            continue
+        block = " ".join(lines[i:i + 3])
+        amounts = [a for _, a in find_amounts(block) if a > 0]
+        if amounts:
+            result["prepayment_amount"] = field(amounts[0], 0.6)
+            dates = find_dates(block)
+            if dates:
+                result["prepayment_from"] = field(dates[0][1], 0.6)
+            break
+    if re.search(r"vierteljährlich|quartal|10\.\s?03\.[\s\S]{0,200}10\.\s?06\.", text, re.IGNORECASE):
+        result["prepayment_interval"] = field(3, 0.75)
+    elif re.search(r"monatlich", text, re.IGNORECASE) and "prepayment_amount" in result:
+        result["prepayment_interval"] = field(1, 0.6)
+    elif re.search(r"jährlich|jahresbetrag", text, re.IGNORECASE) and "prepayment_amount" in result:
+        result["prepayment_interval"] = field(12, 0.6)
+    return result
+
+
 EXTRACTORS = {
     "invoice": extract_invoice,
     "contract": extract_contract,
     "warranty": extract_warranty,
     "reimbursement": extract_reimbursement,
+    "notice": extract_assessment,
 }

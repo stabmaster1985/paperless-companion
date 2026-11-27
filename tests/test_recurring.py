@@ -432,3 +432,24 @@ def test_invoices_confirm_search_many_and_show_in_bookings(client):
     assert "Gehört zum Abo" in page and f'href="/contracts/{cid}"><strong>Wolke</strong></a>' in page
     page = client.get(f"/contracts/{cid}").text
     assert page.count("Beleg: <a") == 4 and "4 mit Rechnung/Beleg" in page and "(Vorschlag – " not in page
+
+
+def test_booking_cache_survives_restart(settings, mock_api):
+    """Geladene Buchungen liegen als Datei im Datenordner – nach einem Neustart (Update) sofort wieder da."""
+    from tests.test_payments import FIREFLY
+
+    settings.firefly_url, settings.firefly_token = FIREFLY, "t"
+    route = mock_api.get(f"{FIREFLY}/api/v1/transactions").respond(json={"data": [
+        {"type": "transactions", "id": "71", "attributes": {"transactions": [{
+            "transaction_journal_id": "971", "type": "withdrawal", "date": "2026-10-15T00:00:00+02:00", "amount": "9.99",
+            "description": "Hörbuchclub", "destination_name": "PayPal Europe", "category_name": "Medien", "tags": ["Abo"]}]}}],
+        "meta": {"pagination": {"total_pages": 1}}})
+    with TestClient(create_app(settings, start_worker=False)) as c:
+        run_all(session_scope, settings)
+        assert "Hörbuchclub" in c.get("/bookings?q=hörbuch&years=1").text
+    assert route.call_count == 1 and (settings.data_dir / "firefly_cache.json").exists()
+    with TestClient(create_app(settings, start_worker=False)) as c:  # „Update“: neue App, gleicher Datenordner
+        page = c.get("/bookings?q=&tag=abo&years=1").text
+        assert "Hörbuchclub" in page and ">Medien<" in page and route.call_count == 1
+        c.get("/bookings?q=hörbuch&years=1&fresh=1")
+        assert route.call_count == 2

@@ -173,11 +173,21 @@ def contract_doc_suggestions(session: Session, contract, limit: int = 5) -> list
     names = [n for n in (contract.payee, contract.name, contract.provider) if n]
     if not names:
         return []
+    def fits(text: str, name: str) -> bool:
+        """Name passt: als Ganzes enthalten oder – bei mehrteiligen Namen – mindestens zwei gemeinsame Wörter
+        (ein gemeinsamer Ortsname wie „Musterstadt“ reicht nicht)."""
+        if not text:
+            return False
+        if _compact(name) and _compact(name) in _compact(text):
+            return True
+        wanted = _words(name)
+        return len(_words(text) & wanted) >= min(2, len(wanted)) if wanted else False
+
     hits = []
     for d in session.scalars(select(Document)):
-        if d.contract is not None:
+        if d.contract is not None or (d.notice is not None and d.notice.contract_id == contract.id):
             continue
-        if any(_name_fits(d.correspondent or "", n) or _name_fits(d.title or "", n) for n in names):
+        if any(fits(d.correspondent or "", n) or fits(d.title or "", n) for n in names):
             hits.append(d)
     hits.sort(key=lambda d: (d.kind != "contract", -(d.created.toordinal() if d.created else 0)))
     return hits[:limit]
@@ -199,6 +209,6 @@ def series_for_doc(session: Session, doc_id: int) -> list[dict]:
             i = s.tx_ids.index(t)
             c = session.get(Contract, s.contract_id) if s.contract_id else None
             href = (f"/documents/{c.document_id}#abbuchungen" if c and c.document_id else f"/contracts/{c.id}") if c else "/recurring"
-            out.append({"label": c.label if c else s.payee, "kind": ("Abo" if c.virtual else "Vertrag") if c else "", "href": href, "date": date.fromisoformat(s.dates[i]),
+            out.append({"label": c.label if c else s.payee, "kind": c.kind_label if c else "", "href": href, "date": date.fromisoformat(s.dates[i]),
                         "amount": s.amounts[i], "state": e["state"], "key": s.key})
     return out

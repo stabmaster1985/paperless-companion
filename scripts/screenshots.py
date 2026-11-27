@@ -202,6 +202,8 @@ def start_demo(data: Path, port: int) -> None:
         demo += [rec_tx(i, start + relativedelta(months=i), 12.99, "Streamingdienst Flimmer") for i in range(12)]
         demo += [rec_tx(i, start + relativedelta(months=3 * i, days=10), 89.0, "Tierversicherung Pfote") for i in range(4)]
         demo += [rec_tx(i, start + relativedelta(months=i, days=5), 39.0, "Zeitschriftenverlag Seite") for i in range(7)]
+        demo += [rec_tx(i, date(2025, 12, 10) + relativedelta(months=3 * i), 850.0 if i else 780.0, "Finanzamt Musterstadt")
+                 for i in range(4) if date(2025, 12, 10) + relativedelta(months=3 * i) <= date.today()]
         recurring.run(s, demo)
         from app.models import Contract
 
@@ -224,6 +226,25 @@ def start_demo(data: Path, port: int) -> None:
         s.flush()
         recurring.link_contract(s, next(x for x in recurring.stored(s) if x.payee == "Zeitschriftenverlag Seite").key,
                                 zeitschrift.id)
+        # Bescheide: Zahlungspflicht Einkommensteuer-Vorauszahlung mit zwei Bescheiden
+        from app.models import Notice
+
+        est = Contract(name="Einkommensteuer-Vorauszahlung", provider="Finanzamt Musterstadt", payee="Finanzamt Musterstadt",
+                       renewal_mode="indefinite", notice_unit="months", notice_to="any", status="active", category="notice")
+        est.set_payment(850.0, 3)
+        s.add(est)
+        s.flush()
+        recurring.link_contract(s, next(x for x in recurring.stored(s) if x.payee == "Finanzamt Musterstadt").key, est.id)
+        for doc_id, title, day, prepay, start_day, kind, amount, due in [
+                (840, "Einkommensteuerbescheid 2024", date(2025, 11, 14), 780.0, date(2025, 12, 10), "refund", 312.40, None),
+                (841, "Einkommensteuerbescheid 2025", date(2026, 2, 20), 850.0, date(2026, 3, 10), "payment", 1234.56,
+                 date(2026, 3, 25))]:
+            d = Document(id=doc_id, title=title, correspondent="Finanzamt Musterstadt", document_type="Bescheid", kind="notice",
+                         tags=["Steuer"], created=day, review_state="confirmed", extraction_state="done")
+            d.notice = Notice(contract_id=est.id, authority="Finanzamt Musterstadt", notice_date=day, period=str(day.year - 1),
+                              reference="123/456/78901", balance_kind=kind, balance_amount=amount, balance_due=due,
+                              prepayment_amount=prepay, prepayment_interval=3, prepayment_from=start_day)
+            s.add(d)
         # Zeitschrift: monatliche Rechnungen zu den Abbuchungen (für „Rechnungen zuordnen“), die neueste fehlt noch
         for i in range(6):
             day = start + relativedelta(months=i, days=1)
@@ -341,6 +362,16 @@ def shoot(base: str) -> None:
         p.goto(base + p.url.split(base)[1].split("/bookings")[0] + "#dokument")
         p.wait_for_timeout(300)
         p.screenshot(path=OUT / "abo-dokument.png")
+        p.goto(base + "/contracts")
+        p.goto(base + p.locator('a:has-text("Einkommensteuer-Vorauszahlung")').first.get_attribute("href") + "#bescheide")
+        p.wait_for_timeout(300)
+        p.screenshot(path=OUT / "bescheide.png")
+        p.goto(base + "/documents/841")
+        if p.locator(".docview:not([data-lazy])").count():
+            p.wait_for_selector(".docview-canvas canvas")
+        p.locator("fieldset:has-text('Vorauszahlungen')").scroll_into_view_if_needed()
+        p.wait_for_timeout(300)
+        p.screenshot(path=OUT / "bescheid-dokument.png")
         p.goto(base + "/bookings?q=&category=Medien&years=1")
         p.click("text=alle freien")
         p.wait_for_timeout(300)

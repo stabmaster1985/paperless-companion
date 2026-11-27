@@ -44,6 +44,17 @@ FIELDS: dict[str, dict[str, tuple[str, str]]] = {
         "amount": ("number", "erstatteter bzw. ausgezahlter Gesamtbetrag in Euro (nicht der eingereichte Rechnungsbetrag)"),
         "statement_date": ("string", "Datum der Abrechnung / des Bescheids"),
     },
+    "notice": {
+        "notice_date": ("string", "Datum des Bescheids"),
+        "period": ("string", "Jahr bzw. Zeitraum, für den der Bescheid gilt, z.B. '2025'"),
+        "reference": ("string", "Steuernummer, Aktenzeichen oder Kassenzeichen"),
+        "balance_kind": ("string", "'payment' wenn eine Nachzahlung zu zahlen ist, 'refund' bei einer Erstattung, sonst 'none'"),
+        "balance_amount": ("number", "Betrag der Nachzahlung bzw. Erstattung in Euro (ohne Vorauszahlungen)"),
+        "balance_due": ("string", "Fälligkeit der Nachzahlung"),
+        "prepayment_amount": ("number", "festgesetzte Vorauszahlung je Termin in Euro (z.B. je Quartal)"),
+        "prepayment_interval": ("integer", "Abstand der Vorauszahlungstermine in Monaten: 1, 3, 6 oder 12"),
+        "prepayment_from": ("string", "erster Vorauszahlungstermin, ab dem der neue Betrag gilt"),
+    },
     "warranty": {
         "purchase_date": ("string", "Kaufdatum"),
         "months": ("integer", "Garantiedauer in Monaten, nur wenn ausdrücklich genannt"),
@@ -55,12 +66,14 @@ ENUMS = {
     "renewal_mode": {"renews", "indefinite", "none"},
     "notice_unit": {"days", "weeks", "months"},
     "notice_to": {"term_end", "month_end", "quarter_end", "any"},
+    "balance_kind": {"payment", "refund", "none"},
 }
 
 KEYWORDS = {
     "invoice": r"betrag|summe|gesamt|fällig|zahlbar|rechnung|datum|lastschrift|iban|überweis",
     "contract": r"kündig|laufzeit|verlänger|beginn|vertrag|frist|monatlich|beitrag|jährlich|ende",
     "warranty": r"garantie|gewährleistung|kauf|datum",
+    "notice": r"bescheid|festsetz|vorauszahl|nachzahl|erstatt|fällig|steuernummer|aktenzeichen|kassenzeichen|betrag",
     "reimbursement": r"erstatt|auszahl|überweis|gutschrift|beihilfe|summe|gesamt|betrag|datum",
 }
 

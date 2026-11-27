@@ -6,7 +6,10 @@
   <li>
     <span class="cand-doc"><a href="/documents/{{ d.id }}" target="_blank" rel="noopener">{{ d.title or ('#' ~ d.id) }}</a> {{ doclink(d.id) }}
       <small class="muted">{{ d.correspondent or 'ohne Korrespondent' }}{% if d.created %} · {{ d.created|d }}{% endif %} · #{{ d.id }}{% if d.kind %} · {{ KINDS.get(d.kind, d.kind) }}{% endif %}</small></span>
-    {% if d.contract %}<small class="muted">gehört schon zu einem Vertrag</small>
+    {% if c.is_notice %}{% if d.notice and d.notice.contract_id == c.id %}<small class="muted">schon zugeordnet</small>
+    {% else %}<form method="post" action="/contracts/{{ c.id }}/notice" class="inline"><input type="hidden" name="doc_id" value="{{ d.id }}">
+      <button class="small" title="Dokument wird zum Bescheid dieser Zahlungspflicht – bisherige Verknüpfungen bleiben">als Bescheid zuordnen</button></form>{% endif %}
+    {% elif d.contract %}<small class="muted">gehört schon zu einem Vertrag</small>
     {% else %}<form method="post" action="/contracts/{{ c.id }}" class="inline">
       <input type="hidden" name="action" value="attach"><input type="hidden" name="doc_id" value="{{ d.id }}">
       <button class="small" title="Dokument wird zum Vertragsdokument dieses Abos">als Vertragsdokument anhängen</button>
