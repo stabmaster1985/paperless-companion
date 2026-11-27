@@ -1404,17 +1404,19 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             return rule.get("q") or "", rule.get("amount"), {k: rule.get(k) or "" for k in recurring.MARKS}
         return c.payee or c.provider or c.name or "", c.payment_amount, {k: "" for k in recurring.MARKS}
 
-    firefly_cache: dict = {}  # Abbuchungen und Namenslisten für ein paar Minuten (die Buchungssuche lädt sonst jedes Mal neu)
-    CACHE_SECONDS = 600
+    # Abbuchungen und Namenslisten einen Tag lang merken (die Buchungssuche lädt sonst jedes Mal Jahre aus Firefly);
+    # „neu aus Firefly laden“ auf der Seite leert den Speicher
+    firefly_cache: dict = {}
+    CACHE_SECONDS = 24 * 3600
 
     def cached_withdrawals(client, start: date) -> list:
         import time as _time
 
         hit = firefly_cache.get("withdrawals")
-        if hit and hit["start"] <= start and _time.monotonic() - hit["at"] < CACHE_SECONDS and hit["end"] == today():
+        if hit and hit["start"] <= start and _time.monotonic() - hit["at"] < CACHE_SECONDS:
             return [t for t in hit["txs"] if t.date >= start]
         txs = list(client.withdrawals(start, today()))
-        firefly_cache["withdrawals"] = {"start": start, "end": today(), "at": _time.monotonic(), "txs": txs}
+        firefly_cache["withdrawals"] = {"start": start, "at": _time.monotonic(), "loaded": datetime.now(), "txs": txs}
         return txs
 
     def cached_names(client) -> dict[str, list[str]]:
@@ -1435,7 +1437,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     @app.get("/contracts/{contract_id}/bookings", response_class=HTMLResponse)
     def contract_bookings(request: Request, contract_id: int, q: str | None = None, amount: str = "", category: str = "",
                           tag: str = "", bill: str = "", budget: str = "", years: str = "", msg: str = "",
-                          session: Session = Depends(get_session)):
+                          fresh: str = "", session: Session = Depends(get_session)):
         """Buchungen in Firefly suchen und einem Vertrag/Abo zuordnen – nach Text, Betrag und Firefly-Merkmalen
         (Kategorie, Tag, Firefly-Abo, Budget). Die Seite öffnet sofort mit vorbelegten Kriterien (gemerkte Suche bzw.
         Empfänger und Betrag des Vertrags); gesucht wird erst auf Knopfdruck."""
@@ -1444,6 +1446,8 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             raise HTTPException(404)
         max_years = max(1, round(settings.recurring_lookback_days / 365))
         span = int(years) if years.isdigit() and 0 < int(years) <= max_years else max_years
+        if fresh:
+            firefly_cache.clear()
         searched = q is not None
         marks = {"category": category, "tag": tag, "bill": bill, "budget": budget}
         if searched:
@@ -1486,7 +1490,7 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         prefilled = ((preset[0] or "").strip().lower() == (q or "").strip().lower() and preset[1] == value
                      and all((preset[2][k] or "").strip().lower() == (marks[k] or "").strip().lower() for k in marks))
         return render(request, "contract_bookings.html", c=c, q=q, amount=shown, marks=marks, rows=rows, searched=searched,
-                      prefilled=prefilled,
+                      prefilled=prefilled, loaded=(firefly_cache.get("withdrawals") or {}).get("loaded"),
                       error=error, msg=msg, back=contract_back(c), mark_names=recurring.MARKS, choices=choices,
                       years=span, year_options=[y for y in (1, 2, 3, 5, 10) if y < max_years] + [max_years],
                       rule={"q": q, "amount": value, **marks}, firefly_enabled=settings.firefly_enabled)

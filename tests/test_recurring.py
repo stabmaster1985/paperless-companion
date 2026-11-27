@@ -263,6 +263,9 @@ def test_contract_booking_search_page(client, settings, mock_api):
     assert "Vorschlag:" in page and page.count('name="tx"') == 3 and page.count("checked") >= 3
     client.get(f"/contracts/{cid}/bookings?q=Monatsbeitrag&years=1")
     assert calls.call_count == 1  # zweite Suche aus dem Zwischenspeicher
+    assert "neu aus Firefly laden" in client.get(f"/contracts/{cid}/bookings?q=Monatsbeitrag&years=1").text
+    client.get(f"/contracts/{cid}/bookings?q=Monatsbeitrag&years=1&fresh=1")
+    assert calls.call_count == 2  # auf Wunsch neu geladen
     import re
     values = [v.replace("&#34;", '"').replace("&quot;", '"') for v in re.findall(r'name="tx" value="([^"]+)"', page)]
     r = client.post(f"/contracts/{cid}/bookings", data={"tx": values})

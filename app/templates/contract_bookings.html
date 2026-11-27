@@ -30,7 +30,9 @@
   <label>Zeitraum <select name="years">{% for y in year_options %}<option value="{{ y }}" {{ 'selected' if y == years }}>{{ 'letztes Jahr' if y == 1 else 'letzte ' ~ y ~ ' Jahre' }}</option>{% endfor %}</select></label>
   <button class="small primary">Suchen</button>
   <small class="muted">Alle Wörter müssen vorkommen · Betrag ±5 % · Kategorie, Tag, Firefly-Abo und Budget genau wie in Firefly ·
-    ein kürzerer Zeitraum lädt schneller; geladene Buchungen bleiben 10 Minuten gemerkt</small>
+    ein kürzerer Zeitraum lädt schneller; geladene Buchungen bleiben einen Tag gemerkt</small>
+  {% if loaded %}<small class="muted cb-loaded">Buchungen aus Firefly geladen am {{ loaded.strftime('%d.%m.%Y um %H:%M') }} –
+    <button class="small link" name="fresh" value="1" title="Nach einer Firefly-Aktualisierung: Buchungen neu laden">neu aus Firefly laden</button></small>{% endif %}
 </form>
 
 {% if error %}<div class="notice">{{ error }}</div>
