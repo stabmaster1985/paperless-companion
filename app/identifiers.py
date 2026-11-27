@@ -36,7 +36,7 @@ def extract(text: str) -> dict[str, list[str]]:
     upper = (text or "").upper()
     found: dict[str, set[str]] = {k: set() for k in KINDS}
     for m in IBAN_RE.finditer(upper):
-        iban = m.group(1).replace(" ", "")
+        iban = re.sub(r"\s", "", m.group(1))
         expected = IBAN_LENGTHS.get(iban[:2])
         if expected and len(iban) > expected:
             iban = iban[:expected]

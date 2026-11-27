@@ -99,3 +99,14 @@ def test_classification():
     assert classify_by_keywords("Scan_0001", "Muster GmbH\nAbrechnung der Brutto/Netto-Bezüge für März 2026") == "other"
     assert classify_by_keywords("Kreditkartenabrechnung", "Rechnungsdatum 01.03.2026") == "other"
     assert classify_by_keywords("Nebenkostenabrechnung 2025", "") == "invoice"  # bleibt (Nachzahlung)
+
+
+def test_iban_across_line_break_does_not_crash():
+    """Text mit Zeilenumbruch mitten in/nach einer IBAN – früher „invalid literal for int() with base 36: '\\n'“."""
+    from app import identifiers
+    from app.extraction.rules import extract_iban, valid_iban
+
+    text = "Bankverbindung\nIBAN DE89 3704 0044 0532 0130 00\nBIC COBADEFFXXX\nKonto DE12\n3456 7890 1234 5678 90"
+    assert extract_iban(text)["value"] == "DE89370400440532013000"
+    assert identifiers.extract(text)["iban"] == ["DE89370400440532013000"]
+    assert valid_iban("DE89 3704 0044 0532 0130 00") and not valid_iban("DE89\n3704-0044")

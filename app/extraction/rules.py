@@ -30,7 +30,8 @@ AMOUNT_RE = re.compile(
     r"|(?:€|eur)\s?(?P<int2>\d{1,3}(?:\.\d{3})+|\d+),(?P<dec2>\d{2})(?!\d)",
     re.IGNORECASE,
 )
-IBAN_RE = re.compile(r"\b([A-Z]{2}\d{2}(?:\s?[A-Z0-9]{4}){3,7}(?:\s?[A-Z0-9]{1,3})?)\b")
+# Gruppen nur durch Leerzeichen getrennt – nicht über Zeilenumbrüche hinweg (sonst hängen fremde Zeichen dran)
+IBAN_RE = re.compile(r"\b([A-Z]{2}\d{2}(?:[ \t]?[A-Z0-9]{4}){3,7}(?:[ \t]?[A-Z0-9]{1,3})?)\b")
 IBAN_LENGTHS = {"DE": 22, "AT": 20, "CH": 21, "NL": 18, "BE": 16, "FR": 27, "LU": 20, "IT": 27, "ES": 24}
 
 AMOUNT_LABELS = [
@@ -136,7 +137,7 @@ def extract_amount(text: str, labels=AMOUNT_LABELS) -> dict | None:
 
 def extract_iban(text: str) -> dict | None:
     for m in IBAN_RE.finditer(text.upper()):
-        iban = m.group(1).replace(" ", "")
+        iban = re.sub(r"\s", "", m.group(1))
         expected = IBAN_LENGTHS.get(iban[:2])
         if expected and len(iban) > expected:
             iban = iban[:expected]
@@ -146,6 +147,9 @@ def extract_iban(text: str) -> dict | None:
 
 
 def valid_iban(iban: str) -> bool:
+    iban = re.sub(r"\s", "", iban or "").upper()
+    if not iban.isalnum() or not iban.isascii():
+        return False
     if len(iban) < 15 or IBAN_LENGTHS.get(iban[:2], len(iban)) != len(iban):
         return False
     rearranged = iban[4:] + iban[:4]
