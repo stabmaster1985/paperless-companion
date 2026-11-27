@@ -448,8 +448,27 @@ def test_booking_cache_survives_restart(settings, mock_api):
         run_all(session_scope, settings)
         assert "Hörbuchclub" in c.get("/bookings?q=hörbuch&years=1").text
     assert route.call_count == 1 and (settings.data_dir / "firefly_cache.json").exists()
-    with TestClient(create_app(settings, start_worker=False)) as c:  # „Update“: neue App, gleicher Datenordner
+    from app import fireflycache
+
+    fireflycache._instances.clear()  # „Update“: neuer Prozess – nur die Datei bleibt
+    with TestClient(create_app(settings, start_worker=False)) as c:  # neue App, gleicher Datenordner
         page = c.get("/bookings?q=&tag=abo&years=1").text
         assert "Hörbuchclub" in page and ">Medien<" in page and route.call_count == 1
         c.get("/bookings?q=hörbuch&years=1&fresh=1")
         assert route.call_count == 2
+
+
+def test_firefly_sync_fills_booking_search(client, settings, mock_api):
+    """Der Erkennungslauf lädt ohnehin die Abbuchungen der letzten Jahre – die Buchungssuche nutzt sie mit."""
+    from tests.test_payments import FIREFLY
+
+    settings.firefly_url, settings.firefly_token = FIREFLY, "t"
+    route = mock_api.get(f"{FIREFLY}/api/v1/transactions").respond(json={"data": [
+        {"type": "transactions", "id": "72", "attributes": {"transactions": [{
+            "transaction_journal_id": "972", "type": "withdrawal", "date": "2026-10-15T00:00:00+02:00", "amount": "15.00",
+            "description": "Vereinsbeitrag", "destination_name": "Sportverein"}]}}],
+        "meta": {"pagination": {"total_pages": 1}}})
+    client.post("/recurring/run")
+    calls = route.call_count
+    assert "Vereinsbeitrag" in client.get("/bookings?q=verein").text
+    assert route.call_count == calls  # kein zweites Laden aus Firefly

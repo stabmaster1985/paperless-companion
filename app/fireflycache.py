@@ -6,6 +6,7 @@ Liegt im Speicher und als Datei im Datenordner – so übersteht er Updates und 
 
 import json
 import logging
+import threading
 import time
 from dataclasses import asdict
 from datetime import date, datetime
@@ -17,11 +18,25 @@ log = logging.getLogger(__name__)
 MAX_AGE = 24 * 3600
 
 
+_instances: dict[Path, "FireflyCache"] = {}
+_instances_lock = threading.Lock()
+
+
+def for_settings(settings) -> "FireflyCache":
+    """Ein Speicher je Datenordner – geteilt von Buchungssuche und Firefly-Abgleich im Hintergrund."""
+    path = Path(settings.data_dir) / "firefly_cache.json"
+    with _instances_lock:
+        if path not in _instances:
+            _instances[path] = FireflyCache(path)
+        return _instances[path]
+
+
 class FireflyCache:
     def __init__(self, path: Path, max_age: int = MAX_AGE):
         self.path = path
         self.max_age = max_age
         self.data: dict = {}
+        self.lock = threading.Lock()
         self._read()
 
     # ------------------------------------------------------------------ Datei
@@ -71,9 +86,18 @@ class FireflyCache:
         if self._fresh(hit) and hit["start"] <= start:
             return [t for t in hit["txs"] if t.date >= start]
         txs = list(client.withdrawals(start, today))
-        self.data["withdrawals"] = {"start": start, "at": time.time(), "loaded": datetime.now(), "txs": txs}
-        self._write()
+        self.store(start, txs)
         return txs
+
+    def store(self, start: date, txs: list[Transaction]) -> None:
+        """Frisch geladene Abbuchungen übernehmen – z.B. vom Firefly-Abgleich im Hintergrund, der dieselben Jahre lädt.
+        Ein kürzerer Zeitraum ersetzt keinen längeren, noch gültigen."""
+        with self.lock:
+            hit = self.data.get("withdrawals")
+            if self._fresh(hit) and hit["start"] < start:
+                return
+            self.data["withdrawals"] = {"start": start, "at": time.time(), "loaded": datetime.now(), "txs": list(txs)}
+            self._write()
 
     def names(self, client, marks) -> dict[str, list[str]]:
         hit = self.data.get("names")
@@ -85,8 +109,9 @@ class FireflyCache:
                 names[mark] = client.names(mark)
             except Exception:  # noqa: BLE001 – nur Auswahlliste, ohne sie geht die Suche trotzdem
                 names[mark] = []
-        self.data["names"] = {"at": time.time(), "names": names}
-        self._write()
+        with self.lock:
+            self.data["names"] = {"at": time.time(), "names": names}
+            self._write()
         return names
 
     @property
@@ -94,8 +119,9 @@ class FireflyCache:
         return (self.data.get("withdrawals") or {}).get("loaded")
 
     def clear(self) -> None:
-        self.data = {}
-        try:
-            self.path.unlink()
-        except OSError:
-            pass
+        with self.lock:
+            self.data = {}
+            try:
+                self.path.unlink()
+            except OSError:
+                pass

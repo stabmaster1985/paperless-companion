@@ -1491,9 +1491,9 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
 
     # Abbuchungen und Namenslisten einen Tag lang merken (die Buchungssuche lädt sonst jedes Mal Jahre aus Firefly) –
     # auch über Updates und Neustarts (Datei im Datenordner); „neu aus Firefly laden“ leert ihn
-    from app.fireflycache import FireflyCache
+    from app import fireflycache
 
-    firefly_cache = FireflyCache(settings.data_dir / "firefly_cache.json")
+    firefly_cache = fireflycache.for_settings(settings)  # füllt auch der Firefly-Abgleich im Hintergrund
 
     def cached_withdrawals(client, start: date) -> list:
         return firefly_cache.withdrawals(client, start, today())
@@ -1709,7 +1709,9 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         if client is None:
             return RedirectResponse(f"/recurring?msg={quote('Firefly III ist nicht eingerichtet')}", status_code=303)
         try:
-            history = list(client.withdrawals(today() - timedelta(days=settings.recurring_lookback_days), today()))
+            start = today() - timedelta(days=settings.recurring_lookback_days)
+            history = list(client.withdrawals(start, today()))
+            firefly_cache.store(start, history)  # die Buchungssuche nutzt dieselben Daten
             count = recurring.run(session, history)
             msg = f"{count} regelmäßige Zahlungen erkannt"
         except FireflyError as exc:

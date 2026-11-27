@@ -316,7 +316,11 @@ def run(session: Session, client: FireflyClient, settings: Settings, today: date
         from app import recurring
 
         release(session)  # mehrere Jahre Buchungen laden dauert
-        history = list(client.withdrawals(today - timedelta(days=settings.recurring_lookback_days), today))
+        start = today - timedelta(days=settings.recurring_lookback_days)
+        history = list(client.withdrawals(start, today))
+        from app import fireflycache
+
+        fireflycache.for_settings(settings).store(start, history)  # die Buchungssuche nutzt dieselben Daten
         result["recurring"] = recurring.run(session, history)
     except Exception as exc:  # noqa: BLE001
         log.warning("Regelmäßige Zahlungen erkennen fehlgeschlagen: %s", exc)

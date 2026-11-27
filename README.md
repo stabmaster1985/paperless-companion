@@ -117,8 +117,9 @@ Für ein Abo mit monatlichen Rechnungen braucht es so keinen Vertrag.
 durchsuchen – auch nach den Firefly-Merkmalen Kategorie, Tag, Firefly-Abo (Bill) und Budget (vorgeschlagen werden
 Buchungen an den Empfänger des Vertrags), anhaken, zuordnen – auch wenn sie über einen anderen Empfänger laufen (z.B. einen
 Bezahldienst). Mit „diese Suche merken“ kommen neue passende Buchungen beim Firefly-Abgleich automatisch zum Vertrag.
-Geladene Buchungen bleiben einen Tag gemerkt – auch über Updates und Neustarts (Datei `firefly_cache.json` im Datenordner);
-„neu aus Firefly laden“ holt sie sofort neu.
+Die Suche nutzt die Abbuchungen, die der Firefly-Abgleich ohnehin lädt (sonst lädt sie einmal selbst); sie bleiben einen
+Tag gemerkt – auch über Updates und Neustarts (Datei `firefly_cache.json` im Datenordner). „neu aus Firefly laden“ holt
+sie sofort neu.
 
 ![Buchungen zuordnen](docs/screenshots/buchungen-zuordnen.png)
 
