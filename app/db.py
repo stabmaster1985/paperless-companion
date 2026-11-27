@@ -1,3 +1,4 @@
+import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 
@@ -46,6 +47,16 @@ def engine() -> Engine:
     return _engine
 
 
+def _sql_default(arg) -> str:
+    """Standardwert für ALTER TABLE: Zahlen so, Texte in Anführungszeichen (auch der leere Text)."""
+    value = str(getattr(arg, "text", arg))
+    if re.fullmatch(r"-?\d+(\.\d+)?", value) or value.upper() in ("NULL", "CURRENT_TIMESTAMP"):
+        return value
+    if len(value) >= 2 and value[0] == value[-1] == "'":
+        return value
+    return "'" + value.replace("'", "''") + "'"
+
+
 def _add_missing_columns(engine: Engine) -> None:
     """Minimale Migration: neue Spalten bestehender Tabellen per ALTER TABLE ergänzen."""
     inspector = inspect(engine)
@@ -57,7 +68,7 @@ def _add_missing_columns(engine: Engine) -> None:
                     continue
                 ddl = f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" {column.type.compile(engine.dialect)}'
                 if column.server_default is not None:
-                    ddl += f" DEFAULT {column.server_default.arg}"
+                    ddl += f" DEFAULT {_sql_default(column.server_default.arg)}"
                 conn.execute(text(ddl))
 
 
