@@ -1,5 +1,6 @@
 import hmac
 import json
+from contextvars import ContextVar
 from collections import Counter
 import logging
 import os
@@ -37,6 +38,7 @@ log = logging.getLogger(__name__)
 # Viele Haken auf einmal (Für Paperless, Dokumentliste) – Standard des Frameworks wären 1000 Felder
 MAX_FORM_FIELDS = 50_000
 BASE = Path(__file__).parent
+PAGE_CACHE: ContextVar[dict | None] = ContextVar("page_cache", default=None)
 PUBLIC_PATHS = ("/login", "/static", "/favicon.ico", "/api/webhook", "/calendar.ics", "/health")
 
 
@@ -127,33 +129,55 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
 
     templates.env.globals["activity_of"] = activity_of
 
+    def page_cached(name: str, compute):
+        """Innerhalb einer Seite nur einmal berechnen (die Buchungslisten rufen das je Serie auf)."""
+        cache = PAGE_CACHE.get()
+        if cache is None:
+            return compute()
+        if name not in cache:
+            cache[name] = compute()
+        return cache[name]
+
     def contract_series(contract_id: int | None) -> list:
         """Regelmäßige Zahlungen, die zu diesem Vertrag gehören."""
         if not contract_id:
             return []
-        with session_scope() as s:
-            return [x for x in recurring.stored(s) if x.contract_id == contract_id]
+
+        def compute():
+            with session_scope() as s:
+                return recurring.stored(s)
+
+        return [x for x in page_cached("stored", compute) if x.contract_id == contract_id]
 
     def all_contracts() -> list:
-        with session_scope() as s:
-            return sorted(({"id": c.id, "label": c.label, "virtual": c.virtual, "notice": c.is_notice}
-                           for c in s.scalars(select(Contract))), key=lambda c: c["label"].lower())
+        def compute():
+            with session_scope() as s:
+                return sorted(({"id": c.id, "label": c.label, "virtual": c.virtual, "notice": c.is_notice}
+                               for c in s.scalars(select(Contract))), key=lambda c: c["label"].lower())
+
+        return page_cached("all_contracts", compute)
 
     templates.env.globals["all_contracts"] = all_contracts
 
     def excluded_for(series) -> list:
-        with session_scope() as s:
-            return recurring.excluded_for(s, series)
+        def compute():
+            with session_scope() as s:
+                return recurring.excluded(s)
+
+        return recurring.excluded_for_items(page_cached("excluded", compute), series)
 
     templates.env.globals["contract_series"] = contract_series
 
     def booking_docs() -> dict:
         """tx_id -> {"doc_id", "title", "state"} – Rechnung/Beleg je Abbuchung für die Buchungslisten."""
-        with session_scope() as s:
-            known = seriesdocs.tx_documents(s)
-            titles = dict(s.execute(select(Document.id, Document.title).where(
-                Document.id.in_({e["doc_id"] for e in known.values()}))).all()) if known else {}
-            return {t: {**e, "title": titles.get(e["doc_id"]) or f"#{e['doc_id']}"} for t, e in known.items()}
+        def compute():
+            with session_scope() as s:
+                known = seriesdocs.tx_documents(s)
+                titles = dict(s.execute(select(Document.id, Document.title).where(
+                    Document.id.in_({e["doc_id"] for e in known.values()}))).all()) if known else {}
+                return {t: {**e, "title": titles.get(e["doc_id"]) or f"#{e['doc_id']}"} for t, e in known.items()}
+
+        return page_cached("booking_docs", compute)
 
     templates.env.globals["booking_docs"] = booking_docs
 
@@ -257,10 +281,14 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             outgoing = s.scalar(select(func.count()).select_from(Document).where(
                 Document.writeback_pending.is_(True) | Document.meta_pending.is_(True)))
             receipts_missing = s.scalar(select(func.count()).select_from(ReceiptCheck).where(ReceiptCheck.state == "missing"))
-        return templates.TemplateResponse(request, name, {
-            "inbox_count": inbox_count, "outgoing_count": outgoing, "today": today(), "receipts_missing": receipts_missing,
-            "update_available": app.state.version.update_available, **ctx,
-        })
+        token = PAGE_CACHE.set({})  # teure Seitenhelfer (z.B. Belege je Buchung) nur einmal je Seite berechnen
+        try:
+            return templates.TemplateResponse(request, name, {
+                "inbox_count": inbox_count, "outgoing_count": outgoing, "today": today(), "receipts_missing": receipts_missing,
+                "update_available": app.state.version.update_available, **ctx,
+            })
+        finally:
+            PAGE_CACHE.reset(token)
 
     def settings_changed() -> None:
         """Nach Änderungen in der App: abhängige Objekte nachziehen (der Worker verbindet sich selbst neu)."""

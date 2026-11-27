@@ -508,8 +508,13 @@ def include(session: Session, tx_id: str) -> dict | None:
 
 def excluded_for(session: Session, s: Series) -> list[dict]:
     """Ausgenommene Buchungen, die zu dieser Serie gehörten (gleicher Empfänger)."""
-    return sorted(({"tx_id": t, **info} for t, info in excluded(session).items()
-                   if info.get("key") == s.key or party_key(info.get("payee", "")) == party_key(s.payee)),
+    return excluded_for_items(excluded(session), s)
+
+
+def excluded_for_items(items: dict, s: Series) -> list[dict]:
+    key = party_key(s.payee)
+    return sorted(({"tx_id": t, **info} for t, info in items.items()
+                   if info.get("key") == s.key or party_key(info.get("payee", "")) == key),
                   key=lambda x: x["date"], reverse=True)
 
 

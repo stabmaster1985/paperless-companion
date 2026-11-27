@@ -6,6 +6,7 @@ als belegt. Alles bleibt im Companion; übernommen wird nur, was du anhakst.
 """
 
 from datetime import date
+from functools import lru_cache
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -173,24 +174,32 @@ def contract_doc_suggestions(session: Session, contract, limit: int = 5) -> list
     names = [n for n in (contract.payee, contract.name, contract.provider) if n]
     if not names:
         return []
+    @lru_cache(maxsize=None)
+    def parts(text: str) -> tuple[str, frozenset]:
+        return _compact(text), frozenset(_words(text))
+
     def fits(text: str, name: str) -> bool:
         """Name passt: als Ganzes enthalten oder – bei mehrteiligen Namen – mindestens zwei gemeinsame Wörter
         (ein gemeinsamer Ortsname wie „Musterstadt“ reicht nicht)."""
         if not text:
             return False
-        if _compact(name) and _compact(name) in _compact(text):
+        (name_c, wanted), (text_c, have) = parts(name), parts(text)
+        if name_c and name_c in text_c:
             return True
-        wanted = _words(name)
-        return len(_words(text) & wanted) >= min(2, len(wanted)) if wanted else False
+        return len(have & wanted) >= min(2, len(wanted)) if wanted else False
 
-    hits = []
-    for d in session.scalars(select(Document)):
-        if d.contract is not None or (d.notice is not None and d.notice.contract_id == contract.id):
-            continue
-        if any(fits(d.correspondent or "", n) or fits(d.title or "", n) for n in names):
-            hits.append(d)
-    hits.sort(key=lambda d: (d.kind != "contract", -(d.created.toordinal() if d.created else 0)))
-    return hits[:limit]
+    from app.models import Contract, Notice
+
+    # eine Abfrage statt Nachladen je Dokument: nur die Spalten, die zum Vergleichen gebraucht werden
+    skip = set(session.scalars(select(Contract.document_id).where(Contract.document_id.is_not(None))))
+    skip |= set(session.scalars(select(Notice.document_id).where(Notice.contract_id == contract.id)))
+    rows = session.execute(select(Document.id, Document.title, Document.correspondent, Document.kind, Document.created)).all()
+    found = [r for r in rows if r.id not in skip
+             and any(fits(r.correspondent or "", n) or fits(r.title or "", n) for n in names)]
+    found.sort(key=lambda r: (r.kind != "contract", -(r.created.toordinal() if r.created else 0)))
+    ids = [r.id for r in found[:limit]]
+    docs = {d.id: d for d in session.scalars(select(Document).where(Document.id.in_(ids)))} if ids else {}
+    return [docs[i] for i in ids if i in docs]
 
 
 def series_for_doc(session: Session, doc_id: int) -> list[dict]:
