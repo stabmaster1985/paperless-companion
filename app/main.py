@@ -1132,6 +1132,15 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         msg = f"{len(docs)} Dokumente mit bekanntem Dokumenttyp zur Analyse eingereiht"
         return RedirectResponse(f"/system?msg={quote(msg)}", status_code=303)
 
+    @app.post("/system/retry-errors")
+    def system_retry_errors(session: Session = Depends(get_session)):
+        """Dokumente, deren Analyse mit einem Fehler abgebrochen ist, noch einmal einreihen."""
+        docs = list(session.scalars(select(Document).where(Document.extraction_state == "error")))
+        for doc in docs:
+            doc.extraction_state, doc.extraction_error = "queued", None
+        request_worker(app)
+        return RedirectResponse(f"/system?msg={quote(f'{len(docs)} Dokumente mit Fehler werden neu analysiert')}", status_code=303)
+
     @app.post("/system/reanalyze-outdated")
     def system_reanalyze_outdated(session: Session = Depends(get_session)):
         docs = pipeline.outdated_documents(session)
@@ -1702,6 +1711,9 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         return render(
             request, "system.html", settings=settings, paperless_status=paperless_status,
             ollama_status=ollama_status, firefly_status=firefly_status, counts=counts, msg=msg,
+            error_reasons=session.execute(
+                select(Document.extraction_error, func.count()).where(Document.extraction_state == "error")
+                .group_by(Document.extraction_error).order_by(func.count().desc()).limit(5)).all(),
             last_sync=pipeline.kv_get(session, "last_sync"), channels=notify.channels(settings),
             version=app.state.version.get(), llm_error_count=len(pipeline.documents_with_llm_error(session, True)),
             outdated_count=len(pipeline.outdated_documents(session)), analysis_version=pipeline.ANALYSIS_VERSION,

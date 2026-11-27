@@ -512,7 +512,10 @@ def process_document(
     text = data.get("content") or ""
     from app import identifiers  # lokal, um Importzyklen zu vermeiden
 
-    identifiers.store(doc, text)  # Textmerkmale für Korrespondenten-Regeln, ohne Zusatzaufwand
+    try:
+        identifiers.store(doc, text)  # Textmerkmale für Korrespondenten-Regeln, ohne Zusatzaufwand
+    except Exception as exc:  # noqa: BLE001 – ein Zusatz darf die eigentliche Analyse nie abbrechen
+        log.warning("Textmerkmale von Dokument %s nicht gelesen: %s", doc.id, exc)
 
     if doc.kind_source in ("manual", "fields"):
         kind, source = doc.kind, doc.kind_source

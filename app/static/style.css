@@ -924,3 +924,5 @@ tr.muted-row td { opacity: .65; }
 .reserve-card h3 { font-size: 1rem; margin: 1rem 0 .35rem; }
 .reserve-plan tr.has-due td:first-child { font-weight: 600; }
 .reserve-plan details > summary { cursor: pointer; }
+.error-reasons { margin: .35rem 0; }
+.error-reasons > summary { cursor: pointer; color: var(--bad, #b91c1c); }

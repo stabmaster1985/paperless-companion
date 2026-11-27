@@ -187,6 +187,13 @@ setInterval(async () => {
       <form method="post" action="/system/queue/clear" class="inline" onsubmit="return confirm('Alle wartenden Analysen und Zusammenfassungen zurücknehmen? Bereits ermittelte Werte bleiben erhalten.')"><button class="small">Warteschlange leeren</button></form>
       {% endif %}
     </div>
+    {% if counts.get('error', 0) %}
+    <details class="error-reasons">
+      <summary>{{ counts.get('error', 0) }} Analysen mit Fehler – häufigste Gründe</summary>
+      <ul class="plain">{% for reason, n in error_reasons %}<li><small><strong>{{ n }}×</strong> {{ (reason or 'ohne Meldung')[:200] }}</small></li>{% endfor %}</ul>
+    </details>
+    <form method="post" action="/system/retry-errors" class="inline"><button class="small">Fehlerhafte neu analysieren</button></form>
+    {% endif %}
     {% if worker.last_error %}<p class="bad">Letzter Fehler: {{ worker.last_error }}</p>{% endif %}
     <p class="muted">Erkennung: Version {{ analysis_version }}{% if outdated_count %} · {{ outdated_count }} nicht bestätigte {{ 'Dokument wurde' if outdated_count == 1 else 'Dokumente wurden' }} mit einer älteren Version analysiert{% endif %}</p>
     {% if outdated_count %}

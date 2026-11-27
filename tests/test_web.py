@@ -478,3 +478,15 @@ def test_paperless_400_is_explained():
         with pytest.raises(PaperlessError) as err:
             client.names("tags")
         assert "API-Token ist ungültig" in str(err.value)
+
+
+def test_retry_errors_and_reasons(client):
+    with session_scope() as s:
+        for i in range(3):
+            s.add(Document(id=940 + i, title=f"Fehler {i}", tags=[], extraction_state="error",
+                           extraction_error="invalid literal for int() with base 36: '\\n'"))
+    page = client.get("/system").text
+    assert "3 Analysen mit Fehler" in page and "3×" in page and "Fehlerhafte neu analysieren" in page
+    client.post("/system/retry-errors")
+    with session_scope() as s:
+        assert {s.get(Document, 940 + i).extraction_state for i in range(3)} == {"queued"}
