@@ -105,10 +105,13 @@ Beitrags- oder Preiserhöhungen (Monatsbeitrag mit einem Klick übernehmen) und 
 Abbuchung sucht der Companion die passende Rechnung (gleicher Absender und Betrag, zeitlich passend) und schlägt alle
 gesammelt vor – zugeordnet wird erst, wenn du bestätigst (auch Vorschläge des Zahlungsabgleichs). Über „Rechnungen suchen
 und mehrere zuordnen“ verteilt der Companion gesuchte Rechnungen auf die freien Buchungen; anhaken und gesammelt bestätigen.
-Die zugeordneten Rechnungen stehen danach direkt in den Abbuchungslisten (Abo, Vertrag, Regelmäßige Zahlungen).
+Die zugeordneten Rechnungen stehen danach direkt in den Abbuchungslisten (Abo, Vertrag, Regelmäßige Zahlungen), und die
+Rechnung selbst zeigt, zu welchem Abo bzw. Vertrag und welcher Abbuchung sie gehört.
 Für ein Abo mit monatlichen Rechnungen braucht es so keinen Vertrag.
 
 ![Rechnungen zu einer regelmäßigen Zahlung](docs/screenshots/rechnungen-zur-serie.png)
+
+![Rechnung: gehört zum Abo](docs/screenshots/rechnung-zum-abo.png)
 
 **Buchungen zuordnen** – am Vertrag bzw. Abo „Weitere Buchungen suchen und zuordnen“: Firefly nach Text und Betrag
 durchsuchen – auch nach den Firefly-Merkmalen Kategorie, Tag, Firefly-Abo (Bill) und Budget (vorgeschlagen werden

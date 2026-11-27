@@ -181,3 +181,24 @@ def contract_doc_suggestions(session: Session, contract, limit: int = 5) -> list
             hits.append(d)
     hits.sort(key=lambda d: (d.kind != "contract", -(d.created.toordinal() if d.created else 0)))
     return hits[:limit]
+
+
+def series_for_doc(session: Session, doc_id: int) -> list[dict]:
+    """Zu welchem Vertrag/Abo bzw. welcher regelmäßigen Zahlung gehört ein Dokument (über seine Abbuchung)?"""
+    from app import recurring
+    from app.models import Contract
+
+    txs = {t: e for t, e in tx_documents(session).items() if e["doc_id"] == doc_id}
+    if not txs:
+        return []
+    out = []
+    for s in recurring.stored(session):
+        for t, e in txs.items():
+            if t not in s.tx_ids:
+                continue
+            i = s.tx_ids.index(t)
+            c = session.get(Contract, s.contract_id) if s.contract_id else None
+            href = (f"/documents/{c.document_id}#abbuchungen" if c and c.document_id else f"/contracts/{c.id}") if c else "/recurring"
+            out.append({"label": c.label if c else s.payee, "kind": ("Abo" if c.virtual else "Vertrag") if c else "", "href": href, "date": date.fromisoformat(s.dates[i]),
+                        "amount": s.amounts[i], "state": e["state"], "key": s.key})
+    return out

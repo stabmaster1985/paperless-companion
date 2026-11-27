@@ -217,6 +217,13 @@ def start_demo(data: Path, port: int) -> None:
                        status="active"))
         s.add(Document(id=830, title="Willkommen im Hörbuchclub – Mitgliedschaft", correspondent="Hörbuchclub", kind="contract",
                        document_type="Vertrag", tags=[], created=date(2026, 5, 28), extraction_state="done"))
+        zeitschrift = Contract(name="Zeitschrift Seite", provider="Zeitschriftenverlag Seite", payee="Zeitschriftenverlag Seite",
+                               payment_amount=39.0, payment_interval=1, monthly_cost=39.0, renewal_mode="indefinite",
+                               notice_value=1, notice_unit="months", notice_to="any", status="active")
+        s.add(zeitschrift)
+        s.flush()
+        recurring.link_contract(s, next(x for x in recurring.stored(s) if x.payee == "Zeitschriftenverlag Seite").key,
+                                zeitschrift.id)
         # Zeitschrift: monatliche Rechnungen zu den Abbuchungen (für „Rechnungen zuordnen“), die neueste fehlt noch
         for i in range(6):
             day = start + relativedelta(months=i, days=1)
@@ -319,6 +326,14 @@ def shoot(base: str) -> None:
         p.wait_for_selector(".si-multi .si-hit")
         p.wait_for_timeout(300)
         p.screenshot(path=OUT / "rechnungen-zur-serie.png", full_page=True)
+        p.fill(".si-multi input[type=search]", "")
+        p.click("#si-go")  # Vorschläge bestätigen – danach zeigt die Rechnung, zu welchem Abo sie gehört
+        p.wait_for_load_state()
+        p.goto(base + "/documents/825")
+        if p.locator(".docview:not([data-lazy])").count():
+            p.wait_for_selector(".docview-canvas canvas")
+        p.wait_for_timeout(400)
+        p.screenshot(path=OUT / "rechnung-zum-abo.png", clip={"x": 0, "y": 0, "width": 1280, "height": 520})
         p.goto(base + "/contracts")
         p.goto(base + p.locator('a:has-text("Hörbuchclub")').first.get_attribute("href") + "/bookings?q=&bill=H%C3%B6rbuchclub")
         p.wait_for_timeout(300)

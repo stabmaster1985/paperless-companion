@@ -416,6 +416,7 @@ def test_invoices_confirm_search_many_and_show_in_bookings(client):
     page = client.get(f"/recurring/invoices?key={key}").text
     assert "Vorschläge zum Bestätigen" in page and "Rechnungen suchen und mehrere zuordnen" in page
     assert "(Vorschlag – " in client.get(f"/contracts/{cid}").text  # in der Abbuchungsliste sichtbar, aber unbestätigt
+    assert "noch Vorschlag" in client.get("/documents/980").text
     hits = client.get(f"/recurring/invoice-pick?key={key}&q=wolke beleg").text
     picks = re.findall(r'name="pick" class="si-hit" value="([^"]+)"', hits)
     assert {p.split(":")[1] for p in picks} == {"980", "981", "982", "983"}  # der Vorschlag ist noch nicht bestätigt
@@ -427,5 +428,7 @@ def test_invoices_confirm_search_many_and_show_in_bookings(client):
         assert all(s.get(Document, 980 + i).invoice.status == "paid" for i in range(4))
         for i, t in enumerate(txs):
             assert s.get(Document, 980 + i).invoice.paid_on == t.date  # jede Rechnung an ihre Buchung
+    page = client.get("/documents/982").text
+    assert "Gehört zum Abo" in page and f'href="/contracts/{cid}"><strong>Wolke</strong></a>' in page
     page = client.get(f"/contracts/{cid}").text
     assert page.count("Beleg: <a") == 4 and "4 mit Rechnung/Beleg" in page and "(Vorschlag – " not in page

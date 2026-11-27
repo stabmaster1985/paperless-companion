@@ -4,8 +4,8 @@
 {% block content %}
 <div class="head">
   <h1>Regelmäßige Zahlungen</h1>
-  {% if firefly_enabled %}<form method="post" action="/recurring/run" class="inline"><button class="small" title="Abbuchungen der letzten Jahre aus Firefly auswerten (Zeitraum unter Einstellungen → Firefly III)">Jetzt aus Firefly erkennen</button></form>
-  <a class="button small" href="/bookings" title="Buchungen in Firefly suchen und daraus ein Abo anlegen oder einem Vertrag zuordnen">Buchungen suchen</a>{% endif %}
+  {% if firefly_enabled %}<div class="actions secondary"><form method="post" action="/recurring/run" class="inline"><button class="small" title="Abbuchungen der letzten Jahre aus Firefly auswerten (Zeitraum unter Einstellungen → Firefly III)">Jetzt aus Firefly erkennen</button></form>
+  <a class="button small" href="/bookings" title="Buchungen in Firefly suchen und daraus ein Abo anlegen oder einem Vertrag zuordnen">Buchungen suchen</a></div>{% endif %}
 </div>
 {% if msg %}<div class="notice ok">{{ msg }}</div>{% endif %}
 <p class="muted">Aus deinen Firefly-Abbuchungen erkannt: Zahlungen an denselben Empfänger in festem Rhythmus (monatlich, vierteljährlich,

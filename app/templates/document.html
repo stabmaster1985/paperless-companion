@@ -73,6 +73,12 @@ document.querySelectorAll('#viewer .tab[data-tab]').forEach((tab) => tab.addEven
 </script>
 <div class="review-main">
 {% set rem = sugg.get('_reminder') if sugg else none %}
+{% for so in series_of_doc(doc.id) %}
+<div class="notice {{ 'ok' if so.state == 'confirmed' }}">Gehört {% if so.kind %}zum {{ so.kind }} <a href="{{ so.href }}"><strong>{{ so.label }}</strong></a>{% else %}zur regelmäßigen Zahlung
+  <a href="{{ so.href }}">{{ so.label }}</a> (ohne Vertrag){% endif %} – Abbuchung vom {{ so.date|d }} über {{ so.amount|eur }}
+  {% if so.state == 'suggested' %}<span class="muted">(noch Vorschlag – <a href="/recurring/invoices?key={{ so.key|urlencode }}&amp;back={{ ('/documents/' ~ doc.id)|urlencode }}">bestätigen</a>)</span>
+  {% elif so.state == 'inbox' %}<span class="muted">(vorbelegt, wird mit dem Bestätigen übernommen)</span>{% endif %}</div>
+{% endfor %}
 {% set remof = reminder_of(doc) %}
 {% if remof %}<div class="notice">Mahnung zur Rechnung <a href="/documents/{{ remof.id }}">{{ remof.title }}</a>.</div>
 {% elif rem and not rem.dismissed %}<div class="notice warn">Das sieht nach einer <strong>Mahnung</strong> aus. <a href="/invoices#mahnungen">Unter Rechnungen der Rechnung zuordnen →</a></div>{% endif %}

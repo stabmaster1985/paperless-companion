@@ -156,6 +156,12 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             return {t: {**e, "title": titles.get(e["doc_id"]) or f"#{e['doc_id']}"} for t, e in known.items()}
 
     templates.env.globals["booking_docs"] = booking_docs
+
+    def series_of_doc(doc_id: int) -> list:
+        with session_scope() as s:
+            return seriesdocs.series_for_doc(s, doc_id)
+
+    templates.env.globals["series_of_doc"] = series_of_doc
     templates.env.globals["excluded_for"] = excluded_for
 
     def reminder_of(doc: Document) -> dict | None:
