@@ -457,7 +457,11 @@ def set_refund(doc: Document, amount: float, day: date, tx: Transaction | None =
 
     pipeline.set_source(doc, ["refund_amount", "refunded_on"], "firefly" if tx else "manual", confirmed=True)
     full = inv.amount is not None and inv.refund_amount >= inv.amount - 0.005
-    return "vollständig erstattet" if full else f"teilweise erstattet – kostet dich noch {inv.net_amount:.2f} €".replace(".", ",")
+    if full:
+        return "vollständig erstattet"
+    if inv.net_amount is None:
+        return "als Rückerstattung eingetragen (die Rechnung hat noch keinen Betrag)"
+    return f"teilweise erstattet – kostet dich noch {inv.net_amount:.2f} €".replace(".", ",")
 
 
 REFUND_HINT = re.compile(r"erstatt|gutschrift|storno|rücksend|ruecksend|retoure|rückzahlung|rueckzahlung|refund|return",
@@ -868,7 +872,11 @@ def add_partial(session: Session, doc: Document, tx: Transaction) -> tuple[str, 
         _mark_firefly(doc, AUTO_MIN, confirmed=True)
         msg = "als letzte Teilzahlung übernommen – die Rechnung ist jetzt bezahlt"
     else:
-        msg = f"als Teilzahlung übernommen – noch offen: {inv.open_amount:.2f} €".replace(".", ",")
+        paid = f"{inv.paid_amount or 0:.2f}".replace(".", ",")
+        msg = (f"als Teilzahlung übernommen – noch offen: {inv.open_amount:.2f} €".replace(".", ",")
+               if inv.open_amount is not None else
+               f"als Teilzahlung übernommen – bisher bezahlt: {paid} €. Die Rechnung hat noch keinen Betrag: bitte "
+               "eintragen, dann rechnet der Companion den offenen Rest aus")
     return msg, {"status": inv.status, "paid_on": inv.paid_on.isoformat() if inv.paid_on else ""}
 
 

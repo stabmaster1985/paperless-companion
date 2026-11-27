@@ -517,3 +517,15 @@ def test_suggest_refund_for_paid_invoice(client, mock_api):
         inv = s.get(Document, 1).invoice
         assert inv.refund_amount == 59.99 and inv.refund_tx_id == "d1" and inv.refund_suggestion is None
         assert payments.suggest_refunds(s, deposits) == 0  # schon erstattet
+
+
+def test_partial_payment_and_refund_without_invoice_amount(client):
+    """Rechnung ohne Betrag: Teilzahlung und Rückerstattung gehen trotzdem (kein Absturz bei der Meldung)."""
+    with session_scope() as s:
+        inv = add_invoice(s, 777, None, issuer="Möbelhaus")
+        inv.document.review_state = "confirmed"
+    with session_scope() as s:
+        msg, _ = payments.add_partial(s, s.get(Document, 777), tx("911", date(2026, 9, 12), 100.0, "Möbelhaus"))
+        assert "bisher bezahlt: 100,00 €" in msg and "keinen Betrag" in msg
+        assert "noch keinen Betrag" in payments.set_refund(s.get(Document, 777), 20.0, date(2026, 10, 1))
+    assert client.get("/documents/777").status_code == 200
