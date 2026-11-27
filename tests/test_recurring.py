@@ -158,3 +158,29 @@ def test_dismiss_several_unknown(db, settings, mock_api):
         assert "Angehakte ausblenden" in page and "ausblenden (kein Vertrag)" in page
         r = c.post("/recurring/dismiss-many", data={"token": [f"unknown:{k}" for k in keys]})
         assert "2 Einträge ausgeblendet" in r.text and "Ohne Vertrag (" not in r.text
+
+
+def test_only_current_series_of_contract_counts(db):
+    """Alter Beitrag 4,90 € (bis 2023) und neuer 7,99 € am selben Vertrag: kein „Betrag geändert“ und keine „ausgebliebene“
+    Abbuchung wegen der alten Serie. Firefly-„(no name)“ wird über den Verwendungszweck erkannt."""
+    from app.firefly import Transaction
+
+    def fee(i, day, amount):
+        return Transaction(journal_id=f"f{i}", group_id=f"gf{i}", date=day, amount=amount, counterparty="(no name)",
+                           iban=None, description="Monatsabschluss", text="Monatsabschluss")
+
+    old = [fee(i, date(2022, 11, 30) + relativedelta(months=i), 4.90) for i in range(12)]
+    new = [fee(100 + i, date(2025, 11, 30) + relativedelta(months=i), 7.99) for i in range(12)]
+    with db() as s:
+        recurring.run(s, [*old, *new])
+        series = recurring.stored(s)
+        assert {x.payee for x in series} == {"Monatsabschluss"} and len(series) == 2
+        contract = Contract(name="Monatsabschluss", provider="Bank")
+        contract.set_payment(7.99, 1)
+        s.add(contract)
+        s.flush()
+        for x in series:
+            recurring.link_contract(s, x.key, contract.id)
+    with db() as s:
+        f = recurring.findings(s, date(2026, 11, 20))
+        assert f["changed"] == [] and f["missing"] == []

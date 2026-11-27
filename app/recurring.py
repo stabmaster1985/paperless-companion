@@ -139,9 +139,22 @@ def _rhythm(dates: list[date]) -> int | None:
     return None
 
 
+NO_NAME = {"(no name)", "no name", "(kein name)", "unbekannt", ""}
+
+
+def payee_of(counterparty: str | None, description: str | None) -> str:
+    """Empfänger für die Erkennung. Firefly schreibt „(no name)“, wenn es keinen gibt (z.B. Kontoführungsgebühren) –
+    dann zählt der Verwendungszweck („Monatsabschluss“), sonst landen alle solchen Buchungen in einem Topf."""
+    name = (counterparty or "").strip()
+    if name.lower() in NO_NAME:
+        text = " ".join((description or "").split())[:60]
+        return text or "ohne Empfänger"
+    return name
+
+
 def _series_of(key: str, txs: list[Transaction], months: int) -> Series:
     txs = sorted(txs, key=lambda t: t.date)
-    return Series(key=key, payee=txs[-1].counterparty, months=months, amounts=[t.amount for t in txs],
+    return Series(key=key, payee=payee_of(txs[-1].counterparty, txs[-1].description), months=months, amounts=[t.amount for t in txs],
                   dates=[t.date.isoformat() for t in txs], tx_ids=[t.journal_id for t in txs],
                   group_ids=[t.group_id for t in txs], descriptions=[(t.description or "")[:120] for t in txs])
 
@@ -161,7 +174,7 @@ def detect(transactions: list[Transaction], ignored: list[str] | None = None, ex
     for tx in transactions:
         if (excluded and tx.journal_id in excluded) or tx.journal_id in in_split:
             continue  # von dir aus der Serie genommen bzw. schon in einer eigenen Gruppe
-        key = party_key(tx.counterparty)
+        key = party_key(payee_of(tx.counterparty, tx.description))
         if key and not _is_ignored(tx.counterparty, ignored or []):
             by_payee.setdefault(key, []).append(tx)
     for key, txs in by_payee.items():
@@ -385,8 +398,16 @@ def findings(session: Session, today: date) -> dict:
     """Hinweise: Serien ohne Vertrag, Betragsänderungen an Verträgen, ausgebliebene Abbuchungen."""
     dismissed = set(_kv(session, DISMISSED_KEY))
     result = {"unknown": [], "changed": [], "missing": [], "all": [], "ended": []}
-    for s in stored(session):
+    all_series = stored(session)
+    # mehrere Serien an einem Vertrag (z.B. alter und neuer Beitrag): nur die aktuelle zählt für Hinweise
+    current: dict[int, Series] = {}
+    for s in all_series:
+        if s.contract_id and (s.contract_id not in current or s.last_date > current[s.contract_id].last_date):
+            current[s.contract_id] = s
+    for s in all_series:
         result["all"].append(s)
+        if s.contract_id and current.get(s.contract_id) is not s:
+            continue  # frühere Serie dieses Vertrags: nur Verlauf
         contract = session.get(Contract, s.contract_id) if s.contract_id else None
         tolerance = 10 if s.months == 1 else 25
         # lange vorbei (mehr als zwei Abstände ohne Abbuchung): früheres Abo, kein offener Hinweis

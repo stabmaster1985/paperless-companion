@@ -316,7 +316,7 @@ def check(session: Session, transactions: list[Transaction], settings: Settings,
             row.note = PAYMENT_NOTE
         elif _is_ignored(tx.counterparty, ignored):
             row.state, row.candidates, row.note = "ignored", None, "Empfänger ausgeblendet"
-        elif abo := abo_for(abos, tx.counterparty, tx.date, tx.journal_id, abo_skip):
+        elif abo := abo_for(abos, tx.counterparty, tx.date, tx.journal_id, abo_skip, tx.description):
             row.state, row.candidates, row.note = "ignored", None, f"{ABO_NOTE}: {abo.label}"
         elif (target := fixed_target(session, fixed.get(party_key(tx.counterparty)), tx.date, tx.amount))[0]:
             row.state, row.document_id, row.candidates = "linked", target[0], None
@@ -421,11 +421,14 @@ def abo_excluded(session: Session) -> set[str]:
     return set(data) if isinstance(data, dict) else set()
 
 
-def abo_for(abos: list, counterparty: str, day: date, tx_id: str | None = None, excluded: set[str] | None = None):
+def abo_for(abos: list, counterparty: str, day: date, tx_id: str | None = None, excluded: set[str] | None = None,
+            description: str | None = None):
     """Gehört eine Buchung an diesen Empfänger zu einem Abo ohne Dokument?"""
+    from app.recurring import payee_of
+
     if tx_id and excluded and tx_id in excluded:
         return None
-    key = party_key(counterparty)
+    key = party_key(payee_of(counterparty, description))
     for c in abos:
         if key and party_key(c.payee) == key:
             if c.status == "cancelled" and c.cancel_effective and day > c.cancel_effective:
@@ -443,7 +446,7 @@ def sync_payments(session: Session) -> int:
     changed = 0
     for row in session.scalars(select(ReceiptCheck).where(ReceiptCheck.decided.is_(False))):
         doc_id = linked.get(row.tx_id)
-        abo = abo_for(abos, row.counterparty, row.tx_date, row.tx_id, abo_skip) if doc_id is None else None
+        abo = abo_for(abos, row.counterparty, row.tx_date, row.tx_id, abo_skip, row.description) if doc_id is None else None
         if doc_id is not None and (row.state != "linked" or row.document_id != doc_id):
             row.state, row.document_id, row.candidates, row.note = "linked", doc_id, row.candidates, PAYMENT_NOTE
             changed += 1

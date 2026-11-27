@@ -45,7 +45,7 @@ def collect(session: Session, today: date) -> dict:
 
     series_by_contract: dict[int, object] = {}
     for s in recurring.stored(session):
-        if s.contract_id and (s.contract_id not in series_by_contract or len(s.amounts) > len(series_by_contract[s.contract_id].amounts)):
+        if s.contract_id and (s.contract_id not in series_by_contract or s.last_date > series_by_contract[s.contract_id].last_date):
             series_by_contract[s.contract_id] = s
     items = []
     for c in session.scalars(select(Contract).where(Contract.status.in_(("active", "cancelled")))):
