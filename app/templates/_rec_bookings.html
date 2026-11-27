@@ -11,6 +11,8 @@
       <button type="button" class="small link" onclick="recPick(this, 'all')">alle</button>
       <button type="button" class="small link" onclick="recPick(this, 'none')">keine</button>
       <button class="small" name="op" value="exclude">Angehakte herausnehmen (<span class="rec-n">0</span>)</button>
+      <a class="button small" href="/recurring/invoices?key={{ s.key|urlencode }}&amp;back={{ (back or '/recurring')|urlencode }}"
+         title="Zu jeder Abbuchung die passende Rechnung suchen (gleicher Absender und Betrag)">Rechnungen zuordnen</a>
     </div>
     <div class="rec-book-tools">
       <span class="muted"><small>Angehakte</small></span>

@@ -85,8 +85,10 @@ def start_demo(data: Path, port: int) -> None:
         booking(0, "2026-10-10", "78.00", "Stadtwerke Musterstadt", "Abschlag RE-1"),
         booking(1, "2026-09-10", "78.00", "Stadtwerke Musterstadt", "Abschlag September"),
         booking(2, "2026-10-14", "79.50", "Stadtwerke Musterstadt", "Nachzahlung Abschlag"),
-        booking(3, "2026-10-03", "78.00", "Fitnessstudio Muster", "Mitgliedsbeitrag Oktober")],
-        "meta": {"pagination": {"total": 4, "current_page": 1, "total_pages": 1}}})
+        booking(3, "2026-10-03", "78.00", "Fitnessstudio Muster", "Mitgliedsbeitrag Oktober"),
+        *[booking(10 + i, f"2026-{m:02d}-12", "9.95", "Bezahldienst Muster", f"Hörbuchclub Beitrag {m:02d}/2026")
+          for i, m in enumerate(range(6, 11))]],
+        "meta": {"pagination": {"total": 9, "current_page": 1, "total_pages": 1}}})
     app = create_app(settings, start_worker=False)
     server = uvicorn.Server(uvicorn.Config(app, port=port, log_level="warning"))
     threading.Thread(target=server.run, daemon=True).start()
@@ -209,6 +211,16 @@ def start_demo(data: Path, port: int) -> None:
         s.flush()
         streaming = next(x for x in recurring.stored(s) if x.payee == "Streamingdienst Flimmer")
         recurring.link_contract(s, streaming.key, abo.id)
+        s.add(Contract(name="Hörbuchclub", provider="Hörbuchclub", payee="Hörbuchclub", payment_amount=9.95, payment_interval=1,
+                       monthly_cost=9.95, renewal_mode="indefinite", notice_value=1, notice_unit="months", notice_to="any",
+                       status="active"))
+        # Zeitschrift: monatliche Rechnungen zu den Abbuchungen (für „Rechnungen zuordnen“), die neueste fehlt noch
+        for i in range(6):
+            day = start + relativedelta(months=i, days=1)
+            s.add(Document(id=820 + i, title=f"Rechnung Zeitschrift {day:%m/%Y}", correspondent="Zeitschriftenverlag Seite",
+                           document_type="Rechnung", kind="invoice", tags=[], created=day, review_state="confirmed",
+                           extraction_state="done", invoice=Invoice(issuer="Zeitschriftenverlag Seite", amount=39.0,
+                                                                     invoice_date=day, status="open")))
 
     from app import backups
 
@@ -295,6 +307,18 @@ def shoot(base: str) -> None:
             p.wait_for_timeout(400)
             p.screenshot(path=OUT / f"{name}.png")
             p.close()
+
+        p = page(1280, 760)  # Rechnungen zu einer regelmäßigen Zahlung
+        p.goto(base + "/recurring")
+        href = p.locator('a[href*="recurring/invoices"][href*="zeitschrift"]').first.get_attribute("href")
+        p.goto(base + href)
+        p.wait_for_timeout(300)
+        p.screenshot(path=OUT / "rechnungen-zur-serie.png")
+        p.goto(base + "/contracts")
+        p.goto(base + p.locator('a:has-text("Hörbuchclub")').first.get_attribute("href") + "/bookings")
+        p.wait_for_timeout(300)
+        p.screenshot(path=OUT / "buchungen-zuordnen.png")
+        p.close()
 
         p = page(390, 844)
         p.goto(base + "/review?after=703")

@@ -1,0 +1,94 @@
+"""Rechnungen zu einer regelmäßigen Zahlung: Für jede Abbuchung einer Serie (Abo, Vertrag oder nur erkannte Zahlung)
+die passende Rechnung suchen – gleicher Absender, gleicher Betrag, zeitlich passend – und gesammelt vorschlagen.
+
+So brauchst du für ein Abo mit monatlichen Rechnungen keinen Vertrag: Die Rechnungen gelten als bezahlt, die Buchungen
+als belegt. Alles bleibt im Companion; übernommen wird nur, was du anhakst.
+"""
+
+from datetime import date
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app import payments, receipts
+from app.firefly import Transaction
+from app.models import Document, ReceiptCheck
+from app.payments import _compact, _words
+from app.recurring import Series
+
+
+def transactions_of(s: Series) -> list[Transaction]:
+    return [Transaction(journal_id=s.tx_ids[i], group_id=s.group_ids[i] if i < len(s.group_ids) else "",
+                        date=date.fromisoformat(day), amount=s.amounts[i], counterparty=s.payee, iban=None,
+                        description=s.descriptions[i] if i < len(s.descriptions) else "",
+                        text=s.descriptions[i] if i < len(s.descriptions) else "")
+            for i, day in enumerate(s.dates)]
+
+
+def _name_fits(name: str, payee: str) -> bool:
+    if not name:
+        return False
+    return bool(_words(name) & _words(payee)) or _compact(name) in _compact(payee) or _compact(payee) in _compact(name)
+
+
+def pairs(session: Session, s: Series) -> list[dict]:
+    """Je Abbuchung (neueste zuerst): schon zugeordnetes Dokument oder der beste Vorschlag.
+    Jedes Dokument wird höchstens einer Buchung vorgeschlagen (beste Paarung zuerst)."""
+    used = payments.used_elsewhere(session)
+    taken_docs = set(used.values())
+    txs = transactions_of(s)
+    pool = [d for d in session.scalars(select(Document).where(Document.kind.in_(("invoice", "receipt", "other"))))
+            if d.id not in taken_docs
+            and _name_fits((d.invoice.issuer if d.invoice and d.invoice.issuer else None) or d.correspondent or "", s.payee)]
+    scored = []
+    for tx in txs:
+        if tx.journal_id in used:
+            continue
+        for doc in pool:
+            result = receipts.score_document(tx, doc, set(), set())
+            if result and result[0] >= receipts.MIN_SCORE and receipts._doc_amount(doc) is not None:
+                scored.append((result[0], tx.journal_id, doc, result[1]))
+    scored.sort(key=lambda x: -x[0])
+    chosen: dict[str, tuple] = {}
+    docs_used: set[int] = set()
+    for points, tx_id, doc, reasons in scored:
+        if tx_id in chosen or doc.id in docs_used:
+            continue
+        chosen[tx_id] = (points, doc, reasons)
+        docs_used.add(doc.id)
+    rows = []
+    for tx in sorted(txs, key=lambda t: t.date, reverse=True):
+        row = {"tx": tx, "doc": None, "state": "none", "reason": "", "sure": False}
+        if tx.journal_id in used:
+            row.update(state="done", doc=session.get(Document, used[tx.journal_id]))
+        elif tx.journal_id in chosen:
+            points, doc, reasons = chosen[tx.journal_id]
+            row.update(state="suggest", doc=doc, reason=", ".join(reasons), sure="gleicher Betrag" in reasons)
+        rows.append(row)
+    return rows
+
+
+def count_open(session: Session, s: Series) -> int:
+    return sum(1 for r in pairs(session, s) if r["state"] == "suggest")
+
+
+def apply(session: Session, s: Series, picks: list[tuple[str, int]]) -> int:
+    """Angehakte Paare übernehmen: Rechnung gilt als bezahlt (bzw. in der Inbox vorbelegt), die Buchung als belegt."""
+    txs = {t.journal_id: t for t in transactions_of(s)}
+    done = 0
+    for tx_id, doc_id in picks:
+        tx, doc = txs.get(tx_id), session.get(Document, doc_id)
+        if tx is None or doc is None:
+            continue
+        if doc.kind == "invoice" and (doc.invoice is not None or doc.review_state == "pending"):
+            payments.choose(session, doc, tx, take=())
+        row = session.scalar(select(ReceiptCheck).where(ReceiptCheck.tx_id == tx_id))
+        if row is None:
+            row = ReceiptCheck(tx_id=tx_id, tx_group_id=tx.group_id, tx_date=tx.date, amount=tx.amount,
+                               counterparty=tx.counterparty[:200], description=tx.description[:300])
+            session.add(row)
+        receipts.link(session, row, doc.id)
+        done += 1
+    session.flush()
+    receipts.sync_payments(session)
+    return done

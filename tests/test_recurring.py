@@ -184,3 +184,81 @@ def test_only_current_series_of_contract_counts(db):
     with db() as s:
         f = recurring.findings(s, date(2026, 11, 20))
         assert f["changed"] == [] and f["missing"] == []
+
+
+def test_assign_bookings_by_hand_survives_new_runs(db):
+    """Buchungen über PayPal (anderer Empfänger) von Hand einem Abo zuordnen: Sie bleiben bei neuen Erkennungsläufen dort."""
+    stream = monthly("Streamingdienst AG", 12.99, 6)
+    paypal = [tx(50 + i, date(2026, 6, 10) + relativedelta(months=i), 9.99, "PayPal Europe", "Hörbuchclub") for i in range(5)]
+    with db() as s:
+        recurring.run(s, [*stream, *paypal])
+        abo = Contract(name="Hörbuchclub", provider="Hörbuchclub", payee="Hörbuchclub")
+        s.add(abo)
+        s.flush()
+        hits = recurring.search_bookings([*stream, *paypal], "hörbuch", 10.0)
+        assert [t.journal_id for t in hits] == [t.journal_id for t in reversed(paypal)]
+        recurring.assign(s, abo.id, hits[:3])
+        abo_id = abo.id
+    with db() as s:
+        recurring.assign(s, abo_id, recurring.search_bookings(paypal, "hörbuch"))  # Rest dazu, keine Dopplung
+        recurring.run(s, [*stream, *paypal])
+        mine = [x for x in recurring.stored(s) if x.contract_id == abo_id]
+        assert len(mine) == 1 and sorted(mine[0].tx_ids) == sorted(t.journal_id for t in paypal) and mine[0].months == 1
+        others = [x for x in recurring.stored(s) if x.contract_id != abo_id]
+        assert not any(set(x.tx_ids) & set(mine[0].tx_ids) for x in others)
+
+
+def test_invoices_for_series(db):
+    """Abo mit monatlichen Rechnungen: Rechnung je Buchung vorschlagen und übernehmen – ohne Vertrag."""
+    from app import seriesdocs
+    from app.models import Invoice, ReceiptCheck
+
+    txs = monthly("Zeitschriftenverlag Seite", 7.5, 4, start=date(2026, 7, 5))
+    with db() as s:
+        for i, t in enumerate(txs):
+            d = Document(id=950 + i, title=f"Rechnung {i}", correspondent="Zeitschriftenverlag Seite", kind="invoice", tags=[],
+                         review_state="confirmed")
+            d.invoice = Invoice(issuer="Zeitschriftenverlag Seite", amount=7.5, invoice_date=t.date - relativedelta(days=3))
+            s.add(d)
+        other = Document(id=960, title="Sonderheft", correspondent="Zeitschriftenverlag Seite", kind="invoice", tags=[],
+                         review_state="confirmed")
+        other.invoice = Invoice(issuer="Zeitschriftenverlag Seite", amount=19.0, invoice_date=date(2026, 8, 1))
+        s.add(other)
+        recurring.run(s, txs)
+        series = recurring.stored(s)[0]
+        rows = seriesdocs.pairs(s, series)
+        assert [r["doc"].id for r in rows] == [953, 952, 951, 950] and all(r["sure"] for r in rows)
+        assert seriesdocs.apply(s, series, [(r["tx"].journal_id, r["doc"].id) for r in rows[:3]]) == 3
+    with db() as s:
+        series = recurring.stored(s)[0]
+        assert s.get(Document, 953).invoice.status == "paid" and s.get(Document, 950).invoice.status == "open"
+        assert s.query(ReceiptCheck).filter_by(state="linked").count() == 3
+        states = [r["state"] for r in seriesdocs.pairs(s, series)]
+        assert states == ["done", "done", "done", "suggest"]
+
+
+def test_contract_booking_search_page(client, settings, mock_api):
+    from tests.test_payments import FIREFLY
+
+    settings.firefly_url, settings.firefly_token = FIREFLY, "t"
+    mock_api.get(f"{FIREFLY}/api/v1/transactions").respond(json={"data": [
+        {"type": "transactions", "id": f"7{i}", "attributes": {"transactions": [{
+            "transaction_journal_id": f"97{i}", "type": "withdrawal", "date": f"2026-0{i + 1}-15T00:00:00+02:00",
+            "amount": "9.99", "description": "Hörbuchclub Monatsbeitrag", "destination_name": "PayPal Europe"}]}}
+        for i in range(3)], "meta": {"pagination": {"total_pages": 1}}})
+    with session_scope() as s:
+        abo = Contract(name="Hörbuchclub", provider="Hörbuchclub", payee="Hörbuchclub")
+        abo.set_payment(9.99, 1)
+        s.add(abo)
+        s.flush()
+        cid = abo.id
+    page = client.get(f"/contracts/{cid}/bookings").text
+    assert "Vorschlag:" in page and page.count('name="tx"') == 3 and "Angehakte zuordnen" in page
+    import re
+    values = [v.replace("&#34;", '"').replace("&quot;", '"') for v in re.findall(r'name="tx" value="([^"]+)"', page)]
+    r = client.post(f"/contracts/{cid}/bookings", data={"tx": values})
+    assert "3 Buchungen gehören jetzt zu" in r.text and "Rechnungen zuordnen" in r.text
+    assert "gehört schon dazu" in client.get(f"/contracts/{cid}/bookings?q=hörbuch").text
+    with session_scope() as s:
+        key = next(x.key for x in recurring.stored(s) if x.contract_id == cid)
+    assert "keine passende Rechnung gefunden" in client.get(f"/recurring/invoices?key={key}").text

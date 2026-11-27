@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% from "macros.html" import doclink, txlinks %}
+{% block content %}
+<div class="head">
+  <h1>Rechnungen zuordnen <small class="muted">· {{ s.payee }} · {{ s.rhythm }}</small></h1>
+  <a class="button small" href="{{ back }}">zurück</a>
+</div>
+{% if msg %}<div class="notice ok">{{ msg }}</div>{% endif %}
+<p class="muted">Zu jeder Abbuchung sucht der Companion die passende Rechnung: gleicher Absender, gleicher Betrag, zeitlich passend.
+  <strong>Vorausgewählt</strong> sind die mit genau gleichem Betrag. Übernehmen setzt die Rechnung auf bezahlt (in der Inbox: vorbelegt)
+  und die Buchung gilt als belegt – so brauchst du für ein Abo mit regelmäßigen Rechnungen keinen Vertrag. Nach Paperless geht nichts automatisch.</p>
+{% set open = rows|selectattr('state', 'equalto', 'suggest')|list %}
+{% set done = rows|selectattr('state', 'equalto', 'done')|list %}
+<p><small>{{ rows|length }} Abbuchungen · {{ done|length }} schon mit Dokument · {{ open|length }} Vorschläge · {{ rows|length - done|length - open|length }} ohne passende Rechnung</small></p>
+<form method="post" action="/recurring/invoices" id="si-form">
+  <input type="hidden" name="key" value="{{ s.key }}"><input type="hidden" name="back" value="{{ back }}">
+  {% if open %}
+  <div class="actions bulk-bar">
+    <button class="primary" id="si-go">Angehakte übernehmen (<span id="si-n">0</span>)</button>
+    <button type="button" class="small" onclick="siPick('sure')">nur sichere</button>
+    <button type="button" class="small" onclick="siPick('all')">alle</button>
+    <button type="button" class="small link" onclick="siPick('none')">keine</button>
+  </div>
+  {% endif %}
+  <table class="list compact"><tbody>
+    {% for r in rows %}{% set t = r.tx %}
+    <tr>
+      <td>{% if r.state == 'suggest' %}<input type="checkbox" name="pick" value="{{ t.journal_id }}:{{ r.doc.id }}" data-sure="{{ 1 if r.sure else 0 }}" {{ 'checked' if r.sure }} onchange="siCount()" aria-label="übernehmen">{% elif r.state == 'done' %}✓{% endif %}</td>
+      <td class="nowrap">{{ t.date|d }}</td><td class="nowrap">{{ t.amount|eur }}</td>
+      <td>{% if r.doc %}<a href="/documents/{{ r.doc.id }}">{{ r.doc.title or ('#' ~ r.doc.id) }}</a> {{ doclink(r.doc.id) }}
+          <small class="muted">{% if r.state == 'done' %}zugeordnet{% else %}{{ r.reason }}{% endif %}</small>
+        {% else %}<small class="muted">keine passende Rechnung gefunden – <a href="/receipts#tx-search">auf der Belegseite suchen</a></small>{% endif %}</td>
+      <td class="nowrap">{% if t.group_id %}{{ txlinks(t.group_id, t.date) }}{% endif %}</td></tr>
+    {% endfor %}
+  </tbody></table>
+</form>
+<script>
+function siCount() {
+  const go = document.getElementById('si-go');
+  if (!go) return;
+  const n = document.querySelectorAll('#si-form input[name=pick]:checked').length;
+  document.getElementById('si-n').textContent = n;
+  go.disabled = n === 0;
+}
+function siPick(mode) {
+  document.querySelectorAll('#si-form input[name=pick]').forEach((b) => { b.checked = mode === 'all' || (mode === 'sure' && b.dataset.sure === '1'); });
+  siCount();
+}
+siCount();
+</script>
+{% endblock %}

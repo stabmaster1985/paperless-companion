@@ -101,6 +101,18 @@ Beitrags- oder Preiserhöhungen (Monatsbeitrag mit einem Klick übernehmen) und 
 
 ![Regelmäßige Zahlungen](docs/screenshots/regelmaessig.png)
 
+**Rechnungen zu einer regelmäßigen Zahlung** – bei jeder Serie unter „Abbuchungen ansehen → Rechnungen zuordnen“: Zu jeder
+Abbuchung sucht der Companion die passende Rechnung (gleicher Absender und Betrag, zeitlich passend) und schlägt alle
+gesammelt vor. Für ein Abo mit monatlichen Rechnungen braucht es so keinen Vertrag.
+
+![Rechnungen zu einer regelmäßigen Zahlung](docs/screenshots/rechnungen-zur-serie.png)
+
+**Buchungen zuordnen** – am Vertrag bzw. Abo „Weitere Buchungen suchen und zuordnen“: Firefly nach Text und Betrag
+durchsuchen (vorgeschlagen werden Buchungen an den Empfänger des Vertrags), anhaken, zuordnen – auch wenn sie über einen
+anderen Empfänger laufen (z.B. einen Bezahldienst).
+
+![Buchungen zuordnen](docs/screenshots/buchungen-zuordnen.png)
+
 **Verlauf** – was du zuletzt bearbeitet hast, wo das Dokument jetzt steht (z.B. bezahlt, wartet auf Übertragung)
 und auf welcher Seite du danach gelandet bist; je Dokument auch auf der Dokumentseite.
 

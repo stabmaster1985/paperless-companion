@@ -22,11 +22,11 @@ from sqlalchemy.orm import Session
 from starlette.background import BackgroundTask
 from starlette.middleware.sessions import SessionMiddleware
 
-from app import activity, appsettings, backups, bulk, reserves, cancellations, dunning, localdata, recurring, cases, mqtt, reimbursements, series, help as helptexts, identifiers, learning, paperless_rules, receipts, rules as rule_proposals, deadlines, events, fields, highlight, ics, metadata, notify, payments, pipeline, reminders, retention, selection, tax
+from app import activity, appsettings, backups, bulk, reserves, cancellations, dunning, localdata, recurring, cases, mqtt, reimbursements, series, help as helptexts, identifiers, learning, paperless_rules, receipts, rules as rule_proposals, seriesdocs, deadlines, events, fields, highlight, ics, metadata, notify, payments, pipeline, reminders, retention, selection, tax
 from app.config import Settings, get_settings
 from app.db import get_session, init_db, session_scope
 from app.models import Case, CaseDocument, CaseEntry, Contract, Document, Invoice, KeyValue, PaymentMatch, ReceiptCheck, RuleProposal, RetentionLog, RetentionRule, Warranty
-from app.firefly import FireflyError
+from app.firefly import FireflyError, Transaction
 from app.paperless import PaperlessError
 from app.version import Version
 from app.worker import Worker, make_firefly, make_ollama, make_paperless
@@ -1393,6 +1393,108 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             raise HTTPException(404)
         docs = receipts.search_documents(session, SimpleNamespace(tx_date=date.fromisoformat(series.dates[0])), q, limit=10)
         return render(request, "_recurring_docs.html", docs=docs, key=key, q=q)
+
+    def contract_back(c: Contract) -> str:
+        return f"/documents/{c.document_id}#abbuchungen" if c.document_id else f"/contracts/{c.id}"
+
+    @app.get("/contracts/{contract_id}/bookings", response_class=HTMLResponse)
+    def contract_bookings(request: Request, contract_id: int, q: str | None = None, amount: str = "", msg: str = "",
+                          session: Session = Depends(get_session)):
+        """Buchungen in Firefly suchen und einem Vertrag/Abo zuordnen. Ohne eigene Suche schlägt der Companion
+        Buchungen an den Empfänger des Vertrags vor (über den Betrag des Vertrags, falls eingetragen)."""
+        c = session.get(Contract, contract_id)
+        if c is None:
+            raise HTTPException(404)
+        suggest = q is None
+        if suggest:
+            q = c.payee or c.provider or c.name or ""
+            value = c.payment_amount
+        else:
+            try:
+                value = float(amount.replace(".", "").replace(",", ".")) if "," in amount else float(amount) if amount.strip() else None
+            except ValueError:
+                value = None
+        hits, error = [], ""
+        client = make_firefly(settings)
+        if client is None:
+            error = "Firefly III ist nicht eingerichtet"
+        elif q or value is not None:
+            try:
+                history = list(client.withdrawals(today() - timedelta(days=settings.recurring_lookback_days), today()))
+                hits = recurring.search_bookings(history, q, value)[:200]
+            except FireflyError as exc:
+                error = f"Firefly nicht erreichbar: {exc}"
+            finally:
+                client.close()
+        owner: dict[str, tuple] = {}
+        for x in recurring.stored(session):
+            for t in x.tx_ids:
+                owner[t] = (x.key, x.contract_id, x.payee)
+        labels = {k.id: k.label for k in session.scalars(select(Contract))}
+        ex = recurring.excluded(session)
+        rows = []
+        for t in hits:
+            key, cid, payee = owner.get(t.journal_id, (None, None, None))
+            rows.append({"tx": t, "mine": cid == c.id, "other": labels.get(cid) if cid and cid != c.id else
+                         (f"erkannt bei „{payee}“" if key and not cid else ""), "excluded": t.journal_id in ex,
+                         "data": json.dumps({"id": t.journal_id, "g": t.group_id, "d": t.date.isoformat(), "a": t.amount,
+                                             "c": t.counterparty, "t": t.description})})
+        return render(request, "contract_bookings.html", c=c, q=q, amount=amount if not suggest else
+                      (f"{value:.2f}".replace(".", ",") if value else ""), rows=rows, suggest=suggest, error=error, msg=msg,
+                      back=contract_back(c), firefly_enabled=settings.firefly_enabled)
+
+    @app.post("/contracts/{contract_id}/bookings")
+    async def contract_bookings_assign(request: Request, contract_id: int, session: Session = Depends(get_session)):
+        c = session.get(Contract, contract_id)
+        if c is None:
+            raise HTTPException(404)
+        form = await request.form()
+        txs = []
+        for raw in form.getlist("tx"):
+            try:
+                d = json.loads(str(raw))
+                txs.append(Transaction(journal_id=str(d["id"]), group_id=str(d.get("g") or ""), date=date.fromisoformat(d["d"]),
+                                       amount=float(d["a"]), counterparty=str(d.get("c") or ""), iban=None,
+                                       description=str(d.get("t") or ""), text=str(d.get("t") or "")))
+            except (ValueError, KeyError, TypeError):
+                continue
+        if not txs:
+            msg = "Keine Buchung angehakt"
+            return RedirectResponse(f"/contracts/{c.id}/bookings?msg={quote(msg)}", status_code=303)
+        recurring.assign(session, c.id, txs)
+        receipts.sync_payments(session)
+        msg = f"{len(txs)} Buchung{'en' if len(txs) != 1 else ''} gehören jetzt zu „{c.label}“"
+        target = contract_back(c)
+        sep = "#" if "#" in target else ""
+        base, _, frag = target.partition("#")
+        return RedirectResponse(f"{base}?msg={quote(msg)}{sep}{frag}", status_code=303)
+
+    @app.get("/recurring/invoices", response_class=HTMLResponse)
+    def recurring_invoices(request: Request, key: str = "", back: str = "", msg: str = "",
+                           session: Session = Depends(get_session)):
+        """Rechnungen zu den Buchungen einer regelmäßigen Zahlung vorschlagen."""
+        series = next((x for x in recurring.stored(session) if x.key == key), None)
+        if series is None:
+            raise HTTPException(404)
+        rows = seriesdocs.pairs(session, series)
+        target = back if back.startswith("/") and not back.startswith("//") else "/recurring"
+        return render(request, "series_invoices.html", s=series, rows=rows, back=target, msg=msg)
+
+    @app.post("/recurring/invoices")
+    async def recurring_invoices_apply(request: Request, session: Session = Depends(get_session)):
+        form = await request.form()
+        key, back = str(form.get("key") or ""), str(form.get("back") or "")
+        series = next((x for x in recurring.stored(session) if x.key == key), None)
+        if series is None:
+            raise HTTPException(404)
+        picks = []
+        for raw in form.getlist("pick"):
+            tx_id, _, doc_id = str(raw).rpartition(":")
+            if tx_id and doc_id.isdigit():
+                picks.append((tx_id, int(doc_id)))
+        count = seriesdocs.apply(session, series, picks)
+        msg = f"{count} Rechnung{'en' if count != 1 else ''} zugeordnet" if count else "Nichts angehakt"
+        return RedirectResponse(f"/recurring/invoices?key={quote(key)}&back={quote(back)}&msg={quote(msg)}", status_code=303)
 
     @app.post("/recurring/run")
     def recurring_run(session: Session = Depends(get_session)):

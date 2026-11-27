@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% from "macros.html" import txlinks %}
+{% block content %}
+<div class="head">
+  <h1>Buchungen zuordnen <small class="muted">· {{ c.label }}{{ ' (Abo)' if c.virtual }}</small></h1>
+  <a class="button small" href="{{ back }}">zurück</a>
+</div>
+{% if msg %}<div class="notice ok">{{ msg }}</div>{% endif %}
+<p class="muted">Such in Firefly nach den Abbuchungen, die zu diesem Vertrag gehören, hak sie an und ordne sie zu. Sie bilden dann die
+  Abbuchungen des Vertrags (bleiben auch bei neuen Erkennungsläufen so) und gelten auf der Belegseite als belegt. Danach kannst du
+  unter „Rechnungen zuordnen“ zu jeder Buchung die passende Rechnung übernehmen. Alles nur im Companion.</p>
+
+<form method="get" action="/contracts/{{ c.id }}/bookings" class="card filters cb-search">
+  <label>Text <input type="search" name="q" value="{{ q }}" placeholder="Empfänger oder Verwendungszweck"></label>
+  <label>Betrag <input name="amount" value="{{ amount }}" inputmode="decimal" placeholder="z.B. 12,99" size="8"></label>
+  <button class="small primary">Suchen</button>
+  <small class="muted">Alle Wörter müssen vorkommen · Betrag ±5 %</small>
+</form>
+
+{% if error %}<div class="notice">{{ error }}</div>
+{% elif suggest and rows %}<p><strong>Vorschlag:</strong> Buchungen an „{{ q }}“{% if amount %} über etwa {{ amount }} €{% endif %}. Passt etwas nicht, such oben selbst.</p>
+{% endif %}
+
+{% if rows %}
+<form method="post" action="/contracts/{{ c.id }}/bookings" id="cb-form">
+  <div class="actions bulk-bar">
+    <button class="primary" id="cb-go">Angehakte zuordnen (<span id="cb-n">0</span>)</button>
+    <button type="button" class="small" onclick="cbPick('free')" title="Alle, die noch keinem Vertrag gehören">alle freien</button>
+    <button type="button" class="small link" onclick="cbPick('none')">keine</button>
+  </div>
+  <table class="list compact"><tbody>
+    {% for r in rows %}{% set t = r.tx %}
+    <tr class="{{ 'muted' if r.mine }}">
+      <td>{% if r.mine %}✓{% else %}<input type="checkbox" name="tx" value="{{ r.data }}" data-free="{{ 0 if r.other else 1 }}" {{ 'checked' if suggest and not r.other and not r.excluded }} onchange="cbCount()" aria-label="anhaken">{% endif %}</td>
+      <td class="nowrap">{{ t.date|d }}</td><td class="nowrap">{{ t.amount|eur }}</td>
+      <td>{{ t.counterparty or 'unbekannt' }} <small class="muted">{{ t.description }}</small></td>
+      <td><small>{% if r.mine %}gehört schon dazu{% elif r.other %}<span class="soon">{{ r.other }}</span>{% elif r.excluded %}<span class="muted">ausgenommen</span>{% endif %}</small></td>
+      <td class="nowrap">{{ txlinks(t.group_id, t.date) }}</td></tr>
+    {% endfor %}
+  </tbody></table>
+</form>
+<script>
+function cbCount() {
+  const n = document.querySelectorAll('#cb-form input[name=tx]:checked').length;
+  document.getElementById('cb-n').textContent = n;
+  document.getElementById('cb-go').disabled = n === 0;
+}
+function cbPick(mode) {
+  document.querySelectorAll('#cb-form input[name=tx]').forEach((b) => { b.checked = mode === 'free' && b.dataset.free === '1'; });
+  cbCount();
+}
+cbCount();
+</script>
+{% elif not error %}
+<p class="empty">{% if q or amount %}Keine Buchungen gefunden.{% else %}Gib einen Suchtext oder Betrag ein.{% endif %}</p>
+{% endif %}
+{% endblock %}

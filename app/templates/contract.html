@@ -57,10 +57,11 @@
   <p><strong>{{ s.payee }}</strong> · {{ s.rhythm }} · zuletzt {{ s.last_date|d }} über {{ s.last_amount|eur }} · nächste um den {{ s.next_date|d }}</p>
   {{ bookings(s, back='/contracts/' ~ c.id, open=true) }}
   {% endfor %}
+  <p><a class="button small" href="/contracts/{{ c.id }}/bookings">Weitere Buchungen suchen und zuordnen</a></p>
 </section>
 {% else %}
 <p class="muted">Noch keine Abbuchungen erkannt. Unter <a href="/recurring">Regelmäßige Zahlungen</a> „Jetzt aus Firefly erkennen“ – der
-  „Empfänger in Firefly“ oben muss zum Namen in Firefly passen.</p>
+  „Empfänger in Firefly“ oben muss zum Namen in Firefly passen – oder <a href="/contracts/{{ c.id }}/bookings">Buchungen selbst suchen und zuordnen</a>.</p>
 {% endif %}
 
 <section class="card">

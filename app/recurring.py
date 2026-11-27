@@ -367,6 +367,71 @@ def split(session: Session, series_key: str, tx_ids: list[str]) -> str | None:
     return new_key
 
 
+def assign(session: Session, contract_id: int, txs: list[Transaction]) -> str:
+    """Von Hand gesuchte Buchungen einem Vertrag zuordnen: Sie kommen in die eigene Gruppe des Vertrags (wird angelegt,
+    falls es keine gibt) und werden aus anderen Serien herausgenommen. Die Gruppe übersteht neue Erkennungsläufe."""
+    data = _kv(session, KEY)
+    data = data if isinstance(data, list) else []
+    links = _kv(session, LINKS_KEY)
+    splits = _kv(session, SPLITS_KEY) or {}
+    key = next((k for k, cid in links.items() if cid == contract_id and k in splits), None)
+    if key is None:
+        payee = payee_of(txs[0].counterparty, txs[0].description) if txs else "von Hand"
+        key = f"{party_key(payee) or 'hand'}|eigene|{len(splits) + 1}|vertrag{contract_id}"
+        splits[key] = {"payee": payee, "tx_ids": [], "months": 1}
+        links[key] = contract_id
+    wanted = {t.journal_id for t in txs}
+    columns = ("tx_ids", "dates", "amounts", "group_ids", "descriptions")
+    for d in data:  # aus anderen Serien herausnehmen
+        if d.get("key") == key:
+            continue
+        rows = [dict(zip(columns, v)) for v in zip(*(d.get(c) or [None] * len(d.get("tx_ids") or []) for c in columns))]
+        if any(r["tx_ids"] in wanted for r in rows):
+            for c in columns:
+                d[c] = [r[c] for r in rows if r["tx_ids"] not in wanted]
+    for g_key, group in splits.items():
+        if g_key != key:
+            group["tx_ids"] = [t for t in group.get("tx_ids", []) if t not in wanted]
+    target = next((d for d in data if d.get("key") == key), None)
+    if target is None:
+        target = {"key": key, "payee": splits[key]["payee"], "months": 1, **{c: [] for c in columns}}
+        data.append(target)
+    have = set(target.get("tx_ids") or [])
+    rows = [dict(zip(columns, v)) for v in zip(*(target.get(c) or [None] * len(have) for c in columns))] if have else []
+    for t in txs:
+        if t.journal_id not in have:
+            rows.append({"tx_ids": t.journal_id, "dates": t.date.isoformat(), "amounts": t.amount, "group_ids": t.group_id,
+                         "descriptions": (t.description or "")[:120]})
+    rows.sort(key=lambda r: r["dates"])
+    for c in columns:
+        target[c] = [r[c] for r in rows]
+    months = _rhythm([date.fromisoformat(r["dates"]) for r in rows]) or target.get("months") or 1
+    target["months"] = months
+    splits[key].update({"tx_ids": [r["tx_ids"] for r in rows], "months": months})
+    items = excluded(session)
+    for t in wanted:
+        items.pop(t, None)
+    _kv_set(session, KEY, [d for d in data if d.get("tx_ids")])
+    _kv_set(session, SPLITS_KEY, splits)
+    _kv_set(session, LINKS_KEY, links)
+    _kv_set(session, EXCLUDED_KEY, items)
+    return key
+
+
+def search_bookings(transactions: list[Transaction], q: str = "", amount: float | None = None) -> list[Transaction]:
+    """Abbuchungen nach Text (alle Wörter in Empfänger/Verwendungszweck) und Betrag (±5 %) filtern, neueste zuerst."""
+    words = [w for w in (q or "").lower().split() if w]
+    hits = []
+    for t in transactions:
+        hay = f"{t.counterparty} {t.description} {t.text}".lower()
+        if words and not all(w in hay for w in words):
+            continue
+        if amount is not None and abs(t.amount - amount) > max(0.01, amount * 0.05):
+            continue
+        hits.append(t)
+    return sorted(hits, key=lambda t: t.date, reverse=True)
+
+
 def include(session: Session, tx_id: str) -> dict | None:
     """Ausgenommene Buchung wieder in ihre Serie aufnehmen."""
     items = excluded(session)
