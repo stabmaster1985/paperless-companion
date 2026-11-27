@@ -311,3 +311,37 @@ def test_remembered_search_assigns_new_bookings(db):
         recurring.run(s, new)
         mine = [x for x in recurring.stored(s) if x.contract_id == cid]
         assert len(mine) == 1 and sorted(mine[0].tx_ids) == ["k1", "k2", "k3", "k4", "k5"] and mine[0].months == 1
+
+
+def test_free_booking_search_creates_abo(client, settings, mock_api):
+    """Buchungen frei suchen (z.B. nach Firefly-Kategorie) und daraus ein neues Abo anlegen bzw. einem Vertrag zuordnen."""
+    import re
+
+    from tests.test_payments import FIREFLY
+
+    settings.firefly_url, settings.firefly_token = FIREFLY, "t"
+    mock_api.get(f"{FIREFLY}/api/v1/transactions").respond(json={"data": [
+        {"type": "transactions", "id": f"8{i}", "attributes": {"transactions": [{
+            "transaction_journal_id": f"98{i}", "type": "withdrawal", "date": f"2026-0{i + 1}-20T00:00:00+02:00",
+            "amount": "4.99", "description": f"Cloudspeicher {i}", "destination_name": "Bezahldienst Muster",
+            "category_name": "Software"}]}} for i in range(4)], "meta": {"pagination": {"total_pages": 1}}})
+    page = client.get("/bookings").text
+    assert "Buchungen suchen" in page and 'name="tx"' not in page  # öffnet ohne Suche
+    page = client.get("/bookings?q=&category=Software&years=1").text
+    assert page.count('name="tx"') == 4 and "als neues Abo anlegen" in page
+    values = [v.replace("&#34;", '"') for v in re.findall(r'name="tx" value="([^"]+)"', page)]
+    rule = re.search(r'name="rule" value="([^"]+)"', page).group(1).replace("&#34;", '"')
+    r = client.post("/bookings", data={"tx": values[:3], "op": "abo", "name": "Cloudspeicher", "remember": "1", "rule": rule})
+    assert "Abo „Cloudspeicher“ mit 3 Buchungen angelegt" in r.text
+    with session_scope() as s:
+        abo = s.query(Contract).filter_by(name="Cloudspeicher").one()
+        assert abo.document_id is None and abo.payment_amount == 4.99 and abo.booking_rule == {"category": "Software"}
+        series = [x for x in recurring.stored(s) if x.contract_id == abo.id]
+        assert len(series) == 1 and len(series[0].tx_ids) == 3
+        other = Contract(name="Fotodienst", provider="Fotodienst")
+        s.add(other)
+        s.flush()
+        other_id = other.id
+    r = client.post("/bookings", data={"tx": values[3:], "op": "contract", "contract_id": str(other_id)})
+    assert "1 Buchung gehört jetzt zu „Fotodienst“" in r.text
+    assert "Bitte einen Vertrag wählen" in client.post("/bookings", data={"tx": values[3:], "op": "contract"}).text

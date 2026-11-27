@@ -1397,8 +1397,10 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     def contract_back(c: Contract) -> str:
         return f"/documents/{c.document_id}#abbuchungen" if c.document_id else f"/contracts/{c.id}"
 
-    def booking_form(c: Contract) -> tuple[str, float | None, dict]:
+    def booking_form(c: Contract | None) -> tuple[str, float | None, dict]:
         """Vorbelegung: gemerkte Suche, sonst Empfänger und Betrag des Vertrags."""
+        if c is None:
+            return "", None, {k: "" for k in recurring.MARKS}
         rule = c.booking_rule or {}
         if rule:
             return rule.get("q") or "", rule.get("amount"), {k: rule.get(k) or "" for k in recurring.MARKS}
@@ -1444,12 +1446,24 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         c = session.get(Contract, contract_id)
         if c is None:
             raise HTTPException(404)
+        return booking_page(request, session, c, q, amount, {"category": category, "tag": tag, "bill": bill, "budget": budget},
+                            years, msg, fresh)
+
+    @app.get("/bookings", response_class=HTMLResponse)
+    def bookings_search(request: Request, q: str | None = None, amount: str = "", category: str = "", tag: str = "",
+                        bill: str = "", budget: str = "", years: str = "", msg: str = "", fresh: str = "",
+                        session: Session = Depends(get_session)):
+        """Buchungen frei suchen – angehakte als neues Abo anlegen oder einem vorhandenen Vertrag zuordnen."""
+        return booking_page(request, session, None, q, amount, {"category": category, "tag": tag, "bill": bill, "budget": budget},
+                            years, msg, fresh)
+
+    def booking_page(request: Request, session: Session, c: Contract | None, q: str | None, amount: str, marks: dict,
+                     years: str, msg: str, fresh: str):
         max_years = max(1, round(settings.recurring_lookback_days / 365))
         span = int(years) if years.isdigit() and 0 < int(years) <= max_years else max_years
         if fresh:
             firefly_cache.clear()
         searched = q is not None
-        marks = {"category": category, "tag": tag, "bill": bill, "budget": budget}
         if searched:
             try:
                 value = (float(amount.replace(".", "").replace(",", ".")) if "," in amount else float(amount)
@@ -1481,7 +1495,8 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         rows = []
         for t in hits:
             key, cid, payee = owner.get(t.journal_id, (None, None, None))
-            rows.append({"tx": t, "mine": cid == c.id, "other": labels.get(cid) if cid and cid != c.id else
+            mine = c is not None and cid == c.id
+            rows.append({"tx": t, "mine": mine, "other": labels.get(cid) if cid and not mine else
                          (f"erkannt bei „{payee}“" if key and not cid else ""), "excluded": t.journal_id in ex,
                          "data": json.dumps({"id": t.journal_id, "g": t.group_id, "d": t.date.isoformat(), "a": t.amount,
                                              "c": t.counterparty, "t": t.description})})
@@ -1491,9 +1506,59 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                      and all((preset[2][k] or "").strip().lower() == (marks[k] or "").strip().lower() for k in marks))
         return render(request, "contract_bookings.html", c=c, q=q, amount=shown, marks=marks, rows=rows, searched=searched,
                       prefilled=prefilled, loaded=(firefly_cache.get("withdrawals") or {}).get("loaded"),
-                      error=error, msg=msg, back=contract_back(c), mark_names=recurring.MARKS, choices=choices,
+                      error=error, msg=msg, back=contract_back(c) if c else "/recurring", mark_names=recurring.MARKS,
+                      choices=choices, all_contract_list=sorted(session.scalars(select(Contract)), key=lambda k: k.label.lower()),
                       years=span, year_options=[y for y in (1, 2, 3, 5, 10) if y < max_years] + [max_years],
                       rule={"q": q, "amount": value, **marks}, firefly_enabled=settings.firefly_enabled)
+
+    def picked_transactions(form) -> list:
+        txs = []
+        for raw in form.getlist("tx"):
+            try:
+                d = json.loads(str(raw))
+                txs.append(Transaction(journal_id=str(d["id"]), group_id=str(d.get("g") or ""), date=date.fromisoformat(d["d"]),
+                                       amount=float(d["a"]), counterparty=str(d.get("c") or ""), iban=None,
+                                       description=str(d.get("t") or ""), text=str(d.get("t") or "")))
+            except (ValueError, KeyError, TypeError):
+                continue
+        return txs
+
+    def rule_from_form(form) -> dict | None:
+        try:
+            rule = json.loads(str(form.get("rule") or "{}"))
+        except ValueError:
+            rule = {}
+        rule = {k: v for k, v in rule.items() if k in ("q", "amount", *recurring.MARKS) and v not in ("", None)}
+        return rule or None
+
+    @app.post("/bookings")
+    async def bookings_create(request: Request, session: Session = Depends(get_session)):
+        """Angehakte Buchungen als neues Abo anlegen oder einem vorhandenen Vertrag zuordnen."""
+        from statistics import median
+
+        form = await request.form()
+        txs = picked_transactions(form)
+        if not txs:
+            return RedirectResponse(f"/bookings?msg={quote('Keine Buchung angehakt')}", status_code=303)
+        if form.get("op") == "contract":
+            cid = str(form.get("contract_id") or "")
+            c = session.get(Contract, int(cid)) if cid.isdigit() else None
+            if c is None:
+                return RedirectResponse(f"/bookings?msg={quote('Bitte einen Vertrag wählen')}", status_code=303)
+            msg = f"{len(txs)} Buchung{'en gehören' if len(txs) != 1 else ' gehört'} jetzt zu „{c.label}“"
+        else:
+            payees = [recurring.payee_of(t.counterparty, t.description) for t in txs]
+            payee = max(set(payees), key=payees.count)
+            name = str(form.get("name") or "").strip() or payee
+            months = recurring._rhythm(sorted(t.date for t in txs)) or 1
+            c = new_abo(session, name, payee, round(median(t.amount for t in txs) / months, 2), min(t.date for t in txs), months)
+            msg = f"Abo „{name}“ mit {len(txs)} Buchung{'en' if len(txs) != 1 else ''} angelegt – Laufzeit und Kündigungsfrist prüfen"
+        if form.get("remember") == "1":
+            c.booking_rule = rule_from_form(form)
+        recurring.assign(session, c.id, txs)
+        receipts.sync_payments(session)
+        base, _, frag = contract_back(c).partition("#")
+        return RedirectResponse(f"{base}?msg={quote(msg)}{'#' + frag if frag else ''}", status_code=303)
 
     @app.post("/contracts/{contract_id}/bookings")
     async def contract_bookings_assign(request: Request, contract_id: int, session: Session = Depends(get_session)):
@@ -1504,30 +1569,17 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         if form.get("op") == "forget":
             c.booking_rule = None
             return RedirectResponse(f"/contracts/{c.id}/bookings?msg={quote('Gemerkte Suche entfernt')}", status_code=303)
-        txs = []
-        for raw in form.getlist("tx"):
-            try:
-                d = json.loads(str(raw))
-                txs.append(Transaction(journal_id=str(d["id"]), group_id=str(d.get("g") or ""), date=date.fromisoformat(d["d"]),
-                                       amount=float(d["a"]), counterparty=str(d.get("c") or ""), iban=None,
-                                       description=str(d.get("t") or ""), text=str(d.get("t") or "")))
-            except (ValueError, KeyError, TypeError):
-                continue
+        txs = picked_transactions(form)
         remember = form.get("remember") == "1"
         if remember:
-            try:
-                rule = json.loads(str(form.get("rule") or "{}"))
-            except ValueError:
-                rule = {}
-            rule = {k: v for k, v in rule.items() if k in ("q", "amount", *recurring.MARKS) and v not in ("", None)}
-            c.booking_rule = rule or None
+            c.booking_rule = rule_from_form(form)
         if not txs and not remember:
             msg = "Keine Buchung angehakt"
             return RedirectResponse(f"/contracts/{c.id}/bookings?msg={quote(msg)}", status_code=303)
         if txs:
             recurring.assign(session, c.id, txs)
             receipts.sync_payments(session)
-        parts = [f"{len(txs)} Buchung{'en' if len(txs) != 1 else ''} gehören jetzt zu „{c.label}“"] if txs else []
+        parts = [f"{len(txs)} Buchung{'en gehören' if len(txs) != 1 else ' gehört'} jetzt zu „{c.label}“"] if txs else []
         if remember:
             parts.append("Suche gemerkt – neue passende Buchungen werden beim nächsten Firefly-Abgleich automatisch zugeordnet"
                          if c.booking_rule else "Leere Suche nicht gemerkt")

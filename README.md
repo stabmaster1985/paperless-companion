@@ -114,6 +114,12 @@ Bezahldienst). Mit „diese Suche merken“ kommen neue passende Buchungen beim 
 
 ![Buchungen zuordnen](docs/screenshots/buchungen-zuordnen.png)
 
+**Buchungen suchen** – unter „Regelmäßige Zahlungen → Buchungen suchen“ (oder bei den Verträgen „aus Buchungen anlegen“):
+Firefly frei durchsuchen, passende Buchungen anhaken und daraus ein neues Abo anlegen (Monatsbeitrag und Rhythmus aus den
+Buchungen) oder sie einem vorhandenen Vertrag zuordnen.
+
+![Buchungen suchen](docs/screenshots/buchungen-suchen.png)
+
 **Verlauf** – was du zuletzt bearbeitet hast, wo das Dokument jetzt steht (z.B. bezahlt, wartet auf Übertragung)
 und auf welcher Seite du danach gelandet bist; je Dokument auch auf der Dokumentseite.
 

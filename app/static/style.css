@@ -934,3 +934,5 @@ tr.muted-row td { opacity: .65; }
 .cb-mark { margin-left: .25rem; }
 .cb-search label { display: flex; flex-direction: column; }
 .cb-search > button { align-self: flex-end; }
+.cb-create { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.cb-create input, .cb-create select { width: auto; margin: 0; }

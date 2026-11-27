@@ -319,6 +319,10 @@ def shoot(base: str) -> None:
         p.goto(base + p.locator('a:has-text("Hörbuchclub")').first.get_attribute("href") + "/bookings?q=&bill=H%C3%B6rbuchclub")
         p.wait_for_timeout(300)
         p.screenshot(path=OUT / "buchungen-zuordnen.png")
+        p.goto(base + "/bookings?q=&category=Medien&years=1")
+        p.click("text=alle freien")
+        p.wait_for_timeout(300)
+        p.screenshot(path=OUT / "buchungen-suchen.png")
         p.close()
 
         p = page(390, 844)

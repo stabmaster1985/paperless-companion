@@ -2,15 +2,18 @@
 {% from "macros.html" import txlinks %}
 {% block content %}
 <div class="head">
-  <h1>Buchungen zuordnen <small class="muted">· {{ c.label }}{{ ' (Abo)' if c.virtual }}</small></h1>
+  <h1>{% if c %}Buchungen zuordnen <small class="muted">· {{ c.label }}{{ ' (Abo)' if c.virtual }}</small>{% else %}Buchungen suchen{% endif %}</h1>
   <a class="button small" href="{{ back }}">zurück</a>
 </div>
 {% if msg %}<div class="notice ok">{{ msg }}</div>{% endif %}
-<p class="muted">Such in Firefly nach den Abbuchungen, die zu diesem Vertrag gehören, hak sie an und ordne sie zu. Sie bilden dann die
+{% if c %}<p class="muted">Such in Firefly nach den Abbuchungen, die zu diesem Vertrag gehören, hak sie an und ordne sie zu. Sie bilden dann die
   Abbuchungen des Vertrags (bleiben auch bei neuen Erkennungsläufen so) und gelten auf der Belegseite als belegt. Danach kannst du
   unter „Rechnungen zuordnen“ zu jeder Buchung die passende Rechnung übernehmen. Alles nur im Companion.</p>
+{% else %}<p class="muted">Such in Firefly nach Abbuchungen – nach Text, Betrag oder Firefly-Merkmalen wie Kategorie und Firefly-Abo –,
+  hak die passenden an und lege daraus ein <strong>neues Abo</strong> an oder ordne sie einem <strong>vorhandenen Vertrag</strong> zu.
+  Monatsbeitrag und Rhythmus werden aus den Buchungen übernommen. Alles nur im Companion.</p>{% endif %}
 
-{% if c.booking_rule %}
+{% if c and c.booking_rule %}
 <div class="card cb-rule">
   <strong>Gemerkte Suche:</strong>
   {% set r = c.booking_rule %}{% for k, label in mark_names.items() if r.get(k) %}<span class="pill">{{ label }}: {{ r[k] }}</span> {% endfor %}
@@ -20,7 +23,7 @@
 </div>
 {% endif %}
 
-<form method="get" action="/contracts/{{ c.id }}/bookings" class="card filters cb-search">
+<form method="get" action="{{ '/contracts/' ~ c.id ~ '/bookings' if c else '/bookings' }}" class="card filters cb-search">
   <label>Text <input type="search" name="q" value="{{ q }}" placeholder="Empfänger, Verwendungszweck, Notiz"></label>
   <label>Betrag <input name="amount" value="{{ amount }}" inputmode="decimal" placeholder="z.B. 12,99" size="8"></label>
   {% for k, label in mark_names.items() if choices[k] or marks[k] %}
@@ -36,18 +39,29 @@
 </form>
 
 {% if error %}<div class="notice">{{ error }}</div>
-{% elif not searched %}<p class="muted">Vorbelegt mit {% if c.booking_rule %}deiner gemerkten Suche{% else %}Empfänger und Betrag des Vertrags{% endif %} –
+{% elif not searched and c %}<p class="muted">Vorbelegt mit {% if c.booking_rule %}deiner gemerkten Suche{% else %}Empfänger und Betrag des Vertrags{% endif %} –
   Kriterien anpassen (z.B. Kategorie oder Firefly-Abo eintragen, Zeitraum verkürzen) und auf „Suchen“ klicken.</p>
-{% elif prefilled and rows %}<p><strong>Vorschlag:</strong> {% if c.booking_rule %}Buchungen zur gemerkten Suche{% else %}Buchungen an „{{ q }}“{% if amount %} über etwa {{ amount }} €{% endif %}{% endif %} – die freien sind angehakt.</p>
+{% elif c and prefilled and rows %}<p><strong>Vorschlag:</strong> {% if c.booking_rule %}Buchungen zur gemerkten Suche{% else %}Buchungen an „{{ q }}“{% if amount %} über etwa {{ amount }} €{% endif %}{% endif %} – die freien sind angehakt.</p>
 {% endif %}
 
 {% if rows %}
-<form method="post" action="/contracts/{{ c.id }}/bookings" id="cb-form">
+<form method="post" action="{{ '/contracts/' ~ c.id ~ '/bookings' if c else '/bookings' }}" id="cb-form">
+  {% if not c %}
+  <div class="actions bulk-bar cb-create">
+    <span>Angehakte (<span id="cb-n">0</span>)</span>
+    <input name="name" value="{{ marks.bill or q or marks.category or marks.tag }}" placeholder="Name des Abos" aria-label="Name des neuen Abos" size="22">
+    <button class="primary cb-act" name="op" value="abo">als neues Abo anlegen</button>
+    <span class="muted">oder</span>
+    <select name="contract_id" aria-label="Vertrag"><option value="">Vertrag wählen …</option>
+      {% for k in all_contract_list %}<option value="{{ k.id }}">{{ k.label }}{{ ' (Abo)' if k.virtual }}</option>{% endfor %}</select>
+    <button class="small cb-act" name="op" value="contract">diesem Vertrag zuordnen</button>
+  </div>
+  {% endif %}
   <div class="actions bulk-bar">
-    <button class="primary" id="cb-go">Angehakte zuordnen (<span id="cb-n">0</span>)</button>
+    {% if c %}<button class="primary cb-act" id="cb-go">Angehakte zuordnen (<span id="cb-n">0</span>)</button>{% endif %}
     <button type="button" class="small" onclick="cbPick('free')" title="Alle, die noch keinem Vertrag gehören">alle freien</button>
     <button type="button" class="small link" onclick="cbPick('none')">keine</button>
-    <label class="cb-remember" title="Beim Firefly-Abgleich kommen neue Buchungen, die zu dieser Suche passen, automatisch zu diesem Vertrag">
+    <label class="cb-remember" title="Beim Firefly-Abgleich kommen neue Buchungen, die zu dieser Suche passen, automatisch zu {{ 'diesem Vertrag' if c else 'dem Abo bzw. Vertrag' }}">
       <input type="checkbox" name="remember" value="1" onchange="cbCount()"> diese Suche merken (neue Buchungen automatisch zuordnen)</label>
     <input type="hidden" name="rule" value="{{ rule|tojson|forceescape }}">
   </div>
@@ -67,7 +81,8 @@
 function cbCount() {
   const n = document.querySelectorAll('#cb-form input[name=tx]:checked').length;
   document.getElementById('cb-n').textContent = n;
-  document.getElementById('cb-go').disabled = n === 0 && !document.querySelector('#cb-form input[name=remember]:checked');
+  const remember = {{ 'true' if c else 'false' }} && document.querySelector('#cb-form input[name=remember]:checked');
+  document.querySelectorAll('#cb-form .cb-act').forEach((b) => { b.disabled = n === 0 && !remember; });
 }
 function cbPick(mode) {
   document.querySelectorAll('#cb-form input[name=tx]').forEach((b) => { b.checked = mode === 'free' && b.dataset.free === '1'; });
