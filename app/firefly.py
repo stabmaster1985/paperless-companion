@@ -1,7 +1,7 @@
 """Minimaler Client für die Firefly-III-API (nur Lesen von Buchungen)."""
 
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 
 import httpx
@@ -21,6 +21,19 @@ class Transaction:
     iban: str | None
     description: str
     text: str  # Beschreibung + Notizen + Referenzen für die Suche nach Rechnungsnummern
+    category: str = ""  # Merkmale aus Firefly, um Buchungen eines Vertrags wiederzuerkennen
+    tags: list[str] = field(default_factory=list)
+    bill: str = ""  # Firefly-„Abo“ (Bill / Dauerauftrag-Erkennung in Firefly)
+    budget: str = ""
+
+    @property
+    def marks(self) -> list[tuple[str, str]]:
+        """Firefly-Merkmale als (Art, Wert) für Anzeige und Regeln."""
+        out = [("category", self.category)] if self.category else []
+        out += [("tag", t) for t in self.tags]
+        out += [("bill", self.bill)] if self.bill else []
+        out += [("budget", self.budget)] if self.budget else []
+        return out
 
 
 class FireflyClient:
@@ -96,4 +109,8 @@ def _parse(group_id: str, split: dict, incoming: bool = False) -> Transaction:
         iban=(split.get("source_iban" if incoming else "destination_iban") or "").replace(" ", "").upper() or None,
         description=split.get("description") or "",
         text=" ".join(text_parts),
+        category=split.get("category_name") or "",
+        tags=[str(t) for t in (split.get("tags") or []) if t],
+        bill=split.get("bill_name") or split.get("subscription_name") or "",
+        budget=split.get("budget_name") or "",
     )

@@ -120,6 +120,9 @@ class Contract(Base):
     cancel_effective: Mapped[date | None] = mapped_column(Date)
     cancellation_doc_id: Mapped[int | None] = mapped_column(Integer)
     notes: Mapped[str | None] = mapped_column(Text)
+    # gemerkte Suche: neue Firefly-Buchungen mit diesen Merkmalen gehören automatisch zum Vertrag
+    # {"q": ..., "amount": ..., "category": ..., "tag": ..., "bill": ..., "budget": ...}
+    booking_rule: Mapped[dict | None] = mapped_column(JSON)
 
     document: Mapped[Document | None] = relationship(back_populates="contract")
 

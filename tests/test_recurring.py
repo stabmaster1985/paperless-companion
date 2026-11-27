@@ -244,7 +244,8 @@ def test_contract_booking_search_page(client, settings, mock_api):
     mock_api.get(f"{FIREFLY}/api/v1/transactions").respond(json={"data": [
         {"type": "transactions", "id": f"7{i}", "attributes": {"transactions": [{
             "transaction_journal_id": f"97{i}", "type": "withdrawal", "date": f"2026-0{i + 1}-15T00:00:00+02:00",
-            "amount": "9.99", "description": "Hörbuchclub Monatsbeitrag", "destination_name": "PayPal Europe"}]}}
+            "amount": "9.99", "description": "Hörbuchclub Monatsbeitrag", "destination_name": "PayPal Europe",
+            "category_name": "Medien", "tags": ["Hörbuch"], "bill_name": "Hörbuchclub"}]}}
         for i in range(3)], "meta": {"pagination": {"total_pages": 1}}})
     with session_scope() as s:
         abo = Contract(name="Hörbuchclub", provider="Hörbuchclub", payee="Hörbuchclub")
@@ -262,3 +263,40 @@ def test_contract_booking_search_page(client, settings, mock_api):
     with session_scope() as s:
         key = next(x.key for x in recurring.stored(s) if x.contract_id == cid)
     assert "keine passende Rechnung gefunden" in client.get(f"/recurring/invoices?key={key}").text
+    # nach Firefly-Merkmal suchen und die Suche merken
+    page = client.get(f"/contracts/{cid}/bookings?q=&bill=hörbuchclub").text
+    assert page.count("gehört schon dazu") == 3 and 'list="cb-category"' in page and ">Medien<" in page
+    assert client.get(f"/contracts/{cid}/bookings?q=&category=Garten").text.count('name="tx"') == 0
+    rule = re.search(r'name="rule" value="([^"]+)"', page).group(1).replace("&#34;", '"')
+    r = client.post(f"/contracts/{cid}/bookings", data={"remember": "1", "rule": rule})
+    assert "Suche gemerkt" in r.text
+    with session_scope() as s:
+        assert s.get(Contract, cid).booking_rule == {"bill": "hörbuchclub"}
+    assert "Gemerkte Suche:" in client.get(f"/contracts/{cid}/bookings").text
+    client.post(f"/contracts/{cid}/bookings", data={"op": "forget"})
+    with session_scope() as s:
+        assert s.get(Contract, cid).booking_rule is None
+
+
+def test_remembered_search_assigns_new_bookings(db):
+    """Gemerkte Suche (Firefly-Kategorie) am Vertrag: neue Buchungen kommen beim nächsten Lauf automatisch dazu,
+    herausgenommene bleiben draußen."""
+    def booking(i, day, cat):
+        return Transaction(journal_id=f"k{i}", group_id=f"gk{i}", date=day, amount=15.0, counterparty="Bezahldienst Muster",
+                           iban=None, description=f"Bestellung {i}", text="", category=cat)
+
+    old = [booking(i, date(2026, 1, 5) + relativedelta(months=i), "Vereinsbeitrag") for i in range(4)]
+    with db() as s:
+        verein = Contract(name="Sportverein", provider="Sportverein", booking_rule={"category": "vereinsbeitrag"})
+        s.add(verein)
+        s.flush()
+        cid = verein.id
+        recurring.run(s, [*old, booking(99, date(2026, 3, 9), "Haushalt")])
+        mine = [x for x in recurring.stored(s) if x.contract_id == cid]
+        assert len(mine) == 1 and sorted(mine[0].tx_ids) == ["k0", "k1", "k2", "k3"]
+        recurring.exclude_many(s, mine[0].key, ["k0"])
+    new = [*old, booking(4, date(2026, 5, 5), "Vereinsbeitrag"), booking(5, date(2026, 6, 5), "Vereinsbeitrag")]
+    with db() as s:
+        recurring.run(s, new)
+        mine = [x for x in recurring.stored(s) if x.contract_id == cid]
+        assert len(mine) == 1 and sorted(mine[0].tx_ids) == ["k1", "k2", "k3", "k4", "k5"] and mine[0].months == 1

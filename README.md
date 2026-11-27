@@ -108,8 +108,9 @@ gesammelt vor. Für ein Abo mit monatlichen Rechnungen braucht es so keinen Vert
 ![Rechnungen zu einer regelmäßigen Zahlung](docs/screenshots/rechnungen-zur-serie.png)
 
 **Buchungen zuordnen** – am Vertrag bzw. Abo „Weitere Buchungen suchen und zuordnen“: Firefly nach Text und Betrag
-durchsuchen (vorgeschlagen werden Buchungen an den Empfänger des Vertrags), anhaken, zuordnen – auch wenn sie über einen
-anderen Empfänger laufen (z.B. einen Bezahldienst).
+durchsuchen – auch nach den Firefly-Merkmalen Kategorie, Tag, Firefly-Abo (Bill) und Budget (vorgeschlagen werden
+Buchungen an den Empfänger des Vertrags), anhaken, zuordnen – auch wenn sie über einen anderen Empfänger laufen (z.B. einen
+Bezahldienst). Mit „diese Suche merken“ kommen neue passende Buchungen beim Firefly-Abgleich automatisch zum Vertrag.
 
 ![Buchungen zuordnen](docs/screenshots/buchungen-zuordnen.png)
 

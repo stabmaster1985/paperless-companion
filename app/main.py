@@ -1397,31 +1397,42 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     def contract_back(c: Contract) -> str:
         return f"/documents/{c.document_id}#abbuchungen" if c.document_id else f"/contracts/{c.id}"
 
+    def booking_form(c: Contract, q: str | None, amount: str, marks: dict) -> tuple[bool, str, float | None, dict]:
+        """Suchfelder: ohne eigene Suche die gemerkte Regel bzw. Empfänger und Betrag des Vertrags."""
+        if q is None and not any(marks.values()):
+            rule = c.booking_rule or {}
+            if rule:
+                value = rule.get("amount")
+                return True, rule.get("q") or "", value, {k: rule.get(k) or "" for k in recurring.MARKS}
+            return True, c.payee or c.provider or c.name or "", c.payment_amount, {k: "" for k in recurring.MARKS}
+        try:
+            value = float(amount.replace(".", "").replace(",", ".")) if "," in amount else float(amount) if amount.strip() else None
+        except ValueError:
+            value = None
+        return False, q or "", value, marks
+
     @app.get("/contracts/{contract_id}/bookings", response_class=HTMLResponse)
-    def contract_bookings(request: Request, contract_id: int, q: str | None = None, amount: str = "", msg: str = "",
+    def contract_bookings(request: Request, contract_id: int, q: str | None = None, amount: str = "", category: str = "",
+                          tag: str = "", bill: str = "", budget: str = "", msg: str = "",
                           session: Session = Depends(get_session)):
-        """Buchungen in Firefly suchen und einem Vertrag/Abo zuordnen. Ohne eigene Suche schlägt der Companion
-        Buchungen an den Empfänger des Vertrags vor (über den Betrag des Vertrags, falls eingetragen)."""
+        """Buchungen in Firefly suchen und einem Vertrag/Abo zuordnen – nach Text, Betrag und Firefly-Merkmalen
+        (Kategorie, Tag, Firefly-Abo, Budget). Ohne eigene Suche: gemerkte Regel bzw. Empfänger und Betrag des Vertrags."""
         c = session.get(Contract, contract_id)
         if c is None:
             raise HTTPException(404)
-        suggest = q is None
-        if suggest:
-            q = c.payee or c.provider or c.name or ""
-            value = c.payment_amount
-        else:
-            try:
-                value = float(amount.replace(".", "").replace(",", ".")) if "," in amount else float(amount) if amount.strip() else None
-            except ValueError:
-                value = None
-        hits, error = [], ""
+        suggest, q, value, marks = booking_form(c, q, amount, {"category": category, "tag": tag, "bill": bill, "budget": budget})
+        hits, error, choices = [], "", {k: set() for k in recurring.MARKS}
         client = make_firefly(settings)
         if client is None:
             error = "Firefly III ist nicht eingerichtet"
-        elif q or value is not None:
+        else:
             try:
                 history = list(client.withdrawals(today() - timedelta(days=settings.recurring_lookback_days), today()))
-                hits = recurring.search_bookings(history, q, value)[:200]
+                for t in history:
+                    for k, v in t.marks:
+                        choices[k].add(v)
+                if q or value is not None or any(v.strip() for v in marks.values()):
+                    hits = recurring.search_bookings(history, q, value, marks)[:300]
             except FireflyError as exc:
                 error = f"Firefly nicht erreichbar: {exc}"
             finally:
@@ -1439,9 +1450,11 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                          (f"erkannt bei „{payee}“" if key and not cid else ""), "excluded": t.journal_id in ex,
                          "data": json.dumps({"id": t.journal_id, "g": t.group_id, "d": t.date.isoformat(), "a": t.amount,
                                              "c": t.counterparty, "t": t.description})})
-        return render(request, "contract_bookings.html", c=c, q=q, amount=amount if not suggest else
-                      (f"{value:.2f}".replace(".", ",") if value else ""), rows=rows, suggest=suggest, error=error, msg=msg,
-                      back=contract_back(c), firefly_enabled=settings.firefly_enabled)
+        shown = f"{value:.2f}".replace(".", ",") if value is not None else ""
+        return render(request, "contract_bookings.html", c=c, q=q, amount=shown, marks=marks, rows=rows, suggest=suggest,
+                      error=error, msg=msg, back=contract_back(c), mark_names=recurring.MARKS,
+                      choices={k: sorted(v, key=str.lower) for k, v in choices.items()},
+                      rule={"q": q, "amount": value, **marks}, firefly_enabled=settings.firefly_enabled)
 
     @app.post("/contracts/{contract_id}/bookings")
     async def contract_bookings_assign(request: Request, contract_id: int, session: Session = Depends(get_session)):
@@ -1449,6 +1462,9 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         if c is None:
             raise HTTPException(404)
         form = await request.form()
+        if form.get("op") == "forget":
+            c.booking_rule = None
+            return RedirectResponse(f"/contracts/{c.id}/bookings?msg={quote('Gemerkte Suche entfernt')}", status_code=303)
         txs = []
         for raw in form.getlist("tx"):
             try:
@@ -1458,16 +1474,27 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                                        description=str(d.get("t") or ""), text=str(d.get("t") or "")))
             except (ValueError, KeyError, TypeError):
                 continue
-        if not txs:
+        remember = form.get("remember") == "1"
+        if remember:
+            try:
+                rule = json.loads(str(form.get("rule") or "{}"))
+            except ValueError:
+                rule = {}
+            rule = {k: v for k, v in rule.items() if k in ("q", "amount", *recurring.MARKS) and v not in ("", None)}
+            c.booking_rule = rule or None
+        if not txs and not remember:
             msg = "Keine Buchung angehakt"
             return RedirectResponse(f"/contracts/{c.id}/bookings?msg={quote(msg)}", status_code=303)
-        recurring.assign(session, c.id, txs)
-        receipts.sync_payments(session)
-        msg = f"{len(txs)} Buchung{'en' if len(txs) != 1 else ''} gehören jetzt zu „{c.label}“"
-        target = contract_back(c)
-        sep = "#" if "#" in target else ""
-        base, _, frag = target.partition("#")
-        return RedirectResponse(f"{base}?msg={quote(msg)}{sep}{frag}", status_code=303)
+        if txs:
+            recurring.assign(session, c.id, txs)
+            receipts.sync_payments(session)
+        parts = [f"{len(txs)} Buchung{'en' if len(txs) != 1 else ''} gehören jetzt zu „{c.label}“"] if txs else []
+        if remember:
+            parts.append("Suche gemerkt – neue passende Buchungen werden beim nächsten Firefly-Abgleich automatisch zugeordnet"
+                         if c.booking_rule else "Leere Suche nicht gemerkt")
+        msg = " · ".join(parts)
+        base, _, frag = contract_back(c).partition("#")
+        return RedirectResponse(f"{base}?msg={quote(msg)}{'#' + frag if frag else ''}", status_code=303)
 
     @app.get("/recurring/invoices", response_class=HTMLResponse)
     def recurring_invoices(request: Request, key: str = "", back: str = "", msg: str = "",

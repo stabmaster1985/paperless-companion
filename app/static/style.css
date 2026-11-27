@@ -928,3 +928,7 @@ tr.muted-row td { opacity: .65; }
 .error-reasons > summary { cursor: pointer; color: var(--bad, #b91c1c); }
 .rec-hide-bar { display: flex; flex-wrap: wrap; gap: .4rem .8rem; align-items: center; margin: .25rem 0 .5rem; }
 .rec-hide-pick { margin-right: .35rem; }
+.cb-rule { display: flex; gap: .4rem; align-items: center; flex-wrap: wrap; }
+.cb-remember { display: inline-flex; gap: .3rem; align-items: center; font-size: .9rem; margin-left: .5rem; white-space: nowrap; }
+.cb-remember input { width: auto; margin: 0; }
+.cb-mark { margin-left: .25rem; }

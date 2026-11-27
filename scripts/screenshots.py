@@ -70,10 +70,10 @@ def start_demo(data: Path, port: int) -> None:
     router = next(mock)
     start_demo.mock = mock  # Referenz halten, sonst endet der Nachbau beim Aufräumen des Generators
     router.get("http://firefly.test/api/v1/about").respond(json={"data": {"version": "6.2.0"}})
-    def booking(journal, day, amount, name, text):
+    def booking(journal, day, amount, name, text, **extra):
         return {"type": "transactions", "id": str(500 + journal), "attributes": {"transactions": [{
             "transaction_journal_id": str(900 + journal), "type": "withdrawal", "date": f"{day}T00:00:00+02:00",
-            "amount": str(amount), "description": text, "destination_name": name}]}}
+            "amount": str(amount), "description": text, "destination_name": name, **extra}]}}
 
     # Geldeingänge (Erstattungen) – vor der allgemeinen Route, damit „type=deposit“ hier landet
     router.get("http://firefly.test/api/v1/transactions", params={"type": "deposit"}).respond(json={"data": [
@@ -86,7 +86,8 @@ def start_demo(data: Path, port: int) -> None:
         booking(1, "2026-09-10", "78.00", "Stadtwerke Musterstadt", "Abschlag September"),
         booking(2, "2026-10-14", "79.50", "Stadtwerke Musterstadt", "Nachzahlung Abschlag"),
         booking(3, "2026-10-03", "78.00", "Fitnessstudio Muster", "Mitgliedsbeitrag Oktober"),
-        *[booking(10 + i, f"2026-{m:02d}-12", "9.95", "Bezahldienst Muster", f"Hörbuchclub Beitrag {m:02d}/2026")
+        *[booking(10 + i, f"2026-{m:02d}-12", "9.95", "Bezahldienst Muster", f"Hörbuchclub Beitrag {m:02d}/2026",
+                  category_name="Medien", bill_name="Hörbuchclub")
           for i, m in enumerate(range(6, 11))]],
         "meta": {"pagination": {"total": 9, "current_page": 1, "total_pages": 1}}})
     app = create_app(settings, start_worker=False)
@@ -315,7 +316,7 @@ def shoot(base: str) -> None:
         p.wait_for_timeout(300)
         p.screenshot(path=OUT / "rechnungen-zur-serie.png")
         p.goto(base + "/contracts")
-        p.goto(base + p.locator('a:has-text("Hörbuchclub")').first.get_attribute("href") + "/bookings")
+        p.goto(base + p.locator('a:has-text("Hörbuchclub")').first.get_attribute("href") + "/bookings?q=&bill=H%C3%B6rbuchclub")
         p.wait_for_timeout(300)
         p.screenshot(path=OUT / "buchungen-zuordnen.png")
         p.close()

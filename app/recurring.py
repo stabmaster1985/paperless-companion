@@ -166,7 +166,7 @@ def detect(transactions: list[Transaction], ignored: list[str] | None = None, ex
     in_split: dict[str, str] = {t: k for k, g in (splits or {}).items() for t in g.get("tx_ids", [])}
     grouped: dict[str, list[Transaction]] = {}
     for tx in transactions:
-        if tx.journal_id in in_split:
+        if tx.journal_id in in_split and not (excluded and tx.journal_id in excluded):
             grouped.setdefault(in_split[tx.journal_id], []).append(tx)
     for key, txs in grouped.items():
         found.append(_series_of(key, txs, (splits[key].get("months") or _rhythm(sorted(t.date for t in txs)) or 1)))
@@ -282,6 +282,7 @@ def _kv_set(session: Session, key: str, value) -> None:
 
 def run(session: Session, transactions: list[Transaction]) -> int:
     """Serien aus den Abbuchungen erkennen und speichern. Gibt die Anzahl zurück."""
+    apply_rules(session, transactions)
     series = evaluate(session, detect(transactions, ignored_counterparties(session), set(excluded(session)),
                                       _kv(session, SPLITS_KEY) or {}))
     _kv_set(session, KEY, [asdict(s) for s in series])
@@ -374,12 +375,7 @@ def assign(session: Session, contract_id: int, txs: list[Transaction]) -> str:
     data = data if isinstance(data, list) else []
     links = _kv(session, LINKS_KEY)
     splits = _kv(session, SPLITS_KEY) or {}
-    key = next((k for k, cid in links.items() if cid == contract_id and k in splits), None)
-    if key is None:
-        payee = payee_of(txs[0].counterparty, txs[0].description) if txs else "von Hand"
-        key = f"{party_key(payee) or 'hand'}|eigene|{len(splits) + 1}|vertrag{contract_id}"
-        splits[key] = {"payee": payee, "tx_ids": [], "months": 1}
-        links[key] = contract_id
+    key = _contract_group(splits, links, contract_id, txs)
     wanted = {t.journal_id for t in txs}
     columns = ("tx_ids", "dates", "amounts", "group_ids", "descriptions")
     for d in data:  # aus anderen Serien herausnehmen
@@ -418,18 +414,76 @@ def assign(session: Session, contract_id: int, txs: list[Transaction]) -> str:
     return key
 
 
-def search_bookings(transactions: list[Transaction], q: str = "", amount: float | None = None) -> list[Transaction]:
-    """Abbuchungen nach Text (alle Wörter in Empfänger/Verwendungszweck) und Betrag (±5 %) filtern, neueste zuerst."""
+def _contract_group(splits: dict, links: dict, contract_id: int, txs: list[Transaction]) -> str:
+    """Eigene Gruppe (Serie) eines Vertrags – wird angelegt, falls es keine gibt."""
+    key = next((k for k, cid in links.items() if cid == contract_id and k in splits), None)
+    if key is None:
+        payee = payee_of(txs[0].counterparty, txs[0].description) if txs else "von Hand"
+        key = f"{party_key(payee) or 'hand'}|eigene|{len(splits) + 1}|vertrag{contract_id}"
+        splits[key] = {"payee": payee, "tx_ids": [], "months": 1}
+        links[key] = contract_id
+    return key
+
+
+MARKS = {"category": "Kategorie", "tag": "Tag", "bill": "Firefly-Abo", "budget": "Budget"}
+
+
+def search_bookings(transactions: list[Transaction], q: str = "", amount: float | None = None,
+                    marks: dict | None = None) -> list[Transaction]:
+    """Abbuchungen nach Text (alle Wörter in Empfänger/Verwendungszweck/Notizen), Betrag (±5 %) und Firefly-Merkmalen
+    (Kategorie, Tag, Firefly-Abo, Budget – genau, ohne Groß/klein) filtern, neueste zuerst."""
     words = [w for w in (q or "").lower().split() if w]
+    wanted = {k: v.strip().lower() for k, v in (marks or {}).items() if k in MARKS and v and v.strip()}
     hits = []
     for t in transactions:
-        hay = f"{t.counterparty} {t.description} {t.text}".lower()
+        hay = f"{t.counterparty} {t.description} {t.text} {t.category} {' '.join(t.tags)} {t.bill}".lower()
         if words and not all(w in hay for w in words):
             continue
         if amount is not None and abs(t.amount - amount) > max(0.01, amount * 0.05):
             continue
+        have = {(k, v.lower()) for k, v in t.marks}
+        if any((k, v) not in have for k, v in wanted.items()):
+            continue
         hits.append(t)
     return sorted(hits, key=lambda t: t.date, reverse=True)
+
+
+def rule_matches(rule: dict | None, transactions: list[Transaction]) -> list[Transaction]:
+    """Buchungen zu einer gemerkten Suche. Ohne Merkmal, Text und Betrag passt nichts (keine leere Regel)."""
+    if not rule:
+        return []
+    marks = {k: rule.get(k) or "" for k in MARKS}
+    q, amount = rule.get("q") or "", rule.get("amount")
+    if not (q.strip() or amount is not None or any(v.strip() for v in marks.values())):
+        return []
+    return search_bookings(transactions, q, amount, marks)
+
+
+def apply_rules(session: Session, transactions: list[Transaction]) -> int:
+    """Gemerkte Suchen der Verträge: neue passende Buchungen kommen in die Gruppe des Vertrags (vor der Erkennung).
+    Von dir herausgenommene Buchungen und Buchungen in anderen eigenen Gruppen bleiben, wo sie sind."""
+    contracts = [c for c in session.scalars(select(Contract).where(Contract.booking_rule.is_not(None))) if c.booking_rule]
+    if not contracts:
+        return 0
+    links = _kv(session, LINKS_KEY)
+    splits = _kv(session, SPLITS_KEY) or {}
+    skip = set(excluded(session))
+    grouped = {t for g in splits.values() for t in g.get("tx_ids", [])}
+    added = 0
+    for c in contracts:
+        hits = [t for t in rule_matches(c.booking_rule, transactions) if t.journal_id not in skip and t.journal_id not in grouped]
+        if not hits:
+            continue
+        key = _contract_group(splits, links, c.id, hits)
+        group = splits[key]
+        group["tx_ids"] = [*group.get("tx_ids", []), *(t.journal_id for t in hits)]
+        grouped |= {t.journal_id for t in hits}
+        mine = sorted((t.date for t in transactions if t.journal_id in set(group["tx_ids"])))
+        group["months"] = _rhythm(mine) or group.get("months") or 1
+        added += len(hits)
+    _kv_set(session, SPLITS_KEY, splits)
+    _kv_set(session, LINKS_KEY, links)
+    return added
 
 
 def include(session: Session, tx_id: str) -> dict | None:

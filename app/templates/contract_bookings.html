@@ -10,15 +10,29 @@
   Abbuchungen des Vertrags (bleiben auch bei neuen Erkennungsläufen so) und gelten auf der Belegseite als belegt. Danach kannst du
   unter „Rechnungen zuordnen“ zu jeder Buchung die passende Rechnung übernehmen. Alles nur im Companion.</p>
 
+{% if c.booking_rule %}
+<div class="card cb-rule">
+  <strong>Gemerkte Suche:</strong>
+  {% set r = c.booking_rule %}{% for k, label in mark_names.items() if r.get(k) %}<span class="pill">{{ label }}: {{ r[k] }}</span> {% endfor %}
+  {% if r.q %}<span class="pill">Text: {{ r.q }}</span>{% endif %}{% if r.amount %}<span class="pill">Betrag: {{ r.amount|eur }}</span>{% endif %}
+  <small class="muted">– neue passende Buchungen kommen beim Firefly-Abgleich automatisch zu diesem Vertrag.</small>
+  <form method="post" action="/contracts/{{ c.id }}/bookings" class="inline"><button class="small link" name="op" value="forget">nicht mehr merken</button></form>
+</div>
+{% endif %}
+
 <form method="get" action="/contracts/{{ c.id }}/bookings" class="card filters cb-search">
-  <label>Text <input type="search" name="q" value="{{ q }}" placeholder="Empfänger oder Verwendungszweck"></label>
+  <label>Text <input type="search" name="q" value="{{ q }}" placeholder="Empfänger, Verwendungszweck, Notiz"></label>
   <label>Betrag <input name="amount" value="{{ amount }}" inputmode="decimal" placeholder="z.B. 12,99" size="8"></label>
+  {% for k, label in mark_names.items() if choices[k] or marks[k] %}
+  <label>{{ label }} <input name="{{ k }}" value="{{ marks[k] }}" list="cb-{{ k }}" size="14" placeholder="aus Firefly">
+    <datalist id="cb-{{ k }}">{% for v in choices[k] %}<option value="{{ v }}">{% endfor %}</datalist></label>
+  {% endfor %}
   <button class="small primary">Suchen</button>
-  <small class="muted">Alle Wörter müssen vorkommen · Betrag ±5 %</small>
+  <small class="muted">Alle Wörter müssen vorkommen · Betrag ±5 % · Kategorie, Tag, Firefly-Abo und Budget genau wie in Firefly</small>
 </form>
 
 {% if error %}<div class="notice">{{ error }}</div>
-{% elif suggest and rows %}<p><strong>Vorschlag:</strong> Buchungen an „{{ q }}“{% if amount %} über etwa {{ amount }} €{% endif %}. Passt etwas nicht, such oben selbst.</p>
+{% elif suggest and rows %}<p><strong>Vorschlag:</strong> {% if c.booking_rule %}Buchungen zur gemerkten Suche{% else %}Buchungen an „{{ q }}“{% if amount %} über etwa {{ amount }} €{% endif %}{% endif %}. Passt etwas nicht, such oben selbst.</p>
 {% endif %}
 
 {% if rows %}
@@ -27,13 +41,17 @@
     <button class="primary" id="cb-go">Angehakte zuordnen (<span id="cb-n">0</span>)</button>
     <button type="button" class="small" onclick="cbPick('free')" title="Alle, die noch keinem Vertrag gehören">alle freien</button>
     <button type="button" class="small link" onclick="cbPick('none')">keine</button>
+    <label class="cb-remember" title="Beim Firefly-Abgleich kommen neue Buchungen, die zu dieser Suche passen, automatisch zu diesem Vertrag">
+      <input type="checkbox" name="remember" value="1" onchange="cbCount()"> diese Suche merken (neue Buchungen automatisch zuordnen)</label>
+    <input type="hidden" name="rule" value="{{ rule|tojson|forceescape }}">
   </div>
   <table class="list compact"><tbody>
     {% for r in rows %}{% set t = r.tx %}
     <tr class="{{ 'muted' if r.mine }}">
       <td>{% if r.mine %}✓{% else %}<input type="checkbox" name="tx" value="{{ r.data }}" data-free="{{ 0 if r.other else 1 }}" {{ 'checked' if suggest and not r.other and not r.excluded }} onchange="cbCount()" aria-label="anhaken">{% endif %}</td>
       <td class="nowrap">{{ t.date|d }}</td><td class="nowrap">{{ t.amount|eur }}</td>
-      <td>{{ t.counterparty or 'unbekannt' }} <small class="muted">{{ t.description }}</small></td>
+      <td>{{ t.counterparty or 'unbekannt' }} <small class="muted">{{ t.description }}</small>
+        {% for k, v in t.marks %}<span class="pill cb-mark" title="{{ mark_names[k] }} in Firefly">{{ v }}</span>{% endfor %}</td>
       <td><small>{% if r.mine %}gehört schon dazu{% elif r.other %}<span class="soon">{{ r.other }}</span>{% elif r.excluded %}<span class="muted">ausgenommen</span>{% endif %}</small></td>
       <td class="nowrap">{{ txlinks(t.group_id, t.date) }}</td></tr>
     {% endfor %}
@@ -43,7 +61,7 @@
 function cbCount() {
   const n = document.querySelectorAll('#cb-form input[name=tx]:checked').length;
   document.getElementById('cb-n').textContent = n;
-  document.getElementById('cb-go').disabled = n === 0;
+  document.getElementById('cb-go').disabled = n === 0 && !document.querySelector('#cb-form input[name=remember]:checked');
 }
 function cbPick(mode) {
   document.querySelectorAll('#cb-form input[name=tx]').forEach((b) => { b.checked = mode === 'free' && b.dataset.free === '1'; });
