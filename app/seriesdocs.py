@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app import payments, receipts
 from app.firefly import Transaction
-from app.models import Document, ReceiptCheck
+from app.models import Document, PaymentMatch, ReceiptCheck
 from app.payments import _compact, _words
 from app.recurring import Series
 
@@ -31,18 +31,40 @@ def _name_fits(name: str, payee: str) -> bool:
     return bool(_words(name) & _words(payee)) or _compact(name) in _compact(payee) or _compact(payee) in _compact(name)
 
 
+def tx_documents(session: Session) -> dict[str, dict]:
+    """Welche Buchung gehört zu welchem Dokument – und wie fest? (tx_id -> {"doc_id", "state"})
+    state: "confirmed" (von dir bzw. bestätigt), "suggested" (Zahlungsabgleich schlägt nur vor), "inbox" (in der Inbox
+    vorbelegt, Dokument noch nicht bestätigt)."""
+    out: dict[str, dict] = {}
+    for m in session.scalars(select(PaymentMatch).where(PaymentMatch.state.in_(("accepted", "suggested")))):
+        if m.invoice is not None:
+            entry = {"doc_id": m.invoice.document_id, "state": "confirmed" if m.state == "accepted" else "suggested"}
+            if out.get(m.tx_id, {}).get("state") != "confirmed":
+                out[m.tx_id] = entry
+    for doc in session.scalars(select(Document).where(Document.review_state == "pending")):
+        if (p := (doc.suggestions or {}).get("_payment")) and p.get("tx_id"):
+            out.setdefault(p["tx_id"], {"doc_id": doc.id, "state": "inbox"})
+    for row in session.scalars(select(ReceiptCheck).where(ReceiptCheck.state == "linked", ReceiptCheck.document_id.is_not(None))):
+        if out.get(row.tx_id, {}).get("state") in (None, "suggested") and row.decided:
+            out[row.tx_id] = {"doc_id": row.document_id, "state": "confirmed"}
+        else:
+            out.setdefault(row.tx_id, {"doc_id": row.document_id, "state": "confirmed" if row.decided else "suggested"})
+    return out
+
+
 def pairs(session: Session, s: Series) -> list[dict]:
-    """Je Abbuchung (neueste zuerst): schon zugeordnetes Dokument oder der beste Vorschlag.
-    Jedes Dokument wird höchstens einer Buchung vorgeschlagen (beste Paarung zuerst)."""
-    used = payments.used_elsewhere(session)
-    taken_docs = set(used.values())
+    """Je Abbuchung (neueste zuerst): zugeordnetes Dokument (bestätigt), ein noch zu bestätigender Vorschlag des
+    Zahlungsabgleichs oder der beste eigene Vorschlag. Jedes Dokument wird höchstens einer Buchung vorgeschlagen."""
+    known = tx_documents(session)
+    fixed = {t: e for t, e in known.items() if e["state"] in ("confirmed", "inbox")}
+    taken_docs = {e["doc_id"] for e in known.values()}
     txs = transactions_of(s)
     pool = [d for d in session.scalars(select(Document).where(Document.kind.in_(("invoice", "receipt", "other"))))
             if d.id not in taken_docs
             and _name_fits((d.invoice.issuer if d.invoice and d.invoice.issuer else None) or d.correspondent or "", s.payee)]
     scored = []
     for tx in txs:
-        if tx.journal_id in used:
+        if tx.journal_id in known:
             continue
         for doc in pool:
             result = receipts.score_document(tx, doc, set(), set())
@@ -59,13 +81,60 @@ def pairs(session: Session, s: Series) -> list[dict]:
     rows = []
     for tx in sorted(txs, key=lambda t: t.date, reverse=True):
         row = {"tx": tx, "doc": None, "state": "none", "reason": "", "sure": False}
-        if tx.journal_id in used:
-            row.update(state="done", doc=session.get(Document, used[tx.journal_id]))
+        if tx.journal_id in fixed:
+            entry = fixed[tx.journal_id]
+            row.update(state="done", doc=session.get(Document, entry["doc_id"]),
+                       reason="in der Inbox vorbelegt" if entry["state"] == "inbox" else "")
+        elif tx.journal_id in known:  # nur vorgeschlagen (Zahlungsabgleich) – bestätigen
+            row.update(state="suggest", doc=session.get(Document, known[tx.journal_id]["doc_id"]),
+                       reason="vom Zahlungsabgleich vorgeschlagen", sure=True)
         elif tx.journal_id in chosen:
             points, doc, reasons = chosen[tx.journal_id]
             row.update(state="suggest", doc=doc, reason=", ".join(reasons), sure="gleicher Betrag" in reasons)
         rows.append(row)
     return rows
+
+
+def assign_docs(session: Session, s: Series, docs: list[Document]) -> list[dict]:
+    """Gesuchte Dokumente auf die noch freien Buchungen der Serie verteilen: gleicher Betrag zuerst, dann die
+    zeitlich nächste Buchung (Rechnung kurz vor oder nach der Abbuchung). Ergebnis je Dokument, mit Buchung oder ohne."""
+    known = tx_documents(session)
+    free = [t for t in transactions_of(s) if known.get(t.journal_id, {}).get("state") not in ("confirmed", "inbox")]
+    taken_docs = {e["doc_id"]: t for t, e in known.items() if e["state"] in ("confirmed", "inbox")}
+    options = []
+    for doc in docs:
+        if doc.id in taken_docs:
+            continue
+        inv = doc.invoice
+        ref = (inv.invoice_date if inv else None) or doc.created or (inv.due_date if inv else None)
+        amount = receipts._doc_amount(doc)
+        for tx in free:
+            days = abs((tx.date - ref).days) if ref else 60
+            if days > 75:
+                continue
+            same = amount is not None and abs(amount - tx.amount) <= 0.01
+            if amount is not None and not same and abs(amount - tx.amount) > max(1.0, amount * 0.05):
+                continue
+            options.append((0 if same else 1, days, doc.id, tx))
+    options.sort(key=lambda o: o[:2])
+    picked: dict[int, tuple] = {}
+    used_tx: set[str] = set()
+    for rank, days, doc_id, tx in options:
+        if doc_id in picked or tx.journal_id in used_tx:
+            continue
+        picked[doc_id] = (tx, rank, days)
+        used_tx.add(tx.journal_id)
+    out = []
+    for doc in docs:
+        if doc.id in taken_docs:
+            out.append({"doc": doc, "tx": None, "note": "schon einer Buchung zugeordnet"})
+        elif doc.id in picked:
+            tx, rank, days = picked[doc.id]
+            out.append({"doc": doc, "tx": tx, "sure": rank == 0,
+                        "note": ("gleicher Betrag" if rank == 0 else "Betrag fast gleich") + f", {days} Tage Abstand"})
+        else:
+            out.append({"doc": doc, "tx": None, "note": "keine freie Buchung passt (Betrag oder Datum)"})
+    return out
 
 
 def count_open(session: Session, s: Series) -> int:
@@ -76,10 +145,14 @@ def apply(session: Session, s: Series, picks: list[tuple[str, int]]) -> int:
     """Angehakte Paare übernehmen: Rechnung gilt als bezahlt (bzw. in der Inbox vorbelegt), die Buchung als belegt."""
     txs = {t.journal_id: t for t in transactions_of(s)}
     done = 0
+    seen_tx: set[str] = set()
+    seen_doc: set[int] = set()
     for tx_id, doc_id in picks:
         tx, doc = txs.get(tx_id), session.get(Document, doc_id)
-        if tx is None or doc is None:
-            continue
+        if tx is None or doc is None or tx_id in seen_tx or doc_id in seen_doc:
+            continue  # je Buchung und je Dokument nur eine Zuordnung (die erste angehakte zählt)
+        seen_tx.add(tx_id)
+        seen_doc.add(doc_id)
         if doc.kind == "invoice" and (doc.invoice is not None or doc.review_state == "pending"):
             payments.choose(session, doc, tx, take=())
         row = session.scalar(select(ReceiptCheck).where(ReceiptCheck.tx_id == tx_id))

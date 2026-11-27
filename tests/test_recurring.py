@@ -381,3 +381,51 @@ def test_abo_document_search_and_manual_invoice(client):
         assert s.get(Document, 971).invoice.status == "paid"
     r = client.post(f"/contracts/{cid}", data={"action": "attach", "doc_id": "970"})
     assert "das Abo ist jetzt ein Vertrag mit Dokument" in r.text
+
+
+def test_invoices_confirm_search_many_and_show_in_bookings(client):
+    """Vorschläge des Zahlungsabgleichs gelten erst nach Bestätigung; mehrere gesuchte Rechnungen werden auf die freien
+    Buchungen verteilt; zugeordnete Rechnungen stehen in der Abbuchungsliste."""
+    import re
+
+    from app import seriesdocs
+    from app.models import Invoice, PaymentMatch
+
+    txs = monthly("Cloudanbieter Wolke", 5.0, 4, start=date(2026, 5, 10))
+    with session_scope() as s:
+        for i, t in enumerate(txs):
+            d = Document(id=980 + i, title=f"Wolke Beleg {i}", correspondent="Abrechnungsdienst", kind="invoice", tags=[],
+                         review_state="confirmed", created=t.date)
+            d.invoice = Invoice(issuer="Abrechnungsdienst", amount=5.0, invoice_date=t.date - relativedelta(days=2))
+            s.add(d)
+        s.flush()
+        t0 = txs[0]
+        s.add(PaymentMatch(invoice_id=s.get(Document, 980).invoice.id, tx_id=t0.journal_id, tx_group_id=t0.group_id,
+                           tx_date=t0.date, amount=5.0, counterparty=t0.counterparty, description="", score=70,
+                           reasons="gleicher Betrag", state="suggested"))
+        abo = Contract(name="Wolke", provider="Wolke", payee="Cloudanbieter Wolke")
+        s.add(abo)
+        s.flush()
+        cid = abo.id
+        recurring.run(s, txs)
+        key = recurring.stored(s)[0].key
+        recurring.link_contract(s, key, cid)
+        rows = {r["tx"].journal_id: r for r in seriesdocs.pairs(s, recurring.stored(s)[0])}
+        assert rows[t0.journal_id]["state"] == "suggest" and "Zahlungsabgleich" in rows[t0.journal_id]["reason"]
+        assert sum(r["state"] == "none" for r in rows.values()) == 3  # anderer Absender: kein eigener Vorschlag
+    page = client.get(f"/recurring/invoices?key={key}").text
+    assert "Vorschläge zum Bestätigen" in page and "Rechnungen suchen und mehrere zuordnen" in page
+    assert "(Vorschlag – " in client.get(f"/contracts/{cid}").text  # in der Abbuchungsliste sichtbar, aber unbestätigt
+    hits = client.get(f"/recurring/invoice-pick?key={key}&q=wolke beleg").text
+    picks = re.findall(r'name="pick" class="si-hit" value="([^"]+)"', hits)
+    assert {p.split(":")[1] for p in picks} == {"980", "981", "982", "983"}  # der Vorschlag ist noch nicht bestätigt
+    assert f"{txs[0].journal_id}:980" in picks  # jede Rechnung an die zeitlich passende Buchung
+    suggestion = f"{t0.journal_id}:980"
+    r = client.post("/recurring/invoices", data={"key": key, "back": f"/contracts/{cid}", "pick": [*picks, suggestion]})
+    assert "4 Rechnungen zugeordnet" in r.text
+    with session_scope() as s:
+        assert all(s.get(Document, 980 + i).invoice.status == "paid" for i in range(4))
+        for i, t in enumerate(txs):
+            assert s.get(Document, 980 + i).invoice.paid_on == t.date  # jede Rechnung an ihre Buchung
+    page = client.get(f"/contracts/{cid}").text
+    assert page.count("Beleg: <a") == 4 and "4 mit Rechnung/Beleg" in page and "(Vorschlag – " not in page

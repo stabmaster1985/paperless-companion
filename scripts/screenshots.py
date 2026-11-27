@@ -315,8 +315,10 @@ def shoot(base: str) -> None:
         p.goto(base + "/recurring")
         href = p.locator('a[href*="recurring/invoices"][href*="zeitschrift"]').first.get_attribute("href")
         p.goto(base + href)
+        p.fill(".si-multi input[type=search]", "Zeitschrift")  # Suche nach mehreren Rechnungen zeigen
+        p.wait_for_selector(".si-multi .si-hit")
         p.wait_for_timeout(300)
-        p.screenshot(path=OUT / "rechnungen-zur-serie.png")
+        p.screenshot(path=OUT / "rechnungen-zur-serie.png", full_page=True)
         p.goto(base + "/contracts")
         p.goto(base + p.locator('a:has-text("Hörbuchclub")').first.get_attribute("href") + "/bookings?q=&bill=H%C3%B6rbuchclub")
         p.wait_for_timeout(300)

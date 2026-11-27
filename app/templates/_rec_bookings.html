@@ -1,9 +1,10 @@
 {% from "macros.html" import txlinks %}
 {# Abbuchungen einer regelmäßigen Zahlung – einzeln oder angehakt herausnehmen, ausgenommene wieder aufnehmen
    (Seite Regelmäßige Zahlungen, Vertrag, Abo). Ein Formular für die ganze Liste. #}
-{% macro bookings(s, back='', open=false) %}{% set ex = excluded_for(s) %}
+{% macro bookings(s, back='', open=false) %}{% set ex = excluded_for(s) %}{% set bd = booking_docs() %}
 <details class="rec-bookings" id="s-{{ s.key }}" {{ 'open' if open }}>
-  <summary>{{ s.amounts|length }} Abbuchungen ansehen{% if ex %} · {{ ex|length }} ausgenommen{% endif %}</summary>
+  {% set with_doc = s.tx_ids|select('in', bd)|list|length %}
+  <summary>{{ s.amounts|length }} Abbuchungen ansehen{% if with_doc %} · {{ with_doc }} mit Rechnung/Beleg{% endif %}{% if ex %} · {{ ex|length }} ausgenommen{% endif %}</summary>
   <form method="post" action="/recurring/bookings" class="rec-book-form">
     <input type="hidden" name="key" value="{{ s.key }}"><input type="hidden" name="back" value="{{ back }}">
     <div class="rec-book-tools">
@@ -26,7 +27,11 @@
       {% for b in s.bookings %}{% set i = s.amounts|length - loop.index %}
       <tr><td><input type="checkbox" name="tx" value="{{ s.tx_ids[i] }}" data-amount="{{ b.amount }}" onchange="recCount(this)" aria-label="anhaken"></td>
         <td class="nowrap">{{ b.date|d }}</td><td class="nowrap">{{ b.amount|eur }}</td>
-        <td><small class="muted">{{ b.description }}</small></td><td class="nowrap">{% if b.group_id %}{{ txlinks(b.group_id, b.date) }}{% endif %}</td>
+        <td><small class="muted">{{ b.description }}</small>
+          {% set e = bd.get(s.tx_ids[i]) %}{% if e %}<br><small>Beleg: <a href="/documents/{{ e.doc_id }}">{{ e.title }}</a>
+            {% if e.state == 'suggested' %}<span class="muted">(Vorschlag – <a href="/recurring/invoices?key={{ s.key|urlencode }}&amp;back={{ (back or '/recurring')|urlencode }}">bestätigen</a>)</span>
+            {% elif e.state == 'inbox' %}<span class="muted">(in der Inbox vorbelegt)</span>{% endif %}</small>{% endif %}</td>
+        <td class="nowrap">{% if b.group_id %}{{ txlinks(b.group_id, b.date) }}{% endif %}</td>
         <td><button class="small link" name="exclude_one" value="{{ s.tx_ids[i] }}" title="Gehört nicht dazu – auf der Belegseite wieder frei">nicht dazu</button></td></tr>
       {% endfor %}
       {% for e in ex %}<tr class="rec-excluded"><td></td><td class="nowrap">{{ e.date[8:10] }}.{{ e.date[5:7] }}.{{ e.date[:4] }}</td><td class="nowrap">{{ e.amount|eur }}</td>

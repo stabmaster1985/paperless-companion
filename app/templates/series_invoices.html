@@ -7,29 +7,36 @@
 </div>
 {% if msg %}<div class="notice ok">{{ msg }}</div>{% endif %}
 <p class="muted">Zu jeder Abbuchung sucht der Companion die passende Rechnung: gleicher Absender, gleicher Betrag, zeitlich passend.
-  <strong>Vorausgewählt</strong> sind die mit genau gleichem Betrag. Übernehmen setzt die Rechnung auf bezahlt (in der Inbox: vorbelegt)
-  und die Buchung gilt als belegt – so brauchst du für ein Abo mit regelmäßigen Rechnungen keinen Vertrag. Nach Paperless geht nichts automatisch.</p>
+  Das sind nur <strong>Vorschläge</strong> – zugeordnet wird erst, wenn du sie mit „Angehakte bestätigen“ übernimmst (angehakt sind
+  die mit genau gleichem Betrag). Findet er etwas nicht, such unten selbst und hak mehrere Treffer auf einmal an.
+  Bestätigen setzt die Rechnung auf bezahlt (in der Inbox: vorbelegt), die Buchung gilt als belegt. Nach Paperless geht nichts automatisch.</p>
 {% set open = rows|selectattr('state', 'equalto', 'suggest')|list %}
 {% set done = rows|selectattr('state', 'equalto', 'done')|list %}
-<p><small>{{ rows|length }} Abbuchungen · {{ done|length }} schon mit Dokument · {{ open|length }} Vorschläge · {{ rows|length - done|length - open|length }} ohne passende Rechnung</small></p>
+<p><small>{{ rows|length }} Abbuchungen · {{ done|length }} bestätigt · {{ open|length }} Vorschläge zum Bestätigen · {{ rows|length - done|length - open|length }} ohne passende Rechnung</small></p>
 <form method="post" action="/recurring/invoices" id="si-form">
   <input type="hidden" name="key" value="{{ s.key }}"><input type="hidden" name="back" value="{{ back }}">
-  {% if open %}
   <div class="actions bulk-bar">
-    <button class="primary" id="si-go">Angehakte übernehmen (<span id="si-n">0</span>)</button>
-    <button type="button" class="small" onclick="siPick('sure')">nur sichere</button>
-    <button type="button" class="small" onclick="siPick('all')">alle</button>
+    <button class="primary" id="si-go">Angehakte bestätigen (<span id="si-n">0</span>)</button>
+    {% if open %}<button type="button" class="small" onclick="siPick('sure')">nur sichere Vorschläge</button>
+    <button type="button" class="small" onclick="siPick('all')">alle Vorschläge</button>{% endif %}
     <button type="button" class="small link" onclick="siPick('none')">keine</button>
   </div>
-  {% endif %}
 </form>
+<details class="card si-multi" open>
+  <summary><strong>Rechnungen suchen und mehrere zuordnen</strong></summary>
+  <p class="muted"><small>Z.B. „Zeitschrift“ oder „Rechnung 2026“: Der Companion verteilt die Treffer auf die noch freien Buchungen
+    (gleicher Betrag zuerst, dann zeitlich am nächsten). Anhaken und oben bestätigen.</small></p>
+  <div class="receipt-search" data-url="/recurring/invoice-pick?key={{ s.key|urlencode }}&amp;">
+    <input type="search" placeholder="Titel, Absender oder Paperless-ID" aria-label="Rechnungen suchen" oninput="siSearch(this)" autocomplete="off">
+    <div class="receipt-hits" aria-live="polite"></div></div>
+</details>
   <table class="list compact si-table"><tbody>
     {% for r in rows %}{% set t = r.tx %}
     <tr>
-      <td>{% if r.state == 'suggest' %}<input type="checkbox" form="si-form" name="pick" value="{{ t.journal_id }}:{{ r.doc.id }}" data-sure="{{ 1 if r.sure else 0 }}" {{ 'checked' if r.sure }} onchange="siCount()" aria-label="übernehmen">{% elif r.state == 'done' %}✓{% endif %}</td>
+      <td>{% if r.state == 'suggest' %}<input type="checkbox" form="si-form" name="pick" class="si-sugg" value="{{ t.journal_id }}:{{ r.doc.id }}" data-sure="{{ 1 if r.sure else 0 }}" {{ 'checked' if r.sure }} onchange="siCount()" aria-label="übernehmen">{% elif r.state == 'done' %}✓{% endif %}</td>
       <td class="nowrap">{{ t.date|d }}</td><td class="nowrap">{{ t.amount|eur }}</td>
       <td>{% if r.doc %}<a href="/documents/{{ r.doc.id }}">{{ r.doc.title or ('#' ~ r.doc.id) }}</a> {{ doclink(r.doc.id) }}
-          <small class="muted">{% if r.state == 'done' %}zugeordnet{% else %}{{ r.reason }}{% endif %}</small>
+          {% if r.state == 'done' %}<small class="ok">{{ r.reason or 'bestätigt' }}</small>{% else %}<span class="pill si-pill">Vorschlag</span> <small class="muted">{{ r.reason }}</small>{% endif %}
         {% else %}<small class="muted">keine passende Rechnung gefunden</small>{% endif %}
         {% if r.state != 'done' %}<details class="si-search"><summary><small>{{ 'andere Rechnung suchen' if r.doc else 'Rechnung suchen' }}</small></summary>
           <div class="receipt-search" data-url="/recurring/invoice-search?key={{ s.key|urlencode }}&amp;tx={{ t.journal_id|urlencode }}&amp;back={{ back|urlencode }}&amp;">
@@ -47,16 +54,20 @@ function siCount() {
   go.disabled = n === 0;
 }
 function siPick(mode) {
-  document.querySelectorAll('input[form=si-form][name=pick]').forEach((b) => { b.checked = mode === 'all' || (mode === 'sure' && b.dataset.sure === '1'); });
+  document.querySelectorAll('input.si-sugg').forEach((b) => { b.checked = mode === 'all' || (mode === 'sure' && b.dataset.sure === '1'); });
   siCount();
 }
 siCount();
+function siPickHits(on) {
+  document.querySelectorAll('input.si-hit').forEach((b) => { b.checked = on; });
+  siCount();
+}
 function siSearch(input) {
   const box = input.closest('.receipt-search'), out = box.querySelector('.receipt-hits');
   clearTimeout(box._timer);
   if (input.value.trim().length < 2 && !/^#?\d+$/.test(input.value.trim())) { out.innerHTML = ''; return; }
   box._timer = setTimeout(async () => {
-    try { out.innerHTML = await (await fetch(box.dataset.url + 'q=' + encodeURIComponent(input.value))).text(); }
+    try { out.innerHTML = await (await fetch(box.dataset.url + 'q=' + encodeURIComponent(input.value))).text(); siCount(); }
     catch (e) { out.innerHTML = '<small class="bad">Suche fehlgeschlagen.</small>'; }
   }, 250);
 }

@@ -1,0 +1,18 @@
+{% from "macros.html" import doclink %}
+{# Suchergebnis „Rechnungen suchen und mehrere zuordnen“ – Checkboxen gehören zum Formular si-form #}
+{% if items %}
+<div class="si-pick-tools"><small class="muted">{{ items|selectattr('tx')|list|length }} von {{ items|length }} Treffern passen zu einer freien Buchung.</small>
+  <button type="button" class="small link" onclick="siPickHits(true)">alle Treffer anhaken</button>
+  <button type="button" class="small link" onclick="siPickHits(false)">keine</button></div>
+<table class="list compact"><tbody>
+  {% for it in items %}{% set d = it.doc %}
+  <tr class="{{ 'muted' if not it.tx }}">
+    <td>{% if it.tx %}<input type="checkbox" form="si-form" name="pick" class="si-hit" value="{{ it.tx.journal_id }}:{{ d.id }}" data-sure="{{ 1 if it.sure else 0 }}" onchange="siCount()" aria-label="anhaken">{% endif %}</td>
+    <td><a href="/documents/{{ d.id }}" target="_blank" rel="noopener">{{ d.title or ('#' ~ d.id) }}</a> {{ doclink(d.id) }}
+      <small class="muted">{{ d.correspondent or '' }}{% if d.invoice and d.invoice.amount is not none %} · {{ d.invoice.amount|eur }}{% endif %}{% if d.created %} · {{ d.created|d }}{% endif %}</small></td>
+    <td>{% if it.tx %}→ Buchung {{ it.tx.date|d }} · {{ it.tx.amount|eur }}{% endif %} <small class="muted">{{ it.note }}</small></td></tr>
+  {% endfor %}
+</tbody></table>
+{% else %}
+<small class="muted">Nichts gefunden. Tipp: ein Wort aus dem Titel, der Absender oder die Paperless-ID.</small>
+{% endif %}

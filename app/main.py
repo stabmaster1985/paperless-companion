@@ -146,6 +146,16 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             return recurring.excluded_for(s, series)
 
     templates.env.globals["contract_series"] = contract_series
+
+    def booking_docs() -> dict:
+        """tx_id -> {"doc_id", "title", "state"} – Rechnung/Beleg je Abbuchung für die Buchungslisten."""
+        with session_scope() as s:
+            known = seriesdocs.tx_documents(s)
+            titles = dict(s.execute(select(Document.id, Document.title).where(
+                Document.id.in_({e["doc_id"] for e in known.values()}))).all()) if known else {}
+            return {t: {**e, "title": titles.get(e["doc_id"]) or f"#{e['doc_id']}"} for t, e in known.items()}
+
+    templates.env.globals["booking_docs"] = booking_docs
     templates.env.globals["excluded_for"] = excluded_for
 
     def reminder_of(doc: Document) -> dict | None:
@@ -1622,6 +1632,17 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         day = date.fromisoformat(series.dates[series.tx_ids.index(tx)])
         docs = receipts.search_documents(session, SimpleNamespace(tx_date=day), q.strip().lstrip("#"), limit=8)
         return render(request, "_series_doc_hits.html", docs=docs, key=key, tx=tx, back=back)
+
+    @app.get("/recurring/invoice-pick", response_class=HTMLResponse)
+    def recurring_invoice_pick(request: Request, key: str = "", q: str = "", session: Session = Depends(get_session)):
+        """Mehrere Rechnungen suchen und automatisch auf die freien Buchungen der Serie verteilen (zum Anhaken)."""
+        from types import SimpleNamespace
+
+        series = next((x for x in recurring.stored(session) if x.key == key), None)
+        if series is None:
+            raise HTTPException(404)
+        docs = receipts.search_documents(session, SimpleNamespace(tx_date=series.last_date), q.strip().lstrip("#"), limit=40)
+        return render(request, "_series_pick.html", items=seriesdocs.assign_docs(session, series, docs), q=q)
 
     @app.post("/recurring/invoices")
     async def recurring_invoices_apply(request: Request, session: Session = Depends(get_session)):
