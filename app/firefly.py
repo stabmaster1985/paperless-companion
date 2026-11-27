@@ -70,6 +70,26 @@ class FireflyClient:
     def link(self, group_id: str) -> str:
         return f"{self.base_url}/transactions/show/{group_id}"
 
+    MARK_ENDPOINTS = {"category": ("categories", "name"), "tag": ("tags", "tag"), "bill": ("bills", "name"),
+                      "budget": ("budgets", "name")}
+
+    def names(self, mark: str) -> list[str]:
+        """Namen der Kategorien, Tags, Firefly-Abos (Bills) bzw. Budgets – für Auswahllisten (schnell, ohne Buchungen)."""
+        endpoint, attr = self.MARK_ENDPOINTS[mark]
+        out, page = [], 1
+        while page <= 20:
+            try:
+                response = self._client.get(f"/api/v1/{endpoint}", params={"page": page, "limit": 100})
+                response.raise_for_status()
+            except httpx.HTTPError as exc:
+                raise FireflyError(f"{endpoint} laden: {exc}") from exc
+            data = response.json()
+            out += [str(x.get("attributes", {}).get(attr) or "") for x in data.get("data", [])]
+            if page >= int(data.get("meta", {}).get("pagination", {}).get("total_pages", 1) or 1):
+                break
+            page += 1
+        return sorted({n for n in out if n}, key=str.lower)
+
     def withdrawals(self, start: date, end: date) -> Iterator[Transaction]:
         return self._transactions("withdrawal", start, end)
 

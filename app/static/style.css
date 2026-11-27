@@ -932,3 +932,5 @@ tr.muted-row td { opacity: .65; }
 .cb-remember { display: inline-flex; gap: .3rem; align-items: center; font-size: .9rem; margin-left: .5rem; white-space: nowrap; }
 .cb-remember input { width: auto; margin: 0; }
 .cb-mark { margin-left: .25rem; }
+.cb-search label { display: flex; flex-direction: column; }
+.cb-search > button { align-self: flex-end; }

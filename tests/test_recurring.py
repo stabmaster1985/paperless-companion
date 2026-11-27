@@ -253,8 +253,16 @@ def test_contract_booking_search_page(client, settings, mock_api):
         s.add(abo)
         s.flush()
         cid = abo.id
-    page = client.get(f"/contracts/{cid}/bookings").text
-    assert "Vorschlag:" in page and page.count('name="tx"') == 3 and "Angehakte zuordnen" in page
+    mock_api.get(f"{FIREFLY}/api/v1/categories").respond(json={"data": [{"attributes": {"name": "Medien"}}],
+                                                                  "meta": {"pagination": {"total_pages": 1}}})
+    calls = next(r for r in mock_api.routes if r.pattern and "transactions" in repr(r.pattern))
+    page = client.get(f"/contracts/{cid}/bookings").text  # öffnet sofort: vorbelegt, ohne Buchungen zu laden
+    assert calls.call_count == 0 and 'value="Hörbuchclub"' in page and 'value="9,99"' in page and "Vorbelegt mit" in page
+    assert ">Medien<" in page or 'value="Medien"' in page
+    page = client.get(f"/contracts/{cid}/bookings?q=Hörbuchclub&amount=9,99&years=2").text
+    assert "Vorschlag:" in page and page.count('name="tx"') == 3 and page.count("checked") >= 3
+    client.get(f"/contracts/{cid}/bookings?q=Monatsbeitrag&years=1")
+    assert calls.call_count == 1  # zweite Suche aus dem Zwischenspeicher
     import re
     values = [v.replace("&#34;", '"').replace("&quot;", '"') for v in re.findall(r'name="tx" value="([^"]+)"', page)]
     r = client.post(f"/contracts/{cid}/bookings", data={"tx": values})

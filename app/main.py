@@ -1397,41 +1397,72 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
     def contract_back(c: Contract) -> str:
         return f"/documents/{c.document_id}#abbuchungen" if c.document_id else f"/contracts/{c.id}"
 
-    def booking_form(c: Contract, q: str | None, amount: str, marks: dict) -> tuple[bool, str, float | None, dict]:
-        """Suchfelder: ohne eigene Suche die gemerkte Regel bzw. Empfänger und Betrag des Vertrags."""
-        if q is None and not any(marks.values()):
-            rule = c.booking_rule or {}
-            if rule:
-                value = rule.get("amount")
-                return True, rule.get("q") or "", value, {k: rule.get(k) or "" for k in recurring.MARKS}
-            return True, c.payee or c.provider or c.name or "", c.payment_amount, {k: "" for k in recurring.MARKS}
-        try:
-            value = float(amount.replace(".", "").replace(",", ".")) if "," in amount else float(amount) if amount.strip() else None
-        except ValueError:
-            value = None
-        return False, q or "", value, marks
+    def booking_form(c: Contract) -> tuple[str, float | None, dict]:
+        """Vorbelegung: gemerkte Suche, sonst Empfänger und Betrag des Vertrags."""
+        rule = c.booking_rule or {}
+        if rule:
+            return rule.get("q") or "", rule.get("amount"), {k: rule.get(k) or "" for k in recurring.MARKS}
+        return c.payee or c.provider or c.name or "", c.payment_amount, {k: "" for k in recurring.MARKS}
+
+    firefly_cache: dict = {}  # Abbuchungen und Namenslisten für ein paar Minuten (die Buchungssuche lädt sonst jedes Mal neu)
+    CACHE_SECONDS = 600
+
+    def cached_withdrawals(client, start: date) -> list:
+        import time as _time
+
+        hit = firefly_cache.get("withdrawals")
+        if hit and hit["start"] <= start and _time.monotonic() - hit["at"] < CACHE_SECONDS and hit["end"] == today():
+            return [t for t in hit["txs"] if t.date >= start]
+        txs = list(client.withdrawals(start, today()))
+        firefly_cache["withdrawals"] = {"start": start, "end": today(), "at": _time.monotonic(), "txs": txs}
+        return txs
+
+    def cached_names(client) -> dict[str, list[str]]:
+        import time as _time
+
+        hit = firefly_cache.get("names")
+        if hit and _time.monotonic() - hit["at"] < CACHE_SECONDS:
+            return hit["names"]
+        names = {}
+        for mark in recurring.MARKS:
+            try:
+                names[mark] = client.names(mark)
+            except Exception:  # nur Auswahlliste – ohne sie geht die Suche trotzdem
+                names[mark] = []
+        firefly_cache["names"] = {"at": _time.monotonic(), "names": names}
+        return names
 
     @app.get("/contracts/{contract_id}/bookings", response_class=HTMLResponse)
     def contract_bookings(request: Request, contract_id: int, q: str | None = None, amount: str = "", category: str = "",
-                          tag: str = "", bill: str = "", budget: str = "", msg: str = "",
+                          tag: str = "", bill: str = "", budget: str = "", years: str = "", msg: str = "",
                           session: Session = Depends(get_session)):
         """Buchungen in Firefly suchen und einem Vertrag/Abo zuordnen – nach Text, Betrag und Firefly-Merkmalen
-        (Kategorie, Tag, Firefly-Abo, Budget). Ohne eigene Suche: gemerkte Regel bzw. Empfänger und Betrag des Vertrags."""
+        (Kategorie, Tag, Firefly-Abo, Budget). Die Seite öffnet sofort mit vorbelegten Kriterien (gemerkte Suche bzw.
+        Empfänger und Betrag des Vertrags); gesucht wird erst auf Knopfdruck."""
         c = session.get(Contract, contract_id)
         if c is None:
             raise HTTPException(404)
-        suggest, q, value, marks = booking_form(c, q, amount, {"category": category, "tag": tag, "bill": bill, "budget": budget})
-        hits, error, choices = [], "", {k: set() for k in recurring.MARKS}
+        max_years = max(1, round(settings.recurring_lookback_days / 365))
+        span = int(years) if years.isdigit() and 0 < int(years) <= max_years else max_years
+        searched = q is not None
+        marks = {"category": category, "tag": tag, "bill": bill, "budget": budget}
+        if searched:
+            try:
+                value = (float(amount.replace(".", "").replace(",", ".")) if "," in amount else float(amount)
+                         if amount.strip() else None)
+            except ValueError:
+                value = None
+        else:
+            q, value, marks = booking_form(c)
+        hits, error, choices = [], "", {k: [] for k in recurring.MARKS}
         client = make_firefly(settings)
         if client is None:
             error = "Firefly III ist nicht eingerichtet"
         else:
             try:
-                history = list(client.withdrawals(today() - timedelta(days=settings.recurring_lookback_days), today()))
-                for t in history:
-                    for k, v in t.marks:
-                        choices[k].add(v)
-                if q or value is not None or any(v.strip() for v in marks.values()):
+                choices = cached_names(client)
+                if searched and (q or value is not None or any(v.strip() for v in marks.values())):
+                    history = cached_withdrawals(client, today() - timedelta(days=span * 365))
                     hits = recurring.search_bookings(history, q, value, marks)[:300]
             except FireflyError as exc:
                 error = f"Firefly nicht erreichbar: {exc}"
@@ -1451,9 +1482,13 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
                          "data": json.dumps({"id": t.journal_id, "g": t.group_id, "d": t.date.isoformat(), "a": t.amount,
                                              "c": t.counterparty, "t": t.description})})
         shown = f"{value:.2f}".replace(".", ",") if value is not None else ""
-        return render(request, "contract_bookings.html", c=c, q=q, amount=shown, marks=marks, rows=rows, suggest=suggest,
-                      error=error, msg=msg, back=contract_back(c), mark_names=recurring.MARKS,
-                      choices={k: sorted(v, key=str.lower) for k, v in choices.items()},
+        preset = booking_form(c)
+        prefilled = ((preset[0] or "").strip().lower() == (q or "").strip().lower() and preset[1] == value
+                     and all((preset[2][k] or "").strip().lower() == (marks[k] or "").strip().lower() for k in marks))
+        return render(request, "contract_bookings.html", c=c, q=q, amount=shown, marks=marks, rows=rows, searched=searched,
+                      prefilled=prefilled,
+                      error=error, msg=msg, back=contract_back(c), mark_names=recurring.MARKS, choices=choices,
+                      years=span, year_options=[y for y in (1, 2, 3, 5, 10) if y < max_years] + [max_years],
                       rule={"q": q, "amount": value, **marks}, firefly_enabled=settings.firefly_enabled)
 
     @app.post("/contracts/{contract_id}/bookings")
