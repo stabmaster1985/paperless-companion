@@ -22,30 +22,43 @@
     <button type="button" class="small link" onclick="siPick('none')">keine</button>
   </div>
   {% endif %}
-  <table class="list compact"><tbody>
+</form>
+  <table class="list compact si-table"><tbody>
     {% for r in rows %}{% set t = r.tx %}
     <tr>
-      <td>{% if r.state == 'suggest' %}<input type="checkbox" name="pick" value="{{ t.journal_id }}:{{ r.doc.id }}" data-sure="{{ 1 if r.sure else 0 }}" {{ 'checked' if r.sure }} onchange="siCount()" aria-label="übernehmen">{% elif r.state == 'done' %}✓{% endif %}</td>
+      <td>{% if r.state == 'suggest' %}<input type="checkbox" form="si-form" name="pick" value="{{ t.journal_id }}:{{ r.doc.id }}" data-sure="{{ 1 if r.sure else 0 }}" {{ 'checked' if r.sure }} onchange="siCount()" aria-label="übernehmen">{% elif r.state == 'done' %}✓{% endif %}</td>
       <td class="nowrap">{{ t.date|d }}</td><td class="nowrap">{{ t.amount|eur }}</td>
       <td>{% if r.doc %}<a href="/documents/{{ r.doc.id }}">{{ r.doc.title or ('#' ~ r.doc.id) }}</a> {{ doclink(r.doc.id) }}
           <small class="muted">{% if r.state == 'done' %}zugeordnet{% else %}{{ r.reason }}{% endif %}</small>
-        {% else %}<small class="muted">keine passende Rechnung gefunden – <a href="/receipts#tx-search">auf der Belegseite suchen</a></small>{% endif %}</td>
+        {% else %}<small class="muted">keine passende Rechnung gefunden</small>{% endif %}
+        {% if r.state != 'done' %}<details class="si-search"><summary><small>{{ 'andere Rechnung suchen' if r.doc else 'Rechnung suchen' }}</small></summary>
+          <div class="receipt-search" data-url="/recurring/invoice-search?key={{ s.key|urlencode }}&amp;tx={{ t.journal_id|urlencode }}&amp;back={{ back|urlencode }}&amp;">
+            <input type="search" placeholder="Titel, Absender oder Paperless-ID" aria-label="Rechnung suchen" oninput="siSearch(this)" autocomplete="off">
+            <div class="receipt-hits" aria-live="polite"></div></div></details>{% endif %}</td>
       <td class="nowrap">{% if t.group_id %}{{ txlinks(t.group_id, t.date) }}{% endif %}</td></tr>
     {% endfor %}
   </tbody></table>
-</form>
 <script>
 function siCount() {
   const go = document.getElementById('si-go');
   if (!go) return;
-  const n = document.querySelectorAll('#si-form input[name=pick]:checked').length;
+  const n = document.querySelectorAll('input[form=si-form][name=pick]:checked').length;
   document.getElementById('si-n').textContent = n;
   go.disabled = n === 0;
 }
 function siPick(mode) {
-  document.querySelectorAll('#si-form input[name=pick]').forEach((b) => { b.checked = mode === 'all' || (mode === 'sure' && b.dataset.sure === '1'); });
+  document.querySelectorAll('input[form=si-form][name=pick]').forEach((b) => { b.checked = mode === 'all' || (mode === 'sure' && b.dataset.sure === '1'); });
   siCount();
 }
 siCount();
+function siSearch(input) {
+  const box = input.closest('.receipt-search'), out = box.querySelector('.receipt-hits');
+  clearTimeout(box._timer);
+  if (input.value.trim().length < 2 && !/^#?\d+$/.test(input.value.trim())) { out.innerHTML = ''; return; }
+  box._timer = setTimeout(async () => {
+    try { out.innerHTML = await (await fetch(box.dataset.url + 'q=' + encodeURIComponent(input.value))).text(); }
+    catch (e) { out.innerHTML = '<small class="bad">Suche fehlgeschlagen.</small>'; }
+  }, 250);
+}
 </script>
 {% endblock %}

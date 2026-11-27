@@ -57,20 +57,37 @@
   <p><strong>{{ s.payee }}</strong> · {{ s.rhythm }} · zuletzt {{ s.last_date|d }} über {{ s.last_amount|eur }} · nächste um den {{ s.next_date|d }}</p>
   {{ bookings(s, back='/contracts/' ~ c.id, open=true) }}
   {% endfor %}
-  <p><a class="button small" href="/contracts/{{ c.id }}/bookings">Weitere Buchungen suchen und zuordnen</a></p>
+  <p><a class="button small" href="/contracts/{{ c.id }}/bookings">Weitere Buchungen suchen und zuordnen</a>
+    {% for s in series %}<a class="button small" href="/recurring/invoices?key={{ s.key|urlencode }}&amp;back={{ ('/contracts/' ~ c.id)|urlencode }}">Rechnungen zuordnen{% if series|length > 1 %} ({{ s.amounts|length }} Buchungen){% endif %}</a> {% endfor %}</p>
 </section>
 {% else %}
 <p class="muted">Noch keine Abbuchungen erkannt. Unter <a href="/recurring">Regelmäßige Zahlungen</a> „Jetzt aus Firefly erkennen“ – der
   „Empfänger in Firefly“ oben muss zum Namen in Firefly passen – oder <a href="/contracts/{{ c.id }}/bookings">Buchungen selbst suchen und zuordnen</a>.</p>
 {% endif %}
 
-<section class="card">
+<section class="card" id="dokument">
   <h2>Dokument anhängen</h2>
-  <p class="muted">Kommt doch noch ein Dokument (Vertragsbestätigung, Rechnung als PDF), hänge es an – dann wird aus dem Abo ein normaler Vertrag.</p>
-  <form method="post" action="/contracts/{{ c.id }}" class="inline">
-    <input type="hidden" name="action" value="attach">
-    <input name="doc_id" inputmode="numeric" placeholder="Paperless-ID" aria-label="Paperless-ID" required>
-    <button class="small">Anhängen</button>
-  </form>
+  <p class="muted">Kommt doch noch ein Dokument (Vertragsbestätigung, Rechnung als PDF), hänge es an – dann wird aus dem Abo ein normaler Vertrag.
+    Einzelne Rechnungen zu den Abbuchungen ordnest du dagegen unter „Rechnungen zuordnen“ zu – dafür bleibt es ein Abo.</p>
+  {% if doc_suggestions %}
+  <p><strong>Vorschläge</strong> <small class="muted">(Absender oder Titel passt zu „{{ c.payee or c.name }}“)</small></p>
+  {% with docs = doc_suggestions %}{% include "_contract_docs.html" %}{% endwith %}
+  {% endif %}
+  <div class="receipt-search ct-docsearch" data-url="/contracts/{{ c.id }}/doc-search?">
+    <input type="search" placeholder="Dokument suchen: Titel, Absender oder Paperless-ID" aria-label="Dokument suchen"
+      oninput="ctDocSearch(this)" autocomplete="off">
+    <div class="receipt-hits" aria-live="polite"></div>
+  </div>
 </section>
+<script>
+function ctDocSearch(input) {
+  const box = input.closest('.ct-docsearch'), out = box.querySelector('.receipt-hits');
+  clearTimeout(box._timer);
+  if (input.value.trim().length < 2 && !/^#?\d+$/.test(input.value.trim())) { out.innerHTML = ''; return; }
+  box._timer = setTimeout(async () => {
+    try { out.innerHTML = await (await fetch(box.dataset.url + 'q=' + encodeURIComponent(input.value))).text(); }
+    catch (e) { out.innerHTML = '<small class="bad">Suche fehlgeschlagen.</small>'; }
+  }, 250);
+}
+</script>
 {% endblock %}

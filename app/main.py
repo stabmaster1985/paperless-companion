@@ -1245,7 +1245,19 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
             return RedirectResponse(f"/documents/{c.document_id}", status_code=303)
         deadline = deadlines.compute(deadlines.terms_from_contract(c), today())
         series = [x for x in recurring.stored(session) if x.contract_id == c.id]
-        return render(request, "contract.html", c=c, msg=msg, deadline=deadline, series=series)
+        return render(request, "contract.html", c=c, msg=msg, deadline=deadline, series=series,
+                      doc_suggestions=seriesdocs.contract_doc_suggestions(session, c))
+
+    @app.get("/contracts/{contract_id}/doc-search", response_class=HTMLResponse)
+    def contract_doc_search(request: Request, contract_id: int, q: str = "", session: Session = Depends(get_session)):
+        """Dokument für ein Abo suchen (Titel, Absender, Dateiname, Paperless-ID) – zum Anhängen als Vertragsdokument."""
+        from types import SimpleNamespace
+
+        c = session.get(Contract, contract_id)
+        if c is None:
+            raise HTTPException(404)
+        docs = receipts.search_documents(session, SimpleNamespace(tx_date=today()), q.strip().lstrip("#"), limit=10)
+        return render(request, "_contract_docs.html", docs=docs, c=c)
 
     @app.post("/contracts/{contract_id}")
     async def contract_save(request: Request, contract_id: int, session: Session = Depends(get_session)):
@@ -1597,6 +1609,19 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         rows = seriesdocs.pairs(session, series)
         target = back if back.startswith("/") and not back.startswith("//") else "/recurring"
         return render(request, "series_invoices.html", s=series, rows=rows, back=target, msg=msg)
+
+    @app.get("/recurring/invoice-search", response_class=HTMLResponse)
+    def recurring_invoice_search(request: Request, key: str = "", tx: str = "", q: str = "", back: str = "",
+                                 session: Session = Depends(get_session)):
+        """Rechnung für eine einzelne Abbuchung einer Serie von Hand suchen."""
+        from types import SimpleNamespace
+
+        series = next((x for x in recurring.stored(session) if x.key == key), None)
+        if series is None or tx not in series.tx_ids:
+            raise HTTPException(404)
+        day = date.fromisoformat(series.dates[series.tx_ids.index(tx)])
+        docs = receipts.search_documents(session, SimpleNamespace(tx_date=day), q.strip().lstrip("#"), limit=8)
+        return render(request, "_series_doc_hits.html", docs=docs, key=key, tx=tx, back=back)
 
     @app.post("/recurring/invoices")
     async def recurring_invoices_apply(request: Request, session: Session = Depends(get_session)):

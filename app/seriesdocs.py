@@ -92,3 +92,19 @@ def apply(session: Session, s: Series, picks: list[tuple[str, int]]) -> int:
     session.flush()
     receipts.sync_payments(session)
     return done
+
+
+def contract_doc_suggestions(session: Session, contract, limit: int = 5) -> list[Document]:
+    """Mögliche Dokumente für ein Abo ohne Dokument: Absender oder Titel passt zu Empfänger bzw. Name des Abos,
+    noch kein Vertrag dran. Verträge zuerst, dann die neuesten."""
+    names = [n for n in (contract.payee, contract.name, contract.provider) if n]
+    if not names:
+        return []
+    hits = []
+    for d in session.scalars(select(Document)):
+        if d.contract is not None:
+            continue
+        if any(_name_fits(d.correspondent or "", n) or _name_fits(d.title or "", n) for n in names):
+            hits.append(d)
+    hits.sort(key=lambda d: (d.kind != "contract", -(d.created.toordinal() if d.created else 0)))
+    return hits[:limit]

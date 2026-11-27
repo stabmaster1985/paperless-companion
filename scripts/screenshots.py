@@ -215,6 +215,8 @@ def start_demo(data: Path, port: int) -> None:
         s.add(Contract(name="Hörbuchclub", provider="Hörbuchclub", payee="Hörbuchclub", payment_amount=9.95, payment_interval=1,
                        monthly_cost=9.95, renewal_mode="indefinite", notice_value=1, notice_unit="months", notice_to="any",
                        status="active"))
+        s.add(Document(id=830, title="Willkommen im Hörbuchclub – Mitgliedschaft", correspondent="Hörbuchclub", kind="contract",
+                       document_type="Vertrag", tags=[], created=date(2026, 5, 28), extraction_state="done"))
         # Zeitschrift: monatliche Rechnungen zu den Abbuchungen (für „Rechnungen zuordnen“), die neueste fehlt noch
         for i in range(6):
             day = start + relativedelta(months=i, days=1)
@@ -319,6 +321,9 @@ def shoot(base: str) -> None:
         p.goto(base + p.locator('a:has-text("Hörbuchclub")').first.get_attribute("href") + "/bookings?q=&bill=H%C3%B6rbuchclub")
         p.wait_for_timeout(300)
         p.screenshot(path=OUT / "buchungen-zuordnen.png")
+        p.goto(base + p.url.split(base)[1].split("/bookings")[0] + "#dokument")
+        p.wait_for_timeout(300)
+        p.screenshot(path=OUT / "abo-dokument.png")
         p.goto(base + "/bookings?q=&category=Medien&years=1")
         p.click("text=alle freien")
         p.wait_for_timeout(300)

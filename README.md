@@ -120,6 +120,12 @@ Buchungen) oder sie einem vorhandenen Vertrag zuordnen.
 
 ![Buchungen suchen](docs/screenshots/buchungen-suchen.png)
 
+**Abo ohne Dokument** – das Vertragsdokument per Suche (Titel, Absender oder Paperless-ID) oder aus den Vorschlägen
+anhängen; aus dem Abo wird dann ein normaler Vertrag. Einzelne Rechnungen zu den Abbuchungen ordnest du über
+„Rechnungen zuordnen“ zu – dort auch je Buchung von Hand gesucht.
+
+![Abo: Dokument anhängen](docs/screenshots/abo-dokument.png)
+
 **Verlauf** – was du zuletzt bearbeitet hast, wo das Dokument jetzt steht (z.B. bezahlt, wartet auf Übertragung)
 und auf welcher Seite du danach gelandet bist; je Dokument auch auf der Dokumentseite.
 

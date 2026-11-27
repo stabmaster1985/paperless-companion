@@ -345,3 +345,39 @@ def test_free_booking_search_creates_abo(client, settings, mock_api):
     r = client.post("/bookings", data={"tx": values[3:], "op": "contract", "contract_id": str(other_id)})
     assert "1 Buchung gehört jetzt zu „Fotodienst“" in r.text
     assert "Bitte einen Vertrag wählen" in client.post("/bookings", data={"tx": values[3:], "op": "contract"}).text
+
+
+def test_abo_document_search_and_manual_invoice(client):
+    """Abo ohne Dokument: Dokument per Suche/Vorschlag anhängen statt Paperless-ID; einzelne Rechnung zu einer Buchung
+    von Hand suchen und zuordnen."""
+    from app.models import Invoice
+
+    txs = monthly("Zeitschriftenverlag Seite", 7.5, 3, start=date(2026, 7, 5))
+    with session_scope() as s:
+        abo = Contract(name="Zeitschrift", provider="Zeitschrift", payee="Zeitschriftenverlag Seite")
+        s.add(abo)
+        s.add(Document(id=970, title="Aboauftrag Zeitschrift", correspondent="Zeitschriftenverlag Seite", kind="contract",
+                       tags=[], created=date(2026, 6, 1)))
+        odd = Document(id=971, title="Sammelrechnung Sommer", correspondent="Verlagsservice", kind="invoice", tags=[],
+                       review_state="confirmed")
+        odd.invoice = Invoice(issuer="Verlagsservice", amount=22.5, invoice_date=date(2026, 7, 1))
+        s.add(odd)
+        s.flush()
+        cid = abo.id
+        recurring.run(s, txs)
+        key = recurring.stored(s)[0].key
+        recurring.link_contract(s, key, cid)
+    page = client.get(f"/contracts/{cid}").text
+    assert "Aboauftrag Zeitschrift" in page and "als Vertragsdokument anhängen" in page and "Rechnungen zuordnen" in page
+    hits = client.get(f"/contracts/{cid}/doc-search?q=aboauftrag").text
+    assert "Aboauftrag Zeitschrift" in hits and "#970" in hits
+    assert "Aboauftrag" in client.get(f"/contracts/{cid}/doc-search?q=%23970").text  # Paperless-ID geht weiter
+    tx_id = txs[0].journal_id
+    hits = client.get(f"/recurring/invoice-search?key={key}&tx={tx_id}&q=sammelrechnung").text
+    assert "Sammelrechnung Sommer" in hits and "Das ist die Rechnung" in hits
+    r = client.post("/recurring/invoices", data={"key": key, "back": f"/contracts/{cid}", "pick": f"{tx_id}:971"})
+    assert "1 Rechnung zugeordnet" in r.text
+    with session_scope() as s:
+        assert s.get(Document, 971).invoice.status == "paid"
+    r = client.post(f"/contracts/{cid}", data={"action": "attach", "doc_id": "970"})
+    assert "das Abo ist jetzt ein Vertrag mit Dokument" in r.text
