@@ -67,7 +67,10 @@ def collect(session: Session, today: date) -> dict:
         items.append(Reserve(c, c.payment, c.interval, round(c.payment / c.interval, 2), last, nxt, saved, source))
     items.sort(key=lambda r: (r.next or date.max, r.contract.label.lower()))
     rare = [r for r in items if r.interval > 1]
+    plan = schedule(items, today)
     return {
+        "plan": plan,
+        "horizons": horizons(items, today),
         "rows": items,
         "rare": rare,
         "monthly_reserve": round(sum(r.monthly for r in rare), 2),
@@ -76,3 +79,58 @@ def collect(session: Session, today: date) -> dict:
         "due_30_sum": round(sum(r.amount for r in items if r.next and (r.next - today).days <= 31), 2),
         "monthly_all": round(sum(r.monthly for r in items), 2),
     }
+
+
+MONTHS = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"]
+
+
+def _payments(r: Reserve, until: date) -> list[date]:
+    """Kommende Zahltermine eines Vertrags bis `until` (ab der nächsten Zahlung im Intervall weitergerechnet)."""
+    if r.next is None:
+        return []
+    dates, d = [], r.next
+    end = r.contract.cancel_effective if r.contract.status == "cancelled" else None
+    while d <= until and (end is None or d <= end):
+        dates.append(d)
+        d = d + relativedelta(months=r.interval)
+    return dates
+
+
+def horizons(items: list[Reserve], today: date) -> list[dict]:
+    """Was ist in 1, 3, 6 und 12 Monaten insgesamt fällig – alle Zahlungen und nur die nicht monatlichen."""
+    result = []
+    for months in (1, 3, 6, 12):
+        until = today + relativedelta(months=months)
+        total = rare = 0.0
+        for r in items:
+            n = len(_payments(r, until))
+            total += n * r.amount
+            if r.interval > 1:
+                rare += n * r.amount
+        result.append({"months": months, "total": round(total, 2), "rare": round(rare, 2)})
+    return result
+
+
+def schedule(items: list[Reserve], today: date, months: int = 12) -> list[dict]:
+    """Monat für Monat: fällige Zahlungen, monatliche Rücklage und der Rücklagenstand am Monatsende (Start: was heute
+    angespart sein sollte). Nur nicht monatliche Zahlungen laufen über die Rücklage; monatliche sind zur Übersicht dabei."""
+    rare = [r for r in items if r.interval > 1]
+    saving = round(sum(r.monthly for r in rare), 2)
+    balance = round(sum(r.saved or 0 for r in rare), 2)
+    first = date(today.year, today.month, 1)
+    rows = []
+    for i in range(months):
+        start = first + relativedelta(months=i)
+        end = start + relativedelta(months=1, days=-1)
+        due = []
+        for r in items:
+            for d in _payments(r, end):
+                if d >= max(start, today):
+                    due.append({"date": d, "label": r.contract.label, "amount": r.amount, "rare": r.interval > 1})
+        due.sort(key=lambda x: x["date"])
+        rare_sum = round(sum(x["amount"] for x in due if x["rare"]), 2)
+        balance = round(balance + saving - rare_sum, 2)
+        rows.append({"label": f"{MONTHS[start.month - 1]} {start.year}", "due": due,
+                     "total": round(sum(x["amount"] for x in due), 2), "rare": rare_sum, "saving": saving,
+                     "balance": balance})
+    return rows

@@ -59,6 +59,35 @@
     (Zahlung + Zahlungsintervall).</p>
   {% endif %}
   {% if rv.rows %}
+  <h3>Fällig in …</h3>
+  <div class="reserve-horizons">
+    {% for h in rv.horizons %}
+    <div><span class="num">{{ h.total|eur }}</span><span>{{ 'im nächsten Monat' if h.months == 1 else 'in ' ~ h.months ~ ' Monaten' }}<br>
+      <small class="muted">davon {{ h.rare|eur }} nicht monatlich</small></span></div>
+    {% endfor %}
+  </div>
+
+  <h3>Monatsplan</h3>
+  <div class="table-wrap"><table class="list compact reserve-plan">
+    <thead><tr><th>Monat</th><th>fällig</th><th>davon aus der Rücklage</th><th>zurücklegen</th><th>Rücklage am Monatsende</th></tr></thead>
+    <tbody>
+    {% for m in rv.plan %}
+      <tr class="{{ 'has-due' if m.rare }}">
+        <td class="nowrap">{{ m.label }}</td>
+        <td>{% if m.due %}<details><summary>{{ m.total|eur }} <small class="muted">({{ m.due|length }})</small></summary>
+            <ul class="plain">{% for d in m.due %}<li><small>{{ d.date|d }} · {{ d.label }} · {{ d.amount|eur }}{% if d.rare %} <span class="tag">Rücklage</span>{% endif %}</small></li>{% endfor %}</ul>
+          </details>{% else %}–{% endif %}</td>
+        <td class="nowrap">{{ m.rare|eur if m.rare else '–' }}</td>
+        <td class="nowrap">{{ m.saving|eur }}</td>
+        <td class="nowrap {{ 'bad' if m.balance < 0 }}">{{ m.balance|eur }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <p class="muted"><small>Rücklage am Monatsende: Start mit dem, was heute angespart sein sollte, jeden Monat plus „zurücklegen“, minus die
+    nicht monatlichen Zahlungen. Wird der Wert negativ, reicht die Rücklage für diese Zahlung noch nicht.</small></p>
+
+  <h3>Je Vertrag</h3>
   <div class="table-wrap"><table class="list compact">
     <thead><tr><th>Vertrag</th><th>Zahlung</th><th>Rücklage/Monat</th><th>nächste Zahlung</th><th>sollte angespart sein</th></tr></thead>
     <tbody>

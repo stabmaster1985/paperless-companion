@@ -42,3 +42,24 @@ def test_contract_form_payment_and_interval(db, settings):
         assert doc.contract.monthly_cost == 10.0 and doc.contract.payment == 120.0 and doc.contract.interval == 12
         pipeline.apply_values(s, doc, "contract", pipeline.parse_values("contract", {"name": "X", "monthly_cost": "9,99"}))
         assert doc.contract.payment == 9.99 and doc.contract.interval == 1  # ältere Eingabe ohne Intervall
+
+
+def test_horizons_and_monthly_plan(db):
+    today = date(2026, 11, 27)
+    with db() as s:
+        yearly = Contract(name="Kfz", start_date=date(2026, 3, 1))
+        yearly.set_payment(480.0, 12)
+        quarterly = Contract(name="Tier", start_date=date(2026, 12, 15))
+        quarterly.set_payment(90.0, 3)
+        monthly = Contract(name="Handy", start_date=date(2026, 1, 3))
+        monthly.set_payment(20.0, 1)
+        s.add_all([yearly, quarterly, monthly])
+    with db() as s:
+        rv = reserves.collect(s, today)
+        h = {x["months"]: x for x in rv["horizons"]}
+        assert h[1] == {"months": 1, "total": 110.0, "rare": 90.0}  # Handy 03.12. + Tier 15.12.
+        assert h[12]["rare"] == 480.0 + 4 * 90.0
+        plan = {m["label"]: m for m in rv["plan"]}
+        assert plan["Dezember 2026"]["rare"] == 90.0 and plan["März 2027"]["rare"] == 570.0  # Kfz + Tier im März
+        assert plan["Dezember 2026"]["saving"] == 70.0  # 40 + 30 pro Monat
+        assert len(rv["plan"]) == 12

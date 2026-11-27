@@ -918,3 +918,9 @@ button:disabled, button:disabled:hover { opacity: .5; cursor: not-allowed; }
 .reserve-sums > div { display: flex; gap: .6rem; align-items: center; }
 .reserve-sums .num { font-size: 1.5rem; font-weight: 700; }
 tr.muted-row td { opacity: .65; }
+.reserve-horizons { display: flex; flex-wrap: wrap; gap: .75rem 2rem; margin: .25rem 0 1rem; }
+.reserve-horizons > div { display: flex; gap: .6rem; align-items: center; }
+.reserve-horizons .num { font-size: 1.25rem; font-weight: 700; }
+.reserve-card h3 { font-size: 1rem; margin: 1rem 0 .35rem; }
+.reserve-plan tr.has-due td:first-child { font-weight: 600; }
+.reserve-plan details > summary { cursor: pointer; }
