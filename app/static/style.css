@@ -926,3 +926,5 @@ tr.muted-row td { opacity: .65; }
 .reserve-plan details > summary { cursor: pointer; }
 .error-reasons { margin: .35rem 0; }
 .error-reasons > summary { cursor: pointer; color: var(--bad, #b91c1c); }
+.rec-hide-bar { display: flex; flex-wrap: wrap; gap: .4rem .8rem; align-items: center; margin: .25rem 0 .5rem; }
+.rec-hide-pick { margin-right: .35rem; }

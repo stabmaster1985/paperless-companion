@@ -141,3 +141,20 @@ def test_sum_of_running_payments(db):
     with db() as s:
         sums = recurring.findings(s, TODAY)["sums"]
         assert sums == {"total": 42.89, "contract": 29.9, "other": 0.0, "open": 12.99, "count": 2}
+
+
+def test_dismiss_several_unknown(db, settings, mock_api):
+    from fastapi.testclient import TestClient
+
+    from app.db import session_scope
+    from app.main import create_app
+
+    app = create_app(settings, start_worker=False)
+    with TestClient(app) as c:
+        with session_scope() as s:
+            recurring.run(s, [*monthly("Sparplan Bank", 50.0, 12), *monthly("Taschengeld Kind", 20.0, 12)])
+            keys = [x.key for x in recurring.stored(s)]
+        page = c.get("/recurring").text
+        assert "Angehakte ausblenden" in page and "ausblenden (kein Vertrag)" in page
+        r = c.post("/recurring/dismiss-many", data={"token": [f"unknown:{k}" for k in keys]})
+        assert "2 Einträge ausgeblendet" in r.text and "Ohne Vertrag (" not in r.text

@@ -168,3 +168,27 @@ def test_split_checked_bookings_into_new_abo(client):
     r = client.post("/recurring/bookings", data={"key": rest.key, "tx": rest.tx_ids[:2], "op": "split-contract",
                                                  "contract_id": str(abo.id)})
     assert "gehören jetzt zu" in r.text
+
+
+def test_two_policies_same_payee_same_day(client):
+    """Zwei Verträge beim selben Empfänger, gleicher Betrag am selben Tag (z.B. zwei Policen): eindeutige Serien,
+    Zuordnung der angehakten Buchungen klappt („Buchungen nicht gefunden“ trat hier auf)."""
+    from app.firefly import Transaction
+
+    a = monthly("Krankenversicherung AG", 250.0, 12)
+    b = [Transaction(journal_id=f"b{i}", group_id=f"gb{i}", date=t.date, amount=250.0, counterparty="Krankenversicherung AG",
+                     iban=None, description="Police 2", text="Police 2") for i, t in enumerate(a)]
+    with session_scope() as s:
+        recurring.run(s, [*a, *b])
+        series = recurring.stored(s)
+        assert len(series) == 2 and len({x.key for x in series}) == 2  # eindeutige Schlüssel
+        target = next(x for x in series if any(t.startswith("b") for t in x.tx_ids))
+        doc = Document(id=975, title="Police 2", correspondent="Krankenversicherung AG", kind="contract", tags=[],
+                       review_state="confirmed")
+        doc.contract = Contract(name="Police 2")
+        s.add(doc)
+        s.flush()
+        cid = doc.contract.id
+    r = client.post("/recurring/bookings", data={"key": target.key, "tx": target.tx_ids[:5], "op": "split-contract",
+                                                 "contract_id": str(cid)})
+    assert "gehören jetzt zu" in r.text

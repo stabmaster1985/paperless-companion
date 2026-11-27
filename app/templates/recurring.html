@@ -79,10 +79,17 @@
   <h2>Ohne Vertrag ({{ data.unknown|length }})</h2>
   <p class="muted">Regelmäßige Abbuchungen, zu denen kein Vertrag erfasst ist – oft Abos, Versicherungen oder Mitgliedschaften.
     Ordne sie einem Vertrag zu, oder lege sie mit „Als Abo anlegen“ als Abo ohne Dokument an (z.B. Streaming, App-Abos). Fehlt beim
-    Vertrag der Monatsbeitrag, wird er aus den Abbuchungen übernommen.</p>
+    Vertrag der Monatsbeitrag, wird er aus den Abbuchungen übernommen. Sind es nur Buchungen ohne Vertrag dahinter (z.B. Taschengeld,
+    Spenden, Umbuchungen), blende sie aus – einzeln oder mehrere angehakt.</p>
+  <form method="post" action="/recurring/dismiss-many" id="hide-many" class="rec-hide-bar">
+    <label class="check"><input type="checkbox" onchange="document.querySelectorAll('input[form=hide-many]').forEach((c) => { c.checked = this.checked; })"> alle</label>
+    <button class="small">Angehakte ausblenden</button>
+    <small class="muted">ausgeblendete kommen nicht wieder; über „Alle erkannten regelmäßigen Zahlungen“ bleiben sie sichtbar</small>
+  </form>
   {% for s in data.unknown %}
   <div class="rec-item">
-    <div><strong>{{ s.payee }}</strong> <small class="muted">· {{ s.rhythm }} · {{ s.amounts|length }} Abbuchungen seit {{ s.dates[0][8:10] }}.{{ s.dates[0][5:7] }}.{{ s.dates[0][:4] }}</small><br>
+    <div><label class="rec-hide-pick" title="zum Ausblenden anhaken"><input type="checkbox" name="token" value="unknown:{{ s.key }}" form="hide-many"></label>
+      <strong>{{ s.payee }}</strong> <small class="muted">· {{ s.rhythm }} · {{ s.amounts|length }} Abbuchungen seit {{ s.dates[0][8:10] }}.{{ s.dates[0][5:7] }}.{{ s.dates[0][:4] }}</small><br>
       <small>{{ s.last_amount|eur }} ({{ s.monthly|eur }} pro Monat) · zuletzt {{ s.last_date|d }} · nächste um den {{ s.next_date|d }}</small>
       {{ bookings(s) }}</div>
     <div class="rec-actions">
@@ -102,7 +109,7 @@
       <form method="post" action="/recurring/action" class="inline"><input type="hidden" name="action" value="abo">
         <input type="hidden" name="key" value="{{ s.key }}">
         <button class="small primary" title="Abo ohne Dokument anlegen (z.B. Streaming): mit Monatsbeitrag, Beginn und Kündigungsfrist">Als Abo anlegen</button></form>
-      {{ dismiss('unknown:' ~ s.key, 'kein Vertrag nötig') }}
+      {{ dismiss('unknown:' ~ s.key, 'ausblenden (kein Vertrag)') }}
     </div>
   </div>
   {% endfor %}

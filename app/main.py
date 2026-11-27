@@ -1373,6 +1373,16 @@ def create_app(settings: Settings | None = None, start_worker: bool = True) -> F
         receipts.sync_payments(session)
         return RedirectResponse(f"{target}?msg={quote(msg)}#s-{quote(key)}", status_code=303)
 
+    @app.post("/recurring/dismiss-many")
+    async def recurring_dismiss_many(request: Request, session: Session = Depends(get_session)):
+        """Mehrere „Ohne Vertrag“-Einträge auf einmal ausblenden (nur Buchungen, kein Vertrag dahinter)."""
+        form = await request.form()
+        tokens = [str(t) for t in form.getlist("token") if str(t).startswith("unknown:")]
+        for token in tokens:
+            recurring.dismiss(session, token)
+        msg = f"{len(tokens)} Einträge ausgeblendet" if tokens else "Nichts angehakt"
+        return RedirectResponse(f"/recurring?msg={quote(msg)}", status_code=303)
+
     @app.get("/recurring/doc-search", response_class=HTMLResponse)
     def recurring_doc_search(request: Request, key: str = "", q: str = "", session: Session = Depends(get_session)):
         """Vertragsdokument zu einer regelmäßigen Zahlung suchen (Titel, Absender, Dateiname, Paperless-ID)."""

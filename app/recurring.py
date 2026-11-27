@@ -170,6 +170,13 @@ def detect(transactions: list[Transaction], ignored: list[str] | None = None, ex
             if months is None:
                 continue
             found.append(_series_of(f"{key}|{months}|{round(stream[0].amount)}", stream, months))
+    # gleicher Empfänger, Rhythmus und Betrag (z.B. zwei Policen am selben Tag): Schlüssel eindeutig machen
+    seen: dict[str, int] = {}
+    for s in found:
+        n = seen.get(s.key, 0) + 1
+        seen[s.key] = n
+        if n > 1:
+            s.key = f"{s.key}|{n}"
     return found
 
 
@@ -295,7 +302,8 @@ def exclude_many(session: Session, series_key: str, tx_ids: list[str]) -> int:
     data = _kv(session, KEY)
     if not isinstance(data, list):
         return 0
-    target = next((d for d in data if d.get("key") == series_key), None)
+    target = next((d for d in data if d.get("key") == series_key and set(d.get("tx_ids") or []) & set(tx_ids)),
+                  next((d for d in data if d.get("key") == series_key), None))
     if target is None:
         return 0
     items = excluded(session)
@@ -322,7 +330,8 @@ def split(session: Session, series_key: str, tx_ids: list[str]) -> str | None:
     """Angehakte Buchungen als eigene Serie abtrennen (z.B. ein zweites Abo beim selben Empfänger). Die Gruppe bleibt
     auch bei späteren Erkennungsläufen bestehen. Gibt den Schlüssel der neuen Serie zurück."""
     data = _kv(session, KEY)
-    source = next((d for d in data if d.get("key") == series_key), None) if isinstance(data, list) else None
+    source = next((d for d in data if d.get("key") == series_key and set(d.get("tx_ids") or []) & set(tx_ids)),
+                  next((d for d in data if d.get("key") == series_key), None)) if isinstance(data, list) else None
     if source is None:
         return None
     wanted = [t for t in source.get("tx_ids", []) if t in set(tx_ids)]
